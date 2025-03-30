@@ -188,5 +188,17 @@ def get_response():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/files", methods=["GET"])
+def get_files():
+    try:
+        response = supabase.storage.from_(BUCKET_NAME).list()
+        filtered_files = [
+            file for file in response if file["name"] != ".emptyFolderPlaceholder"
+        ]
+        return jsonify({"files": filtered_files}), 200
+    except Exception as e:
+        return jsonify({"error": f"Error fetching files {str(e)}"}), 500
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=3000)
