@@ -1,5 +1,4 @@
-import { Button } from "@/components/ui/button";
-import { FileText, Plus } from "lucide-react";
+import { FileText } from "lucide-react";
 
 export default function Navbar() {
   return (
@@ -9,10 +8,6 @@ export default function Navbar() {
           <FileText />
           <h2 className="text-2xl font-semibold">PaperMind</h2>
         </div>
-        <Button className="cursor-pointer">
-          <Plus strokeWidth={2.5} />
-          <span>Add Pdf</span>
-        </Button>
       </div>
     </div>
   );
