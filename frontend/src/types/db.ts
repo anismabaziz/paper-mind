@@ -8,4 +8,5 @@ export interface File {
   };
   name: string;
   updated_at: Date;
+  url: string;
 }
