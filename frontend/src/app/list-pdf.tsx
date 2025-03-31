@@ -18,9 +18,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import usePdfStore from "@/store/pdf-state";
 import { cn } from "@/lib/utils";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
-export default function ListPdf() {
+export default function ListPDF() {
   const queryClient = useQueryClient();
   const { setFile, file: selectedFile } = usePdfStore();
   const filesQuery = useQuery({ queryKey: ["files"], queryFn: getFiles });
@@ -51,9 +51,10 @@ export default function ListPdf() {
       uploadFileMutation.mutate(file);
     }
   };
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleButtonClick = () => {
-    document.getElementById("file")?.click();
+    fileInputRef.current?.click();
   };
 
   const formatFileSize = (bytes: number) => {
@@ -63,8 +64,8 @@ export default function ListPdf() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 min-h-[80vh] col-span-1">
+      <div className="flex items-center justify-between py-4">
         <div className="flex items-center gap-3">
           <Library />
           <h3 className="font-medium text-xl">PDF Library</h3>
@@ -78,12 +79,23 @@ export default function ListPdf() {
           <Plus strokeWidth={2.5} />
           <span>New PDF</span>
         </Button>
-        <Input type="file" hidden onChange={handleFileChange} id="file" />
+        <Input
+          type="file"
+          hidden
+          onChange={handleFileChange}
+          id="file"
+          ref={fileInputRef}
+        />
       </div>
 
       {/* Display when the pdf list is empty */}
       {files?.length === 0 && (
-        <div className="border border-slate-200 flex items-center flex-col gap-4 p-6 rounded-xl text-center">
+        <div
+          className={cn(
+            "border border-slate-200 flex items-center flex-col gap-4 p-6 rounded-xl text-center",
+            uploadFileMutation.isPending && "bg-slate-50"
+          )}
+        >
           <div className="bg-slate-200 rounded-[50%] p-4">
             <Library />
           </div>
@@ -91,7 +103,12 @@ export default function ListPdf() {
           <p className="font-light text-sm">
             Upload your first PDF to start chatting
           </p>
-          <Button className="cursor-pointer" variant={"outline"}>
+          <Button
+            className="cursor-pointer"
+            variant={"outline"}
+            onClick={handleButtonClick}
+            disabled={uploadFileMutation.isPending}
+          >
             <UploadIcon strokeWidth={2.5} />
             <span>Upload PDF</span>
           </Button>
