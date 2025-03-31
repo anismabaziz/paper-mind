@@ -10,13 +10,29 @@ export async function getFiles() {
 
 interface IUploadFile {
   message: string;
+  file: FileType;
 }
 export async function uploadFile(file: File) {
   const formData = new FormData();
   formData.append("file", file);
-  return client.post<IUploadFile>("/upload", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
-  });
+  return (
+    await client.post<IUploadFile>("/upload", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    })
+  ).data;
+}
+
+interface IDeleteFile {
+  message: string;
+}
+export async function deleteFile(file: FileType) {
+  return (
+    await client.delete<IDeleteFile>("/files/remove", {
+      params: {
+        path: file.name,
+      },
+    })
+  ).data;
 }

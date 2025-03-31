@@ -46,12 +46,15 @@ def upload_file():
             file_content,
             file_options={"content-type": "application/pdf"},
         )
-        public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(unique_filename)
+        files = supabase.storage.from_(BUCKET_NAME).list()
+        file = next((file for file in files if file["name"] == unique_filename), None)
+        file["url"] = supabase.storage.from_(BUCKET_NAME).get_public_url(
+            unique_filename
+        )
         return jsonify(
             {
                 "message": "File uploaded successfully",
-                "url": public_url,
-                "filename": unique_filename,
+                "file": file,
             }
         )
     except Exception as e:
@@ -193,11 +196,25 @@ def get_files():
     try:
         response = supabase.storage.from_(BUCKET_NAME).list()
         filtered_files = [
-            file for file in response if file["name"] != ".emptyFolderPlaceholder"
+            {
+                **file,
+                "url": supabase.storage.from_(BUCKET_NAME).get_public_url(file["name"]),
+            }
+            for file in response
+            if file["name"] != ".emptyFolderPlaceholder"
         ]
         return jsonify({"files": filtered_files}), 200
     except Exception as e:
         return jsonify({"error": f"Error fetching files {str(e)}"}), 500
+
+
+@app.route("/files/remove", methods=["DELETE"])
+def removeFile():
+    path = request.args.get("path")
+    if not path:
+        return jsonify({"error": "File path required"}), 400
+    supabase.storage.from_(BUCKET_NAME).remove([path])
+    return jsonify({"message": "File deleted successfully"}), 200
 
 
 if __name__ == "__main__":
