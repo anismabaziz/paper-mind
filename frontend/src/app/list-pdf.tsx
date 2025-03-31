@@ -68,7 +68,7 @@ export default function ListPDF() {
       <div className="flex items-center justify-between py-4">
         <div className="flex items-center gap-3">
           <Library />
-          <h3 className="font-medium text-xl">PDF Library</h3>
+          <h3 className="font-semibold text-xl">PDF Library</h3>
         </div>
         <Button
           className="cursor-pointer"
