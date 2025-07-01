@@ -7,8 +7,8 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { deleteFile } from "@/services/files";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { checkIsProcessed, deleteFile, processFile } from "@/services/files";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export default function ViewPDF() {
   const { file } = usePdfStore();
@@ -21,6 +21,20 @@ export default function ViewPDF() {
     },
   });
 
+  const checkProcessedQuery = useQuery({
+    queryKey: [file?.name, "is-processed"],
+    queryFn: () => checkIsProcessed(file!),
+  });
+
+  console.log(checkProcessedQuery.data);
+
+  const processFileMutation = useMutation({
+    mutationFn: processFile,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [file?.name, "is-processed"] });
+    },
+  });
+
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + " bytes";
     else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
@@ -29,9 +43,22 @@ export default function ViewPDF() {
 
   return (
     <div className="border rounded-md h-[80vh] flex flex-col">
-      <div className="flex items-center gap-4 p-4 border-b rounded-md">
-        <File />
-        <h2 className="text-xl font-semibold">Document Viewer</h2>
+      <div className="flex items-center justify-between p-4 border-b rounded-md">
+        <div className="flex items-center gap-4">
+          <File />
+          <h2 className="text-xl font-semibold">Document Viewer</h2>
+        </div>
+
+        <Button
+          disabled={checkProcessedQuery.data?.is_processed}
+          onClick={() => {
+            processFileMutation.mutate(file!);
+          }}
+        >
+          {checkProcessedQuery.data?.is_processed
+            ? "Already Processed"
+            : "Process File"}
+        </Button>
       </div>
       {file && (
         <div className="p-4 h-full flex flex-col">

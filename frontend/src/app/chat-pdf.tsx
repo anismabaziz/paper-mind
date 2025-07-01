@@ -3,6 +3,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import usePdfStore from "@/store/pdf-state";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { checkIsProcessed } from "@/services/files";
+
 export default function ChatPDF() {
   const { file } = usePdfStore();
   const questions = [
@@ -10,6 +13,11 @@ export default function ChatPDF() {
     "Summarize the key points in 3 bullet points",
   ];
   const [inputValue, setInputValue] = useState("");
+
+  const checkProcessedQuery = useQuery({
+    queryKey: [file?.name, "is-processed"],
+    queryFn: () => checkIsProcessed(file!),
+  });
 
   useEffect(() => {
     if (!file) setInputValue("");
@@ -35,7 +43,11 @@ export default function ChatPDF() {
         </div>
       )}
 
-      {file && (
+      {file && !checkProcessedQuery.data?.is_processed && (
+        <div className="p-4 flex-grow">Process File</div>
+      )}
+
+      {file && checkProcessedQuery.data?.is_processed && (
         <div className="p-4 flex flex-grow">
           <div className="rounded-md border w-full flex flex-col justify-center items-center gap-4">
             <div className="bg-slate-200 rounded-[50%] p-4">

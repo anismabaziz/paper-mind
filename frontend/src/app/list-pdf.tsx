@@ -1,6 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { deleteFile, getFiles, uploadFile } from "@/services/files";
+import {
+  deleteFile,
+  getFiles,
+  processFile,
+  uploadFile,
+} from "@/services/files";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -26,10 +31,12 @@ export default function ListPDF() {
   const filesQuery = useQuery({ queryKey: ["files"], queryFn: getFiles });
   const uploadFileMutation = useMutation({
     mutationFn: uploadFile,
-    onSuccess: () => {
+    onSuccess: async (data) => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
+      await processFile(data.file);
     },
   });
+
   const deleteFileMutation = useMutation({
     mutationFn: deleteFile,
     onSuccess: () => {
@@ -38,6 +45,7 @@ export default function ListPDF() {
   });
 
   const files = filesQuery.data?.files;
+  console.log(files);
 
   useEffect(() => {
     if (files) setFile(files[0]);
