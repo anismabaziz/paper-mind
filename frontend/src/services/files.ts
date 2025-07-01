@@ -36,3 +36,26 @@ export async function deleteFile(file: FileType) {
     })
   ).data;
 }
+
+interface ICheckIsProcessed {
+  is_processed: boolean;
+}
+
+export async function checkIsProcessed(file: FileType) {
+  return (
+    await client.post<ICheckIsProcessed>("/file/is-processed", {
+      filename: file.name,
+    })
+  ).data;
+}
+
+interface IProcessFile {
+  message: string;
+}
+export async function processFile(file: FileType) {
+  return (
+    await client.post<IProcessFile>("/process-file", {
+      filename: file.name,
+    })
+  ).data;
+}

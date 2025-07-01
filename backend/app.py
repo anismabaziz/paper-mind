@@ -18,8 +18,9 @@ app = Flask(__name__)
 CORS(app)
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_KEY")
+supbase_service_role = os.getenv("SUPABASE_SERVICE_ROLE")
 
-supabase: Client = create_client(supabase_url, supabase_key)
+supabase: Client = create_client(supabase_url, supbase_service_role)
 
 BUCKET_NAME = "papermind-pdf"
 
@@ -41,6 +42,7 @@ def upload_file():
     file_content = file.read()
 
     try:
+        # upload file
         supabase.storage.from_(BUCKET_NAME).upload(
             unique_filename,
             file_content,
@@ -51,6 +53,12 @@ def upload_file():
         file["url"] = supabase.storage.from_(BUCKET_NAME).get_public_url(
             unique_filename
         )
+
+        # create file record
+        file_dict = {"filename": file["name"]}
+        file["name"]
+        supabase.table("paper-mind_files").insert(file_dict).execute()
+
         return jsonify(
             {
                 "message": "File uploaded successfully",
@@ -59,6 +67,27 @@ def upload_file():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/file/is-processed", methods=["POST"])
+def check_processed():
+    # get filename from body
+    data = request.get_json()
+    filename = data.get("filename")
+    if not filename:
+        return jsonify({"error": "Filename is required"}), 400
+
+    # fetch file
+    response = (
+        supabase.table("paper-mind_files")
+        .select("*")
+        .eq("filename", filename)
+        .execute()
+    )
+    file = response.data[0]
+    print(file)
+
+    return {"is_processed": file["is_processed"]}
 
 
 @app.route("/process-file", methods=["POST"])
@@ -75,6 +104,8 @@ def process_file():
         if not response:
             return jsonify({"error": "Failed to fetch file"}), 400
         pdf_stream = io.BytesIO(response)
+
+        print("hello world")
 
         # extracting text
         extracted_text = []
@@ -98,11 +129,18 @@ def process_file():
 
         # embedding text
         client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-        result = client.models.embed_content(
-            model="models/text-embedding-004",
-            contents=text_chunks,
-        )
-        vector_embeddings = [embedding.values for embedding in result.embeddings]
+        batch_size = 100
+        vector_embeddings = []
+
+        for i in range(0, len(text_chunks), batch_size):
+            batch = text_chunks[i : i + batch_size]
+            result = client.models.embed_content(
+                model="models/text-embedding-004",
+                contents=batch,
+            )
+            vector_embeddings.extend(
+                [embedding.values for embedding in result.embeddings]
+            )
 
         # mapping vectors
         vectors = [
@@ -123,6 +161,22 @@ def process_file():
         index_name = "pdf-index"
         index = pc.Index(index_name)
         index.upsert(vectors)
+
+        # create conversation
+        file_response = (
+            supabase.table("paper-mind_files")
+            .select("*")
+            .eq("filename", filename)
+            .execute()
+        )
+        file = file_response.data[0]
+        conversation_dict = {"file_id": file["id"]}
+        supabase.table("paper-mind_conversations").insert(conversation_dict).execute()
+
+        # set processed to true
+        supabase.table("paper-mind_files").update({"is_processed": True}).eq(
+            "filename", filename
+        ).execute()
 
         return jsonify({"message": "PDF processed"}), 200
     except Exception as e:
@@ -215,6 +269,25 @@ def removeFile():
         return jsonify({"error": "File path required"}), 400
     supabase.storage.from_(BUCKET_NAME).remove([path])
     return jsonify({"message": "File deleted successfully"}), 200
+
+
+@app.route("/files/check-processing", methods=["GET"])
+def check_processing():
+    filename = request.args.get("filename")
+    if not filename:
+        return jsonify({"error": "File name required"}), 400
+
+    pc = Pinecone(os.getenv("PINECONE_API_KEY"))
+    index_name = "pdf-index"
+    index = pc.Index(index_name)
+    query_results = index.query(
+        vector=[0.0] * 768,
+        top_k=1,
+        include_metadata=True,
+        filter={"filename": filename},
+    )
+    print(query_results)
+    return jsonify({"processed": True}), 200
 
 
 if __name__ == "__main__":
