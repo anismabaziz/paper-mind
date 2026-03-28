@@ -26,7 +26,16 @@ class VectorService:
             include_metadata=True,
             filter={"pdf_name": filename},
         )
-        return [match["metadata"]["content"] for match in search_results["matches"]]
+
+        matches = search_results.get("matches", []) if isinstance(search_results, dict) else getattr(search_results, "matches", [])
+
+        contexts = []
+        for match in matches or []:
+            metadata = match.get("metadata", {}) if isinstance(match, dict) else getattr(match, "metadata", {})
+            if metadata and metadata.get("content"):
+                contexts.append(metadata["content"])
+
+        return contexts
 
     @staticmethod
     def delete_by_filename(filename):

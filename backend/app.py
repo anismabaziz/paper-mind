@@ -122,6 +122,7 @@ def get_response():
 
         return jsonify({"results": response_text}), 200
     except Exception as e:
+        print(f"/response error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/messages", methods=["GET"])
@@ -184,21 +185,21 @@ def remove_file():
         if not filename:
             return jsonify({"error": "File path required"}), 400
 
+        # Always remove embeddings for the target file, even if DB metadata is missing.
+        VectorService.delete_by_filename(filename)
+
         file_record = SupabaseService.get_file_by_name(filename)
         if file_record:
-            # 1. Delete Vectors
-            VectorService.delete_by_filename(filename)
-
-            # 2. Delete Messages & Conversations
+            # 1. Delete Messages & Conversations
             conversation_id = SupabaseService.get_conversation_by_file_id(file_record["id"])
             if conversation_id:
                 SupabaseService.delete_messages(conversation_id)
                 SupabaseService.delete_conversation(conversation_id)
 
-            # 3. Delete DB Record
+            # 2. Delete DB Record
             SupabaseService.delete_file_record(file_record["id"])
 
-        # 4. Remove from Storage
+        # 3. Remove from Storage
         SupabaseService.remove_from_storage(filename)
 
         return jsonify({"message": "File and all its data deleted successfully"}), 200
