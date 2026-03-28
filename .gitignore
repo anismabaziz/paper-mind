@@ -1,4 +1,34 @@
-.venv
+# Environment
+.venv/
 .env
+.env.local
 .env.development
 .env.production
+.env.*.local
+
+# OS Files
+.DS_Store
+Thumbs.db
+*.swp
+
+# Frontend (Vite/React)
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Backend (Python)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.python-version
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
