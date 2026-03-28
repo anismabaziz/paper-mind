@@ -59,3 +59,35 @@ export async function processFile(file: FileType) {
     })
   ).data;
 }
+
+interface IAskQuestion {
+  results: string;
+}
+
+export async function askQuestion(query: string, filename: string) {
+  return (
+    await client.post<IAskQuestion>("/response", {
+      query,
+      filename,
+    })
+  ).data;
+}
+
+export interface IMessage {
+  id: string;
+  text: string;
+  sender: 'user' | 'bot';
+  created_at: string;
+}
+
+interface IGetMessages {
+  messages: IMessage[];
+}
+
+export async function getMessages(filename: string) {
+  return (
+    await client.get<IGetMessages>("/messages", {
+      params: { filename }
+    })
+  ).data;
+}
