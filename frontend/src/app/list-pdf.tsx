@@ -58,14 +58,20 @@ export default function ListPDF() {
     },
   });
 
-  // Automatically pick a new file if the selected one is gone
+  // Automatically pick a new file if the selected one is gone or if all files are deleted
   useEffect(() => {
-    if (files && files.length > 0) {
-      const currentExists = files.find(f => f.id === selectedFile?.id);
-      if (!currentExists || !selectedFile) {
-        // Find the first available processed file, or just the first file
-        const nextFile = files.find(f => f.is_processed) || files[0];
-        setFile(nextFile);
+    if (files) {
+      if (files.length === 0) {
+        if (selectedFile !== null) {
+          setFile(null);
+        }
+      } else {
+        const currentExists = files.find(f => f.id === selectedFile?.id);
+        if (!currentExists || !selectedFile) {
+          // Find the first available processed file, or just the first file
+          const nextFile = files.find(f => f.is_processed) || files[0];
+          setFile(nextFile);
+        }
       }
     }
   }, [files, selectedFile, setFile]);
@@ -91,22 +97,20 @@ export default function ListPDF() {
   };
 
   return (
-    <div className="flex flex-col h-full glass rounded-3xl overflow-hidden shadow-xl border-white/40">
-      <div className="p-5 border-b border-white/20 bg-white/20 backdrop-blur-md flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-primary/10 rounded-lg text-primary">
-            <Library size={20} />
-          </div>
-          <h3 className="font-bold text-slate-800">Library</h3>
+    <div className="flex flex-col h-full glass rounded-xl overflow-hidden shadow-sm">
+      <div className="h-[52px] px-4 border-b border-slate-200/80 bg-slate-50 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <Library size={16} className="text-slate-600" />
+          <h3 className="font-semibold text-xs uppercase tracking-wider text-slate-700">Library</h3>
         </div>
         <Button
           size="sm"
           variant="ghost"
-          className="h-9 w-9 p-0 hover:bg-primary/10 hover:text-primary transition-all rounded-full"
+          className="h-7 w-7 p-0 hover:bg-slate-200/80 text-slate-500 hover:text-slate-800 transition-all rounded"
           onClick={handleButtonClick}
           disabled={uploadFileMutation.isPending}
         >
-          <Plus size={20} strokeWidth={2.5} />
+          <Plus size={16} strokeWidth={2} />
         </Button>
         <Input
           type="file"
@@ -118,30 +122,30 @@ export default function ListPDF() {
         />
       </div>
 
-      <div className="flex-grow overflow-y-auto p-3 space-y-2">
+      <div className="flex-grow overflow-y-auto p-2.5 space-y-1.5">
         {filesQuery.isPending && (
-          <div className="space-y-3 p-2">
+          <div className="space-y-2">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className="h-16 w-full bg-slate-200/40 animate-pulse rounded-2xl" />
+              <div key={i} className="h-12 w-full bg-slate-100/80 border border-slate-200/40 animate-pulse rounded" />
             ))}
           </div>
         )}
 
         {!filesQuery.isPending && files?.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full py-10 px-6 text-center">
-            <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-4 text-slate-300">
-                <File size={32} />
+          <div className="flex flex-col items-center justify-center h-full py-8 px-4 text-center">
+            <div className="w-10 h-10 bg-slate-50 border border-slate-200 rounded flex items-center justify-center mb-3 text-slate-400">
+              <File size={18} />
             </div>
-            <p className="text-sm font-semibold text-slate-600 mb-1">Your library is empty</p>
-            <p className="text-xs text-slate-400 mb-6 max-w-[180px]">Upload research papers to start your analysis</p>
+            <p className="text-xs font-semibold text-slate-700 mb-0.5">No Documents Uploaded</p>
+            <p className="text-[11px] text-slate-400 mb-4 max-w-[180px]">Ingest a PDF research paper to begin analysis.</p>
             <Button
-              className="w-full bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-sm"
+              className="w-full bg-white hover:bg-slate-50 border-slate-200 text-slate-700 shadow-sm text-xs rounded h-9"
               variant="outline"
               onClick={handleButtonClick}
               disabled={uploadFileMutation.isPending}
             >
-              <UploadIcon size={16} className="mr-2" />
-              Upload PDF
+              <UploadIcon size={14} className="mr-1.5" />
+              Ingest Document
             </Button>
           </div>
         )}
@@ -154,38 +158,38 @@ export default function ListPDF() {
             <div
               key={file.id}
               className={cn(
-                "group relative p-3.5 rounded-2xl flex items-center gap-3 transition-all duration-300",
+                "group relative p-2.5 rounded flex items-center gap-2.5 transition-colors border",
                 selectedFile?.id === file.id 
-                  ? "bg-white shadow-md scale-[1.02] ring-1 ring-primary/10 active-glow" 
-                  : "hover:bg-white/60 hover:translate-x-1",
+                  ? "bg-slate-100/80 border-slate-200 text-slate-900 active-glow" 
+                  : "bg-white hover:bg-slate-50 border-slate-100 hover:border-slate-200 text-slate-700",
                 isProcessing ? "grayscale pointer-events-none opacity-60" : "cursor-pointer",
-                isRemoving && "opacity-50 pointer-events-none scale-95"
+                isRemoving && "opacity-50 pointer-events-none"
               )}
               onClick={() => !isProcessing && setFile(file)}
             >
               <div className={cn(
-                  "p-2.5 rounded-xl transition-colors",
-                  selectedFile?.id === file.id ? "bg-primary text-white" : "bg-slate-200/50 text-slate-500 group-hover:bg-white"
+                "p-1.5 rounded transition-colors border",
+                selectedFile?.id === file.id ? "bg-primary text-white border-primary" : "bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-slate-100"
               )}>
-                {isRemoving ? <Loader2 size={18} className="animate-spin" /> : <File size={18} />}
+                {isRemoving ? <Loader2 size={13} className="animate-spin" /> : <File size={13} />}
               </div>
               
               <div className="flex-grow min-w-0">
                 <div className="flex items-center gap-1.5">
                   <p className={cn(
-                      "text-[13px] font-semibold truncate transition-colors",
-                      selectedFile?.id === file.id ? "text-slate-900" : "text-slate-700"
+                    "text-[12px] font-medium truncate transition-colors",
+                    selectedFile?.id === file.id ? "text-slate-950 font-semibold" : "text-slate-700"
                   )}>
                     {file.name.replace(/\.[^/.]+$/, "")}
                   </p>
                   {isProcessing && (
-                    <div className="flex items-center gap-1 font-bold text-[8px] uppercase tracking-tighter text-amber-600/80 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100">
-                       <Loader2 size={8} className="animate-spin" />
-                       Embedding
+                    <div className="flex items-center gap-1 font-semibold text-[8px] uppercase tracking-wider text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                      <Loader2 size={8} className="animate-spin" />
+                      Index
                     </div>
                   )}
                 </div>
-                <p className="text-[11px] text-slate-400 font-medium">
+                <p className="text-[10px] text-slate-400 mt-0.5">
                   {isRemoving ? "Purging storage..." : formatFileSize(file.metadata.size)}
                 </p>
               </div>
@@ -197,24 +201,24 @@ export default function ListPDF() {
                       variant="ghost"
                       size="icon"
                       className={cn(
-                          "h-8 w-8 rounded-lg transition-opacity",
-                          selectedFile?.id === file.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                        "h-7 w-7 rounded transition-opacity",
+                        selectedFile?.id === file.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                       )}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <MoreHorizontal size={16} />
+                      <MoreHorizontal size={14} />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="glass-dark text-white border-none min-w-[140px]">
+                  <DropdownMenuContent align="end" className="bg-white text-slate-800 border border-slate-200/80 shadow-md min-w-[140px] p-1 rounded-md z-50">
                     <DropdownMenuItem
-                      className="text-red-400 focus:bg-red-500/10 focus:text-red-400 cursor-pointer p-2.5 rounded-lg"
+                      className="text-red-600 focus:bg-red-50 focus:text-red-700 cursor-pointer p-2 rounded text-xs font-medium flex items-center transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteFileMutation.mutate(file);
                       }}
                     >
-                      <Trash2 size={15} className="mr-2" />
-                      <span className="text-[13px] font-medium">Remove Paper</span>
+                      <Trash2 size={14} className="mr-2" />
+                      <span>Remove Paper</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -224,13 +228,13 @@ export default function ListPDF() {
         })}
         
         {uploadFileMutation.isPending && (
-          <div className="p-3.5 rounded-2xl bg-primary/5 border border-primary/10 animate-pulse flex items-center gap-3">
-             <div className="p-2.5 bg-primary/20 rounded-xl text-primary">
-                <Loader2 size={18} className="animate-spin" />
+          <div className="p-2.5 rounded border border-slate-200 bg-slate-50 animate-pulse flex items-center gap-2.5">
+             <div className="p-1.5 bg-slate-200 rounded text-slate-400">
+                <Loader2 size={13} className="animate-spin" />
              </div>
              <div className="flex-grow">
-                <div className="h-3 w-24 bg-primary/20 rounded-full mb-1.5" />
-                <div className="h-2 w-12 bg-primary/10 rounded-full" />
+                <div className="h-2.5 w-24 bg-slate-200 rounded mb-1" />
+                <div className="h-2 w-12 bg-slate-150 rounded" />
              </div>
           </div>
         )}
