@@ -11,6 +11,12 @@ from storage import storage
 from services.pdf_service import PDFService
 from services.ai_service import AIService
 from services.vector_service import VectorService
+from services.auth_service import (
+    hash_password,
+    issue_token,
+    require_auth,
+    verify_password,
+)
 
 config.validate()
 
@@ -29,12 +35,42 @@ def get_health():
     return jsonify({"response": "OK"}), 200
 
 
+@app.route("/auth/register", methods=["POST"])
+def register():
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    if not email or not password:
+        return jsonify({"error": "Email and password are required"}), 400
+
+    if repository.get_user_by_email(email):
+        return jsonify({"error": "Email is already registered"}), 409
+
+    user = repository.create_user(email, hash_password(password))
+    return jsonify({"message": "User registered", "token": issue_token(email)}), 201
+
+
+@app.route("/auth/login", methods=["POST"])
+def login():
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+
+    user = repository.get_user_by_email(email)
+    if not user or not verify_password(password, user["password_hash"]):
+        return jsonify({"error": "Invalid email or password"}), 401
+
+    return jsonify({"token": issue_token(email)}), 200
+
+
 @app.route("/storage/<path:filename>", methods=["GET"])
+@require_auth
 def download_file(filename):
     return send_from_directory(config.STORAGE_DIR, filename)
 
 
 @app.route("/upload", methods=["POST"])
+@require_auth
 def upload_file():
     if "file" not in request.files:
         return jsonify({"error": "No File Provided"}), 400
@@ -63,6 +99,7 @@ def upload_file():
 
 
 @app.route("/file/is-processed", methods=["POST"])
+@require_auth
 def check_processed():
     data = request.get_json()
     filename = data.get("filename")
@@ -77,6 +114,7 @@ def check_processed():
 
 
 @app.route("/process-file", methods=["POST"])
+@require_auth
 def process_file():
     try:
         data = request.get_json()
@@ -110,6 +148,7 @@ def process_file():
 
 
 @app.route("/response", methods=["POST"])
+@require_auth
 def get_response():
     try:
         data = request.get_json()
@@ -149,6 +188,7 @@ def get_response():
 
 
 @app.route("/messages", methods=["GET"])
+@require_auth
 def get_messages():
     try:
         filename = request.args.get("filename")
@@ -170,6 +210,7 @@ def get_messages():
 
 
 @app.route("/files", methods=["GET"])
+@require_auth
 def get_files():
     try:
         db_files = repository.list_files()
@@ -200,6 +241,7 @@ def get_files():
 
 
 @app.route("/files/remove", methods=["DELETE"])
+@require_auth
 def remove_file():
     try:
         filename = request.args.get("path")
@@ -224,7 +266,8 @@ def remove_file():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/delete-embeddings", methods=["GET"])
+@app.route("/delete-embeddings", methods=["POST"])
+@require_auth
 def delete_embeddings():
     VectorService.delete_all()
     return jsonify({"message": "Embeddings Deleted"}), 200

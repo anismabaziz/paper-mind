@@ -39,6 +39,16 @@ traceback.
 uv run python app.py
 ```
 
+## Auth
+
+With `DEMO_MODE=false`, user-facing endpoints require a JWT: register with
+`POST /auth/register` (`{"email", "password"}`), log in with
+`POST /auth/login`, and send the returned token as
+`Authorization: Bearer <token>`. Passwords are bcrypt-hashed. Setting
+`DEMO_MODE=true` disables the checks so the app is fully usable without
+logging in. `JWT_SECRET` signs tokens; unset, a per-process random secret is
+used (fine for demos, set it for shared deployments).
+
 ## Tests
 
 ```bash

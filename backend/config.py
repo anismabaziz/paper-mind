@@ -29,8 +29,8 @@ INDEX_NAME = "pdf-index"
 # Mode Selector: which provider answers chat requests ("google" or "groq")
 MODE = os.getenv("MODE", "google").lower()
 
-# When true, skips authentication and serves demo data
-DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() in ("1", "true", "yes")
+# Demo mode (DEMO_MODE env) is read per-request by the auth service, so it
+# can be toggled without reloading this module.
 
 # Model Constants
 EMBEDDING_MODEL = "gemini-embedding-001"
@@ -73,6 +73,15 @@ def validate():
             file=sys.stderr,
         )
         sys.exit(1)
+
+    if not os.getenv("DEMO_MODE", "").lower() in ("1", "true", "yes") and not os.getenv(
+        "JWT_SECRET"
+    ):
+        print(
+            "Warning: DEMO_MODE is off but JWT_SECRET is unset; issued tokens "
+            "will stop working after a restart. Set JWT_SECRET in .env.",
+            file=sys.stderr,
+        )
 
 
 # --- Lazy clients -----------------------------------------------------------

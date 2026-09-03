@@ -62,6 +62,17 @@ class Message(Base):
     )
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 def _engine_kwargs(url: str):
     # Tests may use sqlite; only the in-memory variant needs special care.
     if url.startswith("sqlite"):
@@ -150,6 +161,24 @@ class Repository:
     @staticmethod
     def _file_dict(record):
         return _to_dict(record, filename=record.filename, is_processed=record.is_processed)
+
+    # -- users ------------------------------------------------------------
+
+    def create_user(self, email: str, password_hash: str) -> dict:
+        with self._session_factory() as session, session.begin():
+            user = User(email=email, password_hash=password_hash)
+            session.add(user)
+            session.flush()
+            return {"id": user.id, "email": user.email}
+
+    def get_user_by_email(self, email: str) -> dict | None:
+        with self._session_factory() as session:
+            user = session.scalars(
+                select(User).where(User.email == email)
+            ).first()
+            if not user:
+                return None
+            return {"id": user.id, "email": user.email, "password_hash": user.password_hash}
 
     # -- conversations ----------------------------------------------------
 

@@ -14,7 +14,9 @@ DUMMY_ENV = {
     "MODE": "google",
     "GOOGLE_API_KEY": "dummy-google-key",
     "GROQ_API_KEY": "dummy-groq-key",
-    "DEMO_MODE": "false",
+    # Demo on by default so flow tests exercise business logic; auth tests
+    # override DEMO_MODE explicitly.
+    "DEMO_MODE": "true",
 }
 
 
