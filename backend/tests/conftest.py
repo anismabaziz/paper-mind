@@ -1,16 +1,15 @@
 """Shared test fixtures.
 
-Convention: tests never talk to real Pinecone, LLM, or Postgres/Supabase
-services. Dummy environment variables are set before any config import so
-module loading stays offline; anything that would hit a network is faked
-per-test with monkeypatch.
+Convention: tests never talk to real Pinecone, LLM, Postgres, or any file
+storage outside tmp dirs. Dummy environment variables are set before any
+config import so module loading stays offline; anything that would hit a
+network or disk is faked per-test with monkeypatch.
 """
 
 import pytest
 
 DUMMY_ENV = {
-    "SUPABASE_URL": "https://dummy.supabase.co",
-    "SUPABASE_SECRET_KEY": "dummy-supabase-key",
+    "DATABASE_URL": "sqlite:///:memory:",
     "PINECONE_API_KEY": "dummy-pinecone-key",
     "MODE": "google",
     "GOOGLE_API_KEY": "dummy-google-key",

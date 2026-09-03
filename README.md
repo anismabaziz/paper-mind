@@ -22,6 +22,16 @@ This application combines the power of Large Language Models (LLMs) with documen
 4. **Context Retrieval**: Most relevant document sections are retrieved based on similarity
 5. **Response Generation**: LLM generates responses using the retrieved context and user query
 
+## Quick Start
+
+```bash
+# requires Docker; PINECONE_API_KEY and a provider key in your shell or .env
+docker compose up --build
+```
+
+The API serves on `http://127.0.0.1:3000`. Manual setup (local Postgres, no
+Docker) is documented in [backend/README.md](backend/README.md).
+
 ## Screenshots
 
 ### Main Chat Interface

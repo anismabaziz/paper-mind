@@ -8,13 +8,22 @@ what they actually use.
 
 import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Backend directory (storage paths are rooted here)
+BACKEND_DIR = Path(__file__).resolve().parent
+
+# Where uploaded PDFs live on disk
+STORAGE_DIR = Path(os.getenv("STORAGE_DIR", str(BACKEND_DIR / "data" / "storage")))
+
+# Relational database (Postgres in dev via compose; validated at boot)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 # App Constants
-BUCKET_NAME = "papermind-pdf"
 INDEX_NAME = "pdf-index"
 
 # Mode Selector: which provider answers chat requests ("google" or "groq")
@@ -38,7 +47,7 @@ def missing_required_vars():
     mode = os.getenv("MODE", "google").lower()
     missing = [
         var
-        for var in ("SUPABASE_URL", "SUPABASE_SECRET_KEY", "PINECONE_API_KEY")
+        for var in ("DATABASE_URL", "PINECONE_API_KEY")
         if not os.getenv(var)
     ]
 
@@ -72,21 +81,9 @@ def validate():
 # first access, so a misconfigured key fails at the moment of use with a
 # clear origin instead of crashing the whole import.
 
-_supabase = None
 _pinecone_index = None
 _genai_client = None
 _groq_client = None
-
-
-def get_supabase():
-    global _supabase
-    if _supabase is None:
-        from supabase import create_client
-
-        _supabase = create_client(
-            os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SECRET_KEY")
-        )
-    return _supabase
 
 
 def get_vector_index():
@@ -119,7 +116,6 @@ def get_groq_client():
 
 
 _LAZY_ATTRS = {
-    "supabase": get_supabase,
     "vector_index": get_vector_index,
     "genai_client": get_genai_client,
     "groq_client": get_groq_client,

@@ -1,50 +1,66 @@
-from flask import Flask, jsonify, request
-from flask_cors import CORS
 import uuid
 import os
 
-import config
-from config import BUCKET_NAME
+from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
 
-config.validate()
-from services.supabase_service import SupabaseService
+import config
+from config import INDEX_NAME
+from db import repository
+from storage import storage
 from services.pdf_service import PDFService
 from services.ai_service import AIService
 from services.vector_service import VectorService
 
+config.validate()
+
 app = Flask(__name__)
 CORS(app)
+
+
+def file_url(filename):
+    # Absolute, like the old hosted storage URLs, so the frontend can use
+    # the value directly in an iframe pointed at the API host.
+    return f"{request.host_url.rstrip('/')}{storage.url(filename)}"
+
 
 @app.route("/health", methods=["GET"])
 def get_health():
     return jsonify({"response": "OK"}), 200
 
+
+@app.route("/storage/<path:filename>", methods=["GET"])
+def download_file(filename):
+    return send_from_directory(config.STORAGE_DIR, filename)
+
+
 @app.route("/upload", methods=["POST"])
 def upload_file():
     if "file" not in request.files:
         return jsonify({"error": "No File Provided"}), 400
-    
+
     file = request.files["file"]
     file_ext = os.path.splitext(file.filename)[1]
     unique_filename = f"{uuid.uuid4().hex}{file_ext}"
     file_content = file.read()
 
     try:
-        # Upload to Storage
-        public_url = SupabaseService.upload_to_storage(unique_filename, file_content)
-        
-        # Create DB record
-        SupabaseService.create_file_record(unique_filename)
-        
+        # Store the bytes, then create the DB record
+        storage.save(unique_filename, file_content)
+        file_record = repository.create_file(unique_filename)
+
         return jsonify({
             "message": "File uploaded successfully",
             "file": {
+                "id": file_record["id"],
                 "name": unique_filename,
-                "url": public_url
+                "url": file_url(unique_filename),
             }
         })
     except Exception as e:
+        storage.delete(unique_filename)
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/file/is-processed", methods=["POST"])
 def check_processed():
@@ -53,11 +69,12 @@ def check_processed():
     if not filename:
         return jsonify({"error": "Filename is required"}), 400
 
-    file = SupabaseService.get_file_by_name(filename)
+    file = repository.get_file(filename)
     if not file:
         return jsonify({"error": "File not found"}), 404
 
     return jsonify({"is_processed": file["is_processed"]})
+
 
 @app.route("/process-file", methods=["POST"])
 def process_file():
@@ -68,10 +85,10 @@ def process_file():
             return jsonify({"error": "Filename is required"}), 400
 
         # 1. Download & Extract
-        file_content = SupabaseService.download_from_storage(filename)
-        if not file_content:
+        if not storage.exists(filename):
             return jsonify({"error": "Failed to fetch file"}), 400
-            
+        file_content = storage.open(filename)
+
         text = PDFService.extract_text(file_content)
         chunks = PDFService.split_text(text)
 
@@ -79,16 +96,18 @@ def process_file():
         embeddings = AIService.get_embeddings(chunks)
         VectorService.upsert_vectors(embeddings, chunks, filename)
 
-        # 3. Create Conversation
-        file_record = SupabaseService.get_file_by_name(filename)
-        SupabaseService.create_conversation(file_record["id"])
+        # 3. Create Conversation (reuse one if the file is re-processed)
+        file_record = repository.get_file(filename)
+        if file_record and not repository.get_conversation_id(file_record["id"]):
+            repository.create_conversation(file_record["id"])
 
         # 4. Mark as Processed
-        SupabaseService.update_processing_status(filename, True)
+        repository.set_processed(filename, True)
 
         return jsonify({"message": "PDF processed"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/response", methods=["POST"])
 def get_response():
@@ -96,21 +115,21 @@ def get_response():
         data = request.get_json()
         query = data.get("query")
         filename = data.get("filename")
-        
+
         if not query or not filename:
             return jsonify({"error": "Query and Filename are required"}), 400
 
         # 1. Context Retrieval
-        file_record = SupabaseService.get_file_by_name(filename)
+        file_record = repository.get_file(filename)
         if not file_record:
             return jsonify({"error": "File not found"}), 404
-            
-        conversation_id = SupabaseService.get_conversation_by_file_id(file_record["id"])
+
+        conversation_id = repository.get_conversation_id(file_record["id"])
         if not conversation_id:
             return jsonify({"error": "Conversation not found"}), 404
 
         # Store User Message
-        SupabaseService.store_message(conversation_id, "user", query)
+        repository.add_message(conversation_id, "user", query)
 
         # 2. Vector Search
         query_embedding = AIService.get_embeddings(query)[0]
@@ -121,12 +140,13 @@ def get_response():
         response_text = AIService.generate_response(query, context)
 
         # Store Bot Message
-        SupabaseService.store_message(conversation_id, "bot", response_text)
+        repository.add_message(conversation_id, "bot", response_text)
 
         return jsonify({"results": response_text}), 200
     except Exception as e:
         print(f"/response error: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/messages", methods=["GET"])
 def get_messages():
@@ -135,51 +155,49 @@ def get_messages():
         if not filename:
             return jsonify({"error": "Filename is required"}), 400
 
-        file_record = SupabaseService.get_file_by_name(filename)
+        file_record = repository.get_file(filename)
         if not file_record:
             return jsonify({"messages": []}), 200
-            
-        conversation_id = SupabaseService.get_conversation_by_file_id(file_record["id"])
+
+        conversation_id = repository.get_conversation_id(file_record["id"])
         if not conversation_id:
             return jsonify({"messages": []}), 200
 
-        messages = SupabaseService.get_messages(conversation_id)
+        messages = repository.get_messages(conversation_id)
         return jsonify({"messages": messages}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/files", methods=["GET"])
 def get_files():
     try:
-        db_files = SupabaseService.get_all_files()
-        storage_items = SupabaseService.get_storage_list()
+        db_files = repository.list_files()
+        storage_items = storage.list()
         storage_map = {item["name"]: item for item in storage_items}
-        
+
         enriched_files = []
         for db_file in db_files:
             filename = db_file["filename"]
             storage_item = storage_map.get(filename)
-            
-            size = 0
-            if storage_item:
-                size = storage_item.get("metadata", {}).get("size") or storage_item.get("size", 0)
-            
-            public_url = config.supabase.storage.from_(BUCKET_NAME).get_public_url(filename) # Fallback if URL needed
-            
+
+            size = storage_item["size"] if storage_item else 0
+
             enriched_files.append({
                 "id": db_file["id"],
                 "name": filename,
-                "url": public_url,
+                "url": file_url(filename),
                 "is_processed": db_file["is_processed"],
                 "metadata": {
                     "size": size,
                     "content_type": "application/pdf"
                 }
             })
-            
+
         return jsonify({"files": enriched_files}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/files/remove", methods=["DELETE"])
 def remove_file():
@@ -188,31 +206,29 @@ def remove_file():
         if not filename:
             return jsonify({"error": "File path required"}), 400
 
-        # Always remove embeddings for the target file, even if DB metadata is missing.
+        # Always remove vectors and bytes, even if DB metadata is missing.
         VectorService.delete_by_filename(filename)
+        storage.delete(filename)
 
-        file_record = SupabaseService.get_file_by_name(filename)
+        file_record = repository.get_file(filename)
         if file_record:
-            # 1. Delete Messages & Conversations
-            conversation_id = SupabaseService.get_conversation_by_file_id(file_record["id"])
+            conversation_id = repository.get_conversation_id(file_record["id"])
             if conversation_id:
-                SupabaseService.delete_messages(conversation_id)
-                SupabaseService.delete_conversation(conversation_id)
+                repository.delete_messages(conversation_id)
+                repository.delete_conversation(conversation_id)
 
-            # 2. Delete DB Record
-            SupabaseService.delete_file_record(file_record["id"])
-
-        # 3. Remove from Storage
-        SupabaseService.remove_from_storage(filename)
+            repository.delete_file(file_record["id"])
 
         return jsonify({"message": "File and all its data deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/delete-embeddings", methods=["GET"])
 def delete_embeddings():
     VectorService.delete_all()
     return jsonify({"message": "Embeddings Deleted"}), 200
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=3000)

@@ -11,8 +11,7 @@ def reload_config():
 
 def test_all_required_vars_missing_are_named(monkeypatch):
     for var in (
-        "SUPABASE_URL",
-        "SUPABASE_SECRET_KEY",
+        "DATABASE_URL",
         "PINECONE_API_KEY",
         "MODE",
         "GOOGLE_API_KEY",
@@ -23,8 +22,7 @@ def test_all_required_vars_missing_are_named(monkeypatch):
     cfg = reload_config()
     missing = cfg.missing_required_vars()
 
-    assert "SUPABASE_URL" in missing
-    assert "SUPABASE_SECRET_KEY" in missing
+    assert "DATABASE_URL" in missing
     assert "PINECONE_API_KEY" in missing
     # MODE defaults to "google", so the Google key is the one required
     assert "GOOGLE_API_KEY" in missing
@@ -74,7 +72,6 @@ def test_validate_passes_with_complete_env(capsys):
 
 def test_import_does_not_build_clients(monkeypatch):
     cfg = reload_config()
-    assert cfg._supabase is None
     assert cfg._pinecone_index is None
     assert cfg._genai_client is None
     assert cfg._groq_client is None
@@ -89,8 +86,7 @@ def test_booting_without_env_exits_readably():
     # Empty-string values shadow any local .env (dotenv does not override
     # existing vars) and count as missing to the validator.
     empty_env = {var: "" for var in (
-        "SUPABASE_URL",
-        "SUPABASE_SECRET_KEY",
+        "DATABASE_URL",
         "PINECONE_API_KEY",
         "GOOGLE_API_KEY",
         "GROQ_API_KEY",
@@ -103,5 +99,5 @@ def test_booting_without_env_exits_readably():
         env=empty_env,
     )
     assert result.returncode == 1
-    assert "SUPABASE_URL" in result.stderr
+    assert "DATABASE_URL" in result.stderr
     assert "Traceback" not in result.stderr
