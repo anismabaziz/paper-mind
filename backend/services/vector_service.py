@@ -1,6 +1,26 @@
 import uuid
 import config
 
+# How many candidates the index is asked for vs. how many survive shaping.
+# Asking for more than we keep gives dedupe room to work.
+TOP_K = 8
+MAX_RETRIEVED_SOURCES = 5
+
+
+def shape_sources(sources, limit=MAX_RETRIEVED_SOURCES):
+    """Dedupe by content, order by score, and bound the result.
+
+    The returned order is the order the LLM receives as context and the
+    order the Sources panel shows, so both always agree.
+    """
+    shaped = {}
+    for source in sorted(sources, key=lambda s: s["score"], reverse=True):
+        key = source["content"].strip()
+        if key and key not in shaped:
+            shaped[key] = source
+    return list(shaped.values())[:limit]
+
+
 class VectorService:
     @staticmethod
     def upsert_vectors(embeddings, texts, filename):
@@ -19,8 +39,8 @@ class VectorService:
         return config.vector_index.upsert(vectors)
 
     @staticmethod
-    def query_vectors(embedding, filename, top_k=3):
-        """Return retrieved chunks as source dicts the repository can persist."""
+    def query_vectors(embedding, filename, top_k=TOP_K):
+        """Return shaped sources: deduped, score-ordered, bounded."""
         search_results = config.vector_index.query(
             vector=embedding,
             top_k=top_k,
@@ -46,7 +66,7 @@ class VectorService:
                 }
             )
 
-        return sources
+        return shape_sources(sources)
 
     @staticmethod
     def delete_by_filename(filename):

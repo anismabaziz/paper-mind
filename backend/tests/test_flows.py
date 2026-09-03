@@ -20,6 +20,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db import Base, Repository
+from services.document_parser import DocumentParser
+from services.pdf_service import PDFParser
+from services.vector_service import shape_sources
 
 
 @pytest.fixture
@@ -90,7 +93,9 @@ class FakeVectorService:
         self.upserts.append((embeddings, texts, filename))
 
     def query_vectors(self, embedding, filename, top_k=3):
-        return self.matches
+        # Route through the real shaping so flow tests see the same
+        # dedupe/bound/order behavior as production retrieval.
+        return shape_sources(self.matches)
 
     def delete_by_filename(self, filename):
         self.deleted.append(filename)
@@ -119,8 +124,8 @@ def fake_ai(monkeypatch, app_module):
     def split_text(text, chunk_size=600, chunk_overlap=100):
         return ["chunk about topic", "another chunk"]
 
-    monkeypatch.setattr(app_module.PDFService, "extract_text", staticmethod(extract_text))
-    monkeypatch.setattr(app_module.PDFService, "split_text", staticmethod(split_text))
+    monkeypatch.setattr(PDFParser, "extract_text", staticmethod(extract_text))
+    monkeypatch.setattr(DocumentParser, "split_text", staticmethod(split_text))
 
     def get_embeddings(texts):
         if isinstance(texts, str):
@@ -356,6 +361,32 @@ def test_primary_success_does_not_invoke_fallback(app_module, monkeypatch):
     tokens = list(AIService.stream_response("q", "ctx"))
     assert "".join(tokens) == "primary answer"
     assert fallback_calls == []
+
+
+def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fake_ai):
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+
+    fake_vectors.matches = [
+        {"content": "weak chunk", "document": "doc.pdf", "chunk_index": 2, "score": 0.31},
+        {"content": "strong chunk", "document": "doc.pdf", "chunk_index": 1, "score": 0.95},
+    ]
+
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    done_sources = parse_sse(response.get_data(as_text=True))[-1][1]["sources"]
+    assert [s["content"] for s in done_sources] == ["strong chunk", "weak chunk"], (
+        "sources must be ordered by score, not by index order"
+    )
+
+    # The LLM received the same chunks, in the same order, as its context.
+    _, context = fake_ai["streamed"][0]
+    assert context == "strong chunk\n\nweak chunk"
+
+    history = client.get(f"/messages?filename={filename}").get_json()["messages"]
+    assert history[1]["sources"] == done_sources, (
+        "the persisted sources must replay in the same order for history"
+    )
 
 
 def test_delete_removes_everything_with_no_orphans(client, fake_storage, fake_vectors, repo):

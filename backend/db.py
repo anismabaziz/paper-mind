@@ -259,11 +259,13 @@ class Repository:
 
     @staticmethod
     def _sources_for(session, message_id: str) -> list[Source]:
+        # Score order mirrors the retrieval order the LLM received, so the
+        # Sources panel shows the same ranking for stored and fresh answers.
         return list(
             session.scalars(
                 select(Source)
                 .where(Source.message_id == message_id)
-                .order_by(Source.chunk_index)
+                .order_by(Source.score.desc())
             ).all()
         )
 

@@ -9,7 +9,7 @@ import config
 from config import INDEX_NAME
 from db import repository
 from storage import storage
-from services.pdf_service import PDFService
+from services.document_parser import DocumentParser
 from services.ai_service import AIService
 from services.vector_service import VectorService
 from services.auth_service import (
@@ -123,13 +123,14 @@ def process_file():
         if not filename:
             return jsonify({"error": "Filename is required"}), 400
 
-        # 1. Download & Extract
+        # 1. Parse & Extract (format-specific parser, shared chunking)
         if not storage.exists(filename):
             return jsonify({"error": "Failed to fetch file"}), 400
         file_content = storage.open(filename)
 
-        text = PDFService.extract_text(file_content)
-        chunks = PDFService.split_text(text)
+        parser = DocumentParser.for_filename(filename)
+        text = parser.extract_text(file_content)
+        chunks = DocumentParser.split_text(text)
 
         # 2. Embed & Vectorize
         embeddings = AIService.get_embeddings(chunks)
