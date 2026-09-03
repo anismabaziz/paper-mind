@@ -1,0 +1,89 @@
+{
+  "documents": [
+    {
+      "filename": "papermind-rag-primer.pdf",
+      "origin": "authored in-repo for this project",
+      "license": "CC0 1.0 (public domain)"
+    },
+    {
+      "filename": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "origin": "Bruening et al., PLOS ONE, 2018, doi:10.1371/journal.pone.0206162",
+      "license": "CC BY 4.0"
+    }
+  ],
+  "questions": [
+    {
+      "id": "primer-stages",
+      "document": "papermind-rag-primer.pdf",
+      "question": "What are the stages of a RAG pipeline?",
+      "expected_answer": "Ingestion, chunking, embedding, retrieval, and generation.",
+      "gold_snippets": ["A RAG pipeline has five stages"]
+    },
+    {
+      "id": "primer-hit-rate",
+      "document": "papermind-rag-primer.pdf",
+      "question": "How is hit rate at k defined?",
+      "expected_answer": "The fraction of questions for which at least one gold chunk appears in the top k retrieved chunks.",
+      "gold_snippets": ["Hit rate at k is"]
+    },
+    {
+      "id": "primer-faithfulness",
+      "document": "papermind-rag-primer.pdf",
+      "question": "What does faithfulness ask about a generated answer?",
+      "expected_answer": "Whether every claim in the generated answer is supported by the retrieved context.",
+      "gold_snippets": ["is every claim in the generated answer supported"]
+    },
+    {
+      "id": "primer-chunk-size",
+      "document": "papermind-rag-primer.pdf",
+      "question": "Why does chunk size matter for retrieval?",
+      "expected_answer": "Too large and the embedding becomes a blurry average hurting precision; too small and the chunk may not contain the full answer hurting recall.",
+      "gold_snippets": [
+        "If a chunk is too large",
+        "If a chunk is too small"
+      ]
+    },
+    {
+      "id": "primer-limits",
+      "document": "papermind-rag-primer.pdf",
+      "question": "Why can a small fixture not prove the system is accurate?",
+      "expected_answer": "It only demonstrates the pipeline works end to end; hit rate and recall depend on how gold chunks were chosen, and the LLM judge inherits the judge model's biases.",
+      "gold_snippets": ["A small fixture can only demonstrate"]
+    },
+    {
+      "id": "skating-jump-counts",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "question": "How many program jumps were counted correctly by the identification algorithm?",
+      "expected_answer": "39 of the 41 program jumps, with one false positive.",
+      "gold_snippets": ["counted 39 of the 41 program jumps correctly"]
+    },
+    {
+      "id": "skating-isolated-jumps",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "question": "How many isolated jumps did the skaters perform?",
+      "expected_answer": "A total of 59 isolated multi-revolution jumps.",
+      "gold_snippets": ["performed a total of 59 isolated multi-revolution"]
+    },
+    {
+      "id": "skating-errors",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "question": "What errors were found with the peak-to-peak scaling algorithm?",
+      "expected_answer": "Flight time and jump height errors under 7% and 15% respectively.",
+      "gold_snippets": ["Flight time and jump height errors under 7% and 15%"]
+    },
+    {
+      "id": "skating-sensor-placement",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "question": "Where was the jump monitor worn on the body?",
+      "expected_answer": "It is a waist-mounted inertial measurement unit.",
+      "gold_snippets": ["waist-mounted"]
+    },
+    {
+      "id": "skating-rotation-speed",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "question": "What rotation speeds were noted?",
+      "expected_answer": "Rotation speeds up to 1,500 degrees per second.",
+      "gold_snippets": ["Rotation speeds up to 1,500"]
+    }
+  ]
+}

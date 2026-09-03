@@ -58,3 +58,27 @@ uv run pytest
 Tests never talk to real Pinecone, LLM, Postgres, or the real upload
 directory — `tests/conftest.py` provides dummy environment values, and the
 flow tests in `tests/test_flows.py` run against fakes and in-memory sqlite.
+
+## Evaluation
+
+`evaluation/` measures retrieval and answer quality against a committed
+ground-truth fixture (`evaluation/fixture.json`): ten questions over two
+sample documents in `evaluation/sample_docs/` — one authored in-repo
+(CC0), one published paper (CC BY 4.0). The evaluator reports
+hit-rate/recall@k for retrieval and LLM-as-judge faithfulness for the
+answers it generates.
+
+The test suite exercises the evaluator's scoring logic on deterministic
+fakes. A live run — real embeddings, real retrieval in Pinecone, real
+answers, real judge — is opt-in because it costs provider calls:
+
+```bash
+cd backend
+uv run python -m evaluation.cli --live              # full report
+uv run python -m evaluation.cli --live --no-judge   # retrieval metrics only
+uv run python -m evaluation.cli --live --json       # machine-readable
+```
+
+A live run indexes the sample docs under an `eval-` prefix in the vector
+index and deletes them afterwards.
+
