@@ -13,13 +13,13 @@ providers, and only behind ``--live``.
 
 import json
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from evaluation import judge as judge_module
-from evaluation.metrics import hit_at_k, recall_at_k, summarize
+from evaluation.metrics import RetrievalReport, hit_at_k, recall_at_k, summarize
 from services.document_parser import DocumentParser
-from services.vector_service import shape_sources
+from services.vector_service import matches_to_sources, shape_sources
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 FIXTURE_PATH = Path(__file__).parent / "fixture.json"
@@ -33,13 +33,13 @@ DEFAULT_K = 5
 
 @dataclass
 class EvaluationReport:
-    retrieval: object
+    retrieval: RetrievalReport
     faithfulness: dict
     per_question: list = field(default_factory=list)
 
     def as_dict(self):
         return {
-            "retrieval": vars(self.retrieval),
+            "retrieval": asdict(self.retrieval),
             "faithfulness": self.faithfulness,
             "per_question": self.per_question,
         }
@@ -53,11 +53,16 @@ def read_document(filename: str, docs_dir=SAMPLE_DOCS_DIR) -> bytes:
     return (Path(docs_dir) / filename).read_bytes()
 
 
-def index_document(filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR):
+def index_document(
+    filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR, pdf_name=None
+):
     """Parse, chunk, embed, and upsert one sample document.
 
-    Uses the same parser seam and vector shape as the /process-file route,
-    so the evaluator exercises the real ingestion path.
+    ``pdf_name`` names the stored vectors (defaults to ``filename``), so a
+    live run can namespace them under an eval- prefix without changing
+    which file is read. Uses the same parser seam and vector shape as the
+    /process-file route, so the evaluator exercises the real ingestion
+    path.
     """
     text = DocumentParser.for_filename(filename).extract_text(
         read_document(filename, docs_dir)
@@ -70,7 +75,7 @@ def index_document(filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR):
             "values": embeddings[i],
             "metadata": {
                 "content": chunks[i],
-                "pdf_name": filename,
+                "pdf_name": pdf_name or filename,
                 "chunk_index": i,
             },
         }
@@ -84,32 +89,20 @@ def remove_document(filename: str, index):
     index.delete(filter={"pdf_name": filename})
 
 
-def retrieve(query_embedding, filename, index, k=DEFAULT_K):
+def retrieve(query_embedding, filename, index, k=DEFAULT_K, prefix=""):
     """Fetch candidates and shape them exactly like the /response route."""
     results = index.query(
         vector=query_embedding,
         top_k=FETCH_K,
         include_metadata=True,
-        filter={"pdf_name": filename},
+        filter={"pdf_name": f"{prefix}{filename}"},
     )
     matches = (
         results.get("matches", [])
         if isinstance(results, dict)
         else getattr(results, "matches", [])
     )
-    sources = shape_sources(
-        [
-            {
-                "content": m["metadata"]["content"],
-                "document": filename,
-                "chunk_index": m["metadata"].get("chunk_index", 0),
-                "score": float(m.get("score", 0.0)),
-            }
-            for m in matches
-            if isinstance(m, dict) and m.get("metadata", {}).get("content")
-        ]
-    )
-    return sources[:k]
+    return shape_sources(matches_to_sources(matches, filename))[:k]
 
 
 def evaluate(
@@ -120,6 +113,7 @@ def evaluate(
     judge_fn=None,
     k: int = DEFAULT_K,
     docs_dir=SAMPLE_DOCS_DIR,
+    prefix="",
 ) -> EvaluationReport:
     """Run every fixture question through retrieval and generation.
 
@@ -133,7 +127,7 @@ def evaluate(
     for item in fixture["questions"]:
         filename = item["document"]
         query_embedding = embed_fn([item["question"]])[0]
-        sources = retrieve(query_embedding, filename, index, k=k)
+        sources = retrieve(query_embedding, filename, index, k=k, prefix=prefix)
         retrieved_texts = [s["content"] for s in sources]
 
         result = {

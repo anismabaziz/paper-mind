@@ -21,6 +21,32 @@ def shape_sources(sources, limit=MAX_RETRIEVED_SOURCES):
     return list(shaped.values())[:limit]
 
 
+def matches_to_sources(matches, filename):
+    """Turn raw index matches into the shared source shape."""
+    sources = []
+    for match in matches or []:
+        metadata = (
+            match.get("metadata", {}) if isinstance(match, dict) else getattr(match, "metadata", {})
+        )
+        content = metadata.get("content") if metadata else None
+        if not content:
+            continue
+        score = (
+            match.get("score", 0.0)
+            if isinstance(match, dict)
+            else (getattr(match, "score", 0.0) or 0.0)
+        )
+        sources.append(
+            {
+                "content": content,
+                "document": metadata.get("pdf_name", filename),
+                "chunk_index": metadata.get("chunk_index", 0),
+                "score": float(score),
+            }
+        )
+    return sources
+
+
 class VectorService:
     @staticmethod
     def upsert_vectors(embeddings, texts, filename):
@@ -50,23 +76,7 @@ class VectorService:
 
         matches = search_results.get("matches", []) if isinstance(search_results, dict) else getattr(search_results, "matches", [])
 
-        sources = []
-        for match in matches or []:
-            metadata = match.get("metadata", {}) if isinstance(match, dict) else getattr(match, "metadata", {})
-            content = metadata.get("content") if metadata else None
-            if not content:
-                continue
-            score = match.get("score", 0.0) if isinstance(match, dict) else (getattr(match, "score", 0.0) or 0.0)
-            sources.append(
-                {
-                    "content": content,
-                    "document": metadata.get("pdf_name", filename),
-                    "chunk_index": metadata.get("chunk_index", 0),
-                    "score": float(score),
-                }
-            )
-
-        return shape_sources(sources)
+        return shape_sources(matches_to_sources(matches, filename))
 
     @staticmethod
     def delete_by_filename(filename):

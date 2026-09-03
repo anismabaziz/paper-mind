@@ -51,28 +51,32 @@ def make_live_components():
 
 
 def run(live: bool, judge: bool, k: int) -> dict:
-    fixture = load_fixture()
     if not live:
         sys.exit(
             "Refusing to run a live evaluation by default. Add --live to "
             "embed, retrieve, generate, and judge against the real providers."
         )
 
+    fixture = load_fixture()
     config.validate()
     embed_fn, generate_fn, judge_fn = make_live_components()
     if not judge:
         judge_fn = None
 
     index = config.vector_index
-    names = {f"{EVAL_PREFIX}{doc['filename']}" for doc in fixture["documents"]}
     try:
-        for name in names:
-            chunks = index_document(name, index, embed_fn)
+        for doc in fixture["documents"]:
+            name = f"{EVAL_PREFIX}{doc['filename']}"
+            chunks = index_document(
+                doc["filename"], index, embed_fn, pdf_name=name
+            )
             print(f"indexed {name}: {chunks} chunks")
-        report = evaluate(fixture, index, embed_fn, generate_fn, judge_fn, k=k)
+        report = evaluate(
+            fixture, index, embed_fn, generate_fn, judge_fn, k=k, prefix=EVAL_PREFIX
+        )
     finally:
-        for name in names:
-            remove_document(name, index)
+        for doc in fixture["documents"]:
+            remove_document(f"{EVAL_PREFIX}{doc['filename']}", index)
 
     return report.as_dict()
 

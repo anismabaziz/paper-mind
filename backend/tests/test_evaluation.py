@@ -331,6 +331,28 @@ class TestEvaluator:
         assert 0.0 <= report.retrieval.hit_rate <= 1.0
         assert 0.0 <= report.retrieval.recall <= 1.0
 
+    def test_prefixed_live_style_run_matches_fixture_documents(self, fixture):
+        """Regression: a live run indexes docs under an eval- prefix; the
+        retrieval filter must use the same prefixed name or every query
+        silently matches nothing."""
+        index = InMemoryIndex()
+        for doc in fixture["documents"]:
+            evaluator.index_document(
+                doc["filename"],
+                index,
+                hash_embed,
+                pdf_name=f"{cli.EVAL_PREFIX}{doc['filename']}",
+            )
+        report = evaluator.evaluate(
+            fixture,
+            index,
+            hash_embed,
+            canned_generate,
+            judge_fn=None,
+            prefix=cli.EVAL_PREFIX,
+        )
+        assert report.retrieval.hit_rate > 0.0
+
     def test_index_and_remove_round_trip(self, fixture):
         index = InMemoryIndex()
         filename = fixture["documents"][0]["filename"]
