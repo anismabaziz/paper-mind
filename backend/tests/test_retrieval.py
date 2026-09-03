@@ -66,16 +66,26 @@ class FakeVectorIndex:
         return {"matches": self._matches}
 
 
-class TestRetrievalShaping:
-    @staticmethod
-    def run_shaping(matches):
+@pytest.fixture
+def fake_index(monkeypatch):
+    """Install a fake vector index behind the config.vector_index seam."""
+    installed = {}
+
+    def install(matches):
         index = FakeVectorIndex(matches)
-        original = config.__dict__.get("_pinecone_index")
-        config._pinecone_index = index
-        try:
-            return VectorService.query_vectors([0.1], "doc.pdf")
-        finally:
-            config._pinecone_index = original
+        # Patch the memo slot, not `vector_index` itself: setattr would read
+        # the current value first, which triggers the lazy Pinecone builder.
+        monkeypatch.setattr(config, "_pinecone_index", index)
+        installed["index"] = index
+        return index
+
+    yield install
+
+
+class TestRetrievalShaping:
+    def run_shaping(self, fake_index, matches):
+        index = fake_index(matches)
+        return VectorService.query_vectors([0.1], "doc.pdf"), index
 
     @staticmethod
     def match(content, score, chunk_index=0, document="doc.pdf"):
@@ -89,54 +99,50 @@ class TestRetrievalShaping:
             },
         }
 
-    def test_results_are_ordered_by_score_descending(self):
+    def test_results_are_ordered_by_score_descending(self, fake_index):
         matches = [
             self.match("low", 0.10, 0),
             self.match("high", 0.90, 1),
             self.match("mid", 0.50, 2),
         ]
 
-        sources = self.run_shaping(matches)
+        sources, _ = self.run_shaping(fake_index, matches)
 
         assert [s["content"] for s in sources] == ["high", "mid", "low"]
 
-    def test_duplicate_content_is_deduped_keeping_the_best_score(self):
+    def test_duplicate_content_is_deduped_keeping_the_best_score(self, fake_index):
         matches = [
             self.match("same text", 0.40, 0),
             self.match("same text", 0.80, 1),
             self.match("unique", 0.60, 2),
         ]
 
-        sources = self.run_shaping(matches)
+        sources, _ = self.run_shaping(fake_index, matches)
 
         assert [s["content"] for s in sources] == ["same text", "unique"]
         assert sources[0]["score"] == 0.80
 
-    def test_results_are_bounded(self):
+    def test_results_are_bounded(self, fake_index):
         matches = [self.match(f"chunk {i}", 1.0 - i / 10, i) for i in range(10)]
 
-        sources = self.run_shaping(matches)
+        sources, _ = self.run_shaping(fake_index, matches)
 
         assert len(sources) == MAX_RETRIEVED_SOURCES
         assert len(sources) < len(matches)
 
-    def test_matches_without_content_are_dropped(self):
+    def test_matches_without_content_are_dropped(self, fake_index):
         matches = [
             {"id": "v-empty", "score": 0.9, "metadata": {"pdf_name": "doc.pdf"}},
             self.match("real", 0.5, 0),
         ]
 
-        sources = self.run_shaping(matches)
+        sources, _ = self.run_shaping(fake_index, matches)
 
         assert [s["content"] for s in sources] == ["real"]
 
-    def test_query_is_filtered_to_the_document(self):
-        index = FakeVectorIndex([])
-        original = config.__dict__.get("_pinecone_index")
-        config._pinecone_index = index
-        try:
-            VectorService.query_vectors([0.1], "doc.pdf")
-        finally:
-            config._pinecone_index = original
+    def test_query_is_filtered_to_the_document(self, fake_index):
+        index = fake_index([])
+
+        VectorService.query_vectors([0.1], "doc.pdf")
 
         assert index.queries[0]["filter"] == {"pdf_name": "doc.pdf"}

@@ -22,7 +22,7 @@ from sqlalchemy.pool import StaticPool
 from db import Base, Repository
 from services.document_parser import DocumentParser
 from services.pdf_service import PDFParser
-from services.vector_service import shape_sources
+from services.vector_service import TOP_K, shape_sources
 
 
 @pytest.fixture
@@ -92,7 +92,7 @@ class FakeVectorService:
     def upsert_vectors(self, embeddings, texts, filename):
         self.upserts.append((embeddings, texts, filename))
 
-    def query_vectors(self, embedding, filename, top_k=3):
+    def query_vectors(self, embedding, filename, top_k=TOP_K):
         # Route through the real shaping so flow tests see the same
         # dedupe/bound/order behavior as production retrieval.
         return shape_sources(self.matches)

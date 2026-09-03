@@ -265,7 +265,7 @@ class Repository:
             session.scalars(
                 select(Source)
                 .where(Source.message_id == message_id)
-                .order_by(Source.score.desc())
+                .order_by(Source.score.desc(), Source.chunk_index)
             ).all()
         )
 
