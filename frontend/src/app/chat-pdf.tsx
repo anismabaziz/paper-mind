@@ -2,7 +2,9 @@ import { MessageSquare, Send, ChevronRight, ChevronDown, Loader2, Cpu, User, Cop
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import usePdfStore from "@/store/pdf-state";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type ComponentPropsWithoutRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useQuery } from "@tanstack/react-query";
 import { checkIsProcessed, chatStream, getMessages, ISource } from "@/services/files";
 import { cn } from "@/lib/utils";
@@ -302,81 +304,34 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   );
 }
 
-function renderInlineCode(text: string) {
-  const codeParts = text.split(/(`.*?`)/g);
-  return codeParts.map((cPart, cIdx) => {
-    if (cPart.startsWith("`") && cPart.endsWith("`")) {
-      const codeText = cPart.slice(1, -1);
-      return (
-        <code
-          key={cIdx}
-          className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-mono text-[10px] text-slate-800 font-medium mx-0.5"
-        >
-          {codeText}
-        </code>
-      );
-    }
-    return cPart;
-  });
-}
-
-function renderInlineMarkdown(text: string) {
-  const boldParts = text.split(/(\*\*.*?\*\*)/g);
-  return boldParts.map((bPart, bIdx) => {
-    if (bPart.startsWith("**") && bPart.endsWith("**")) {
-      const boldText = bPart.slice(2, -2);
-      return (
-        <strong key={bIdx} className="font-semibold text-slate-900">
-          {renderInlineCode(boldText)}
-        </strong>
-      );
-    }
-    return <span key={bIdx}>{renderInlineCode(bPart)}</span>;
-  });
+function MarkdownCode({ className, children, ...props }: ComponentPropsWithoutRef<"code">) {
+  const isBlock = className?.includes("language-") || String(children).includes("\n");
+  if (!isBlock) {
+    return (
+      <code
+        className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-mono text-[10px] text-slate-800 font-medium mx-0.5"
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  }
+  const lang = /language-(\S+)/.exec(className ?? "")?.[1] ?? "";
+  return <CodeBlock code={String(children).replace(/\n$/, "")} lang={lang} />;
 }
 
 function MarkdownRenderer({ text }: { text: string }) {
-  const parts = text.split(/(```[\s\S]*?```)/g);
-
   return (
-    <div className="space-y-2">
-      {parts.map((part, index) => {
-        if (part.startsWith("```")) {
-          const lines = part.split("\n");
-          const firstLine = lines[0];
-          const lang = firstLine.replace("```", "").trim();
-          const code = lines.slice(1, -1).join("\n");
-          return <CodeBlock key={index} code={code} lang={lang} />;
-        } else {
-          const paragraphs = part.split("\n\n");
-          return paragraphs.map((para, paraIdx) => {
-            const trimmed = para.trim();
-            if (!trimmed) return null;
-
-            const lines = trimmed.split("\n");
-            const isBulletList = lines.every(
-              (line) => line.trim().startsWith("- ") || line.trim().startsWith("* ")
-            );
-
-            if (isBulletList) {
-              return (
-                <ul key={paraIdx} className="list-disc pl-4 space-y-1 my-1.5">
-                  {lines.map((line, lineIdx) => {
-                    const content = line.replace(/^[-*]\s+/, "");
-                    return <li key={lineIdx}>{renderInlineMarkdown(content)}</li>;
-                  })}
-                </ul>
-              );
-            }
-
-            return (
-              <p key={paraIdx} className="my-1.5">
-                {renderInlineMarkdown(para)}
-              </p>
-            );
-          });
-        }
-      })}
+    <div className="space-y-2 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:space-y-1 [&_ul]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:space-y-1 [&_ol]:my-1.5 [&_li]:leading-relaxed [&_strong]:font-semibold [&_strong]:text-slate-900 [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:text-xs [&_h2]:font-semibold [&_h3]:text-xs [&_h3]:font-semibold [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-200 [&_blockquote]:pl-2 [&_blockquote]:text-slate-600 [&_table]:text-[10px] [&_th]:border [&_th]:border-slate-200 [&_th]:px-1.5 [&_th]:py-1 [&_td]:border [&_td]:border-slate-200 [&_td]:px-1.5 [&_td]:py-1">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          pre: ({ children }) => <>{children}</>,
+          code: MarkdownCode,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
