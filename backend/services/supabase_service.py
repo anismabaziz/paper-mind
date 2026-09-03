@@ -1,27 +1,29 @@
 from flask import jsonify
-from config import supabase, BUCKET_NAME
+import config
+
+BUCKET_NAME = config.BUCKET_NAME
 
 class SupabaseService:
     @staticmethod
     def upload_to_storage(filename, content):
-        supabase.storage.from_(BUCKET_NAME).upload(
+        config.supabase.storage.from_(BUCKET_NAME).upload(
             filename,
             content,
             file_options={"content-type": "application/pdf"},
         )
-        return supabase.storage.from_(BUCKET_NAME).get_public_url(filename)
+        return config.supabase.storage.from_(BUCKET_NAME).get_public_url(filename)
 
     @staticmethod
     def get_storage_list():
-        return supabase.storage.from_(BUCKET_NAME).list()
+        return config.supabase.storage.from_(BUCKET_NAME).list()
 
     @staticmethod
     def remove_from_storage(filename):
-        return supabase.storage.from_(BUCKET_NAME).remove([filename])
+        return config.supabase.storage.from_(BUCKET_NAME).remove([filename])
 
     @staticmethod
     def download_from_storage(filename):
-        return supabase.storage.from_(BUCKET_NAME).download(filename)
+        return config.supabase.storage.from_(BUCKET_NAME).download(filename)
 
     @staticmethod
     def create_file_record(filename):

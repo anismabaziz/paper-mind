@@ -1,5 +1,5 @@
 import uuid
-from config import vector_index
+import config
 
 class VectorService:
     @staticmethod
@@ -16,11 +16,11 @@ class VectorService:
             }
             for i, embedding in enumerate(embeddings)
         ]
-        return vector_index.upsert(vectors)
+        return config.vector_index.upsert(vectors)
 
     @staticmethod
     def query_vectors(embedding, filename, top_k=3):
-        search_results = vector_index.query(
+        search_results = config.vector_index.query(
             vector=embedding,
             top_k=top_k,
             include_metadata=True,
@@ -39,8 +39,8 @@ class VectorService:
 
     @staticmethod
     def delete_by_filename(filename):
-        return vector_index.delete(filter={"pdf_name": filename})
+        return config.vector_index.delete(filter={"pdf_name": filename})
 
     @staticmethod
     def delete_all():
-        return vector_index.delete(delete_all=True)
+        return config.vector_index.delete(delete_all=True)

@@ -1,5 +1,7 @@
 from google.genai import types
-from config import genai_client, CHAT_MODEL
+import config
+
+CHAT_MODEL = config.CHAT_MODEL
 
 class GoogleService:
     @staticmethod
@@ -10,7 +12,7 @@ class GoogleService:
             "Do not use any outside knowledge."
         )
 
-        result = genai_client.models.generate_content(
+        result = config.genai_client.models.generate_content(
             model=CHAT_MODEL,
             config=types.GenerateContentConfig(system_instruction=system_instruction),
             contents=[

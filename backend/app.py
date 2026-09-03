@@ -3,7 +3,10 @@ from flask_cors import CORS
 import uuid
 import os
 
-from config import BUCKET_NAME, supabase
+import config
+from config import BUCKET_NAME
+
+config.validate()
 from services.supabase_service import SupabaseService
 from services.pdf_service import PDFService
 from services.ai_service import AIService
@@ -161,7 +164,7 @@ def get_files():
             if storage_item:
                 size = storage_item.get("metadata", {}).get("size") or storage_item.get("size", 0)
             
-            public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(filename) # Fallback if URL needed
+            public_url = config.supabase.storage.from_(BUCKET_NAME).get_public_url(filename) # Fallback if URL needed
             
             enriched_files.append({
                 "id": db_file["id"],

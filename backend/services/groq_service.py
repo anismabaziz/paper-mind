@@ -1,9 +1,13 @@
-from config import groq_client, GROQ_MODEL
+import os
+
+import config
+
+GROQ_MODEL = config.GROQ_MODEL
 
 class GroqService:
     @staticmethod
     def generate_response(query: str, context: str) -> str:
-        if not groq_client:
+        if not os.getenv("GROQ_API_KEY"):
             raise ValueError("Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file.")
 
         system_instruction = (
@@ -12,7 +16,7 @@ class GroqService:
             "Do not use any outside knowledge."
         )
 
-        chat_completion = groq_client.chat.completions.create(
+        chat_completion = config.groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
