@@ -35,7 +35,6 @@ export default function ListPDF() {
     queryFn: getFiles,
     refetchInterval: (query) => {
        // Refetch while any file is still processing to update the "Analyzed" status
-       // @ts-ignore
        const hasUnprocessed = query.state.data?.files.some(f => !f.is_processed);
        return hasUnprocessed ? 3000 : false;
     }

@@ -26,7 +26,6 @@ export default function ChatPDF() {
     queryFn: () => checkIsProcessed(file!),
     enabled: !!file,
     refetchInterval: (query) => {
-      // @ts-ignore
       return query.state.data?.is_processed ? false : 3000;
     }
   });
@@ -41,7 +40,7 @@ export default function ChatPDF() {
     if (file) {
       setInputValue("");
       if (messagesQuery.data?.messages) {
-        setMessages(messagesQuery.data.messages as any);
+        setMessages(messagesQuery.data.messages);
       } else {
         setMessages([]);
       }
