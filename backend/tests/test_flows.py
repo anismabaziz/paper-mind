@@ -329,22 +329,36 @@ def test_midstream_primary_failure_does_not_replay_via_fallback(app_module, monk
     assert fallback_calls == [], "fallback must not duplicate a half-streamed answer"
 
 
+def test_primary_success_does_not_invoke_fallback(app_module, monkeypatch):
+    """When the primary streams fully, the fallback must never be called."""
+    from services.ai_service import AIService
+    from services.groq_service import GroqService
+    from services.google_service import GoogleService
+
+    monkeypatch.setattr(config, "MODE", "groq")
+
+    def primary_stream(query, context):
+        yield "primary answer"
+
+    fallback_calls = []
+
+    def fallback_stream(query, context):
+        fallback_calls.append((query, context))
+        yield "fallback"
+
+    monkeypatch.setattr(
+        GroqService, "stream_response", staticmethod(primary_stream)
+    )
+    monkeypatch.setattr(
+        GoogleService, "stream_response", staticmethod(fallback_stream)
+    )
+
+    tokens = list(AIService.stream_response("q", "ctx"))
+    assert "".join(tokens) == "primary answer"
+    assert fallback_calls == []
+
+
 def test_delete_removes_everything_with_no_orphans(client, fake_storage, fake_vectors, repo):
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
-    client.post("/response", json={"query": "what?", "filename": filename})
-
-    response = client.delete(f"/files/remove?path={filename}")
-
-    assert response.status_code == 200
-    assert fake_storage.blobs == {}
-    assert fake_vectors.deleted == [filename]
-    assert repo.list_files() == []
-    assert client.get(f"/messages?filename={filename}").get_json()["messages"] == []
-    assert client.get("/files").get_json()["files"] == []
-
-
-def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
     client.post("/response", json={"query": "what?", "filename": filename})

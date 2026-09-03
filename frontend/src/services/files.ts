@@ -134,11 +134,6 @@ function parseSSEBlock(block: string): { name: string; data: Record<string, unkn
   }
 }
 
-export type SSEEvent =
-  | { event: "token"; text: string }
-  | { event: "error"; error: string }
-  | { event: "done"; done: boolean; sources: ISource[] };
-
 export interface IMessage {
   id: string;
   text: string;

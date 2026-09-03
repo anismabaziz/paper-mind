@@ -43,6 +43,7 @@ class AIService:
             for token in AIService._stream_with(primary, query, context):
                 emitted = True
                 yield token
+            return
         except Exception as e:
             print(f"AI Streaming Error ({primary}): {e}")
             if emitted:

@@ -1,6 +1,7 @@
 import os
 
 import config
+from services.prompts import SYSTEM_INSTRUCTION
 
 GROQ_MODEL = config.GROQ_MODEL
 
@@ -10,17 +11,11 @@ class GroqService:
         if not os.getenv("GROQ_API_KEY"):
             raise ValueError("Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file.")
 
-        system_instruction = (
-            "You must only answer questions based on the provided context. "
-            "If the context does not contain the answer, say 'I don't know based on the given context.' "
-            "Do not use any outside knowledge."
-        )
-
         chat_completion = config.groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": system_instruction,
+                    "content": SYSTEM_INSTRUCTION,
                 },
                 {
                     "role": "user",
@@ -38,17 +33,11 @@ class GroqService:
         if not os.getenv("GROQ_API_KEY"):
             raise ValueError("Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file.")
 
-        system_instruction = (
-            "You must only answer questions based on the provided context. "
-            "If the context does not contain the answer, say 'I don't know based on the given context.' "
-            "Do not use any outside knowledge."
-        )
-
         stream = config.groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": system_instruction,
+                    "content": SYSTEM_INSTRUCTION,
                 },
                 {
                     "role": "user",
