@@ -2,7 +2,7 @@ import { MessageSquare, Send, ChevronRight, ChevronDown, Loader2, Cpu, User, Cop
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import usePdfStore from "@/store/pdf-state";
-import { useEffect, useState, useRef, type ComponentPropsWithoutRef } from "react";
+import { useEffect, useState, useRef, isValidElement, type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useQuery } from "@tanstack/react-query";
@@ -304,20 +304,24 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   );
 }
 
-function MarkdownCode({ className, children, ...props }: ComponentPropsWithoutRef<"code">) {
-  const isBlock = className?.includes("language-") || String(children).includes("\n");
-  if (!isBlock) {
-    return (
-      <code
-        className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-mono text-[10px] text-slate-800 font-medium mx-0.5"
-        {...props}
-      >
-        {children}
-      </code>
-    );
+function MarkdownPre({ children }: ComponentPropsWithoutRef<"pre">) {
+  if (isValidElement<ComponentPropsWithoutRef<"code">>(children)) {
+    const { className, children: code } = children.props;
+    const lang = /language-(\S+)/.exec(className ?? "")?.[1] ?? "";
+    return <CodeBlock code={String(code).replace(/\n$/, "")} lang={lang} />;
   }
-  const lang = /language-(\S+)/.exec(className ?? "")?.[1] ?? "";
-  return <CodeBlock code={String(children).replace(/\n$/, "")} lang={lang} />;
+  return <pre>{children}</pre>;
+}
+
+function MarkdownInlineCode({ children, ...props }: ComponentPropsWithoutRef<"code">) {
+  return (
+    <code
+      className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-mono text-[10px] text-slate-800 font-medium mx-0.5"
+      {...props}
+    >
+      {children}
+    </code>
+  );
 }
 
 function MarkdownRenderer({ text }: { text: string }) {
@@ -326,8 +330,8 @@ function MarkdownRenderer({ text }: { text: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          pre: ({ children }) => <>{children}</>,
-          code: MarkdownCode,
+          pre: MarkdownPre,
+          code: MarkdownInlineCode,
         }}
       >
         {text}
