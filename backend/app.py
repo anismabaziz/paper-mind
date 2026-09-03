@@ -1,7 +1,8 @@
+import json
 import uuid
 import os
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from flask_cors import CORS
 
 import config
@@ -150,41 +151,62 @@ def process_file():
 @app.route("/response", methods=["POST"])
 @require_auth
 def get_response():
+    data = request.get_json() or {}
+    query = data.get("query")
+    filename = data.get("filename")
+
+    if not query or not filename:
+        return jsonify({"error": "Query and Filename are required"}), 400
+
+    file_record = repository.get_file(filename)
+    if not file_record:
+        return jsonify({"error": "File not found"}), 404
+
+    conversation_id = repository.get_conversation_id(file_record["id"])
+    if not conversation_id:
+        return jsonify({"error": "Conversation not found"}), 404
+
+    # Retrieval happens up front: the user message and the sources must be
+    # settled before the first token is streamed, so a provider failure can
+    # never leave the turn half-recorded.
     try:
-        data = request.get_json()
-        query = data.get("query")
-        filename = data.get("filename")
-
-        if not query or not filename:
-            return jsonify({"error": "Query and Filename are required"}), 400
-
-        # 1. Context Retrieval
-        file_record = repository.get_file(filename)
-        if not file_record:
-            return jsonify({"error": "File not found"}), 404
-
-        conversation_id = repository.get_conversation_id(file_record["id"])
-        if not conversation_id:
-            return jsonify({"error": "Conversation not found"}), 404
-
-        # Store User Message
         repository.add_message(conversation_id, "user", query)
-
-        # 2. Vector Search
         query_embedding = AIService.get_embeddings(query)[0]
-        context_chunks = VectorService.query_vectors(query_embedding, filename)
-        context = "\n".join(context_chunks)
-
-        # 3. LLM Generation
-        response_text = AIService.generate_response(query, context)
-
-        # Store Bot Message
-        repository.add_message(conversation_id, "bot", response_text)
-
-        return jsonify({"results": response_text}), 200
+        sources = VectorService.query_vectors(query_embedding, filename)
+        context = "\n\n".join(source["content"] for source in sources)
     except Exception as e:
-        print(f"/response error: {e}")
+        print(f"/response retrieval error: {e}")
         return jsonify({"error": str(e)}), 500
+
+    def event(name, payload):
+        return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
+
+    def generate():
+        fragments = []
+        try:
+            for token in AIService.stream_response(query, context):
+                fragments.append(token)
+                yield event("token", {"text": token})
+        except Exception as e:
+            print(f"/response generation error: {e}")
+            failure = (
+                "Sorry — the language model is unavailable right now. "
+                "Please try again."
+            )
+            repository.add_message(conversation_id, "bot", failure)
+            yield event("error", {"error": failure})
+            yield event("done", {"done": True, "sources": []})
+            return
+
+        answer = "".join(fragments).strip() or "I don't know based on the given context."
+        repository.add_message(conversation_id, "bot", answer, sources)
+        yield event("done", {"done": True, "sources": sources})
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.route("/messages", methods=["GET"])

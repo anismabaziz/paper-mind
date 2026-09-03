@@ -1,25 +1,33 @@
-import { MessageSquare, Send, ChevronRight, Loader2, Cpu, User, Copy, Check } from "lucide-react";
+import { MessageSquare, Send, ChevronRight, ChevronDown, Loader2, Cpu, User, Copy, Check, FileText } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import usePdfStore from "@/store/pdf-state";
 import { useEffect, useState, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { checkIsProcessed, askQuestion, getMessages } from "@/services/files";
+import { useQuery } from "@tanstack/react-query";
+import { checkIsProcessed, chatStream, getMessages, ISource } from "@/services/files";
 import { cn } from "@/lib/utils";
+
+interface ChatMessage {
+  id: string;
+  text: string;
+  sender: 'user' | 'bot';
+  sources?: ISource[];
+  failed?: boolean;
+}
 
 export default function ChatPDF() {
   const { file } = usePdfStore();
-  const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
-  
+
   const questions = [
     "What is the main topic of this document?",
     "Summarize the key findings",
     "Methodology used in this paper?",
   ];
-  
+
   const [inputValue, setInputValue] = useState("");
-  const [messages, setMessages] = useState<{id: string, text: string, sender: 'user' | 'bot'}[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   const checkProcessedQuery = useQuery({
     queryKey: [file?.name, "is-processed"],
@@ -56,25 +64,46 @@ export default function ChatPDF() {
     }
   }, [messages]);
 
-  const askMutation = useMutation({
-    mutationFn: (query: string) => askQuestion(query, file!.name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [file?.name, "messages"] });
-    },
-    onError: () => {
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), text: 'Connection lost. Please ensure the backend server is active.', sender: 'bot' }
-      ]);
-    }
-  });
-
-  const handleSend = () => {
-    if (!inputValue.trim() || !file || askMutation.isPending) return;
+  const handleSend = async () => {
+    if (!inputValue.trim() || !file || isStreaming) return;
     const q = inputValue.trim();
     setInputValue("");
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), text: q, sender: 'user' }]);
-    askMutation.mutate(q);
+    setIsStreaming(true);
+
+    const botId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), text: q, sender: 'user' },
+      { id: botId, text: "", sender: 'bot' },
+    ]);
+
+    try {
+      await chatStream(q, file.name, {
+        onToken: (text) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, text: msg.text + text } : msg)
+          );
+        },
+        onError: (message) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, text: message, failed: true } : msg)
+          );
+        },
+        onDone: (sources) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, sources } : msg)
+          );
+        },
+      });
+    } catch {
+      setMessages((prev) =>
+        prev.map((msg) => msg.id === botId
+          ? { ...msg, text: "Connection lost. Please ensure the backend server is active.", failed: true }
+          : msg)
+      );
+    } finally {
+      setIsStreaming(false);
+    }
   };
 
   return (
@@ -145,16 +174,25 @@ export default function ChatPDF() {
             
             <div className={cn(
               "max-w-[85%] px-3.5 py-2.5 rounded text-xs leading-relaxed border shadow-none",
-              msg.sender === 'user' 
-                ? "bg-primary text-white border-primary rounded-tr-none font-medium" 
-                : "bg-white border-slate-200 text-slate-800 rounded-tl-none"
+              msg.sender === 'user'
+                ? "bg-primary text-white border-primary rounded-tr-none font-medium"
+                : msg.failed
+                  ? "bg-red-50 border-red-200 text-red-800 rounded-tl-none"
+                  : "bg-white border-slate-200 text-slate-800 rounded-tl-none"
             )}>
               {msg.sender === 'bot' ? (
                 <>
                   <div className="flex items-center gap-1 mb-1.5 text-[9px] font-semibold text-slate-450 uppercase tracking-wider">
                     System Response
                   </div>
-                  <MarkdownRenderer text={msg.text} />
+                  {msg.text ? (
+                    <MarkdownRenderer text={msg.text} />
+                  ) : (
+                    <Loader2 size={12} className="animate-spin text-slate-400" />
+                  )}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <SourcesPanel sources={msg.sources} />
+                  )}
                 </>
               ) : (
                 <p className="whitespace-pre-wrap">{msg.text}</p>
@@ -163,7 +201,7 @@ export default function ChatPDF() {
           </div>
         ))}
 
-        {askMutation.isPending && (
+        {isStreaming && (
           <div className="flex gap-2.5 animate-pulse">
             <div className="h-7 w-7 rounded border bg-slate-50 border-slate-200 text-slate-400 flex items-center justify-center shrink-0">
               <Loader2 size={11} className="animate-spin" />
@@ -189,9 +227,9 @@ export default function ChatPDF() {
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             className="h-10 pl-3.5 pr-11 bg-white border-slate-200 ring-primary/20 rounded text-xs placeholder:text-slate-450 transition-all focus-visible:ring-offset-0 focus-visible:ring-2"
           />
-          <Button 
+          <Button
             onClick={handleSend}
-            disabled={!inputValue.trim() || askMutation.isPending}
+            disabled={!inputValue.trim() || isStreaming}
             className="absolute right-1 top-1 h-8 w-8 p-0 bg-primary hover:bg-primary/95 text-white rounded shadow-sm transition-colors"
           >
             <Send size={14} />
@@ -201,6 +239,39 @@ export default function ChatPDF() {
           PaperMind Quantitative Ingestion Node
         </p>
       </div>
+    </div>
+  );
+}
+
+function SourcesPanel({ sources }: { sources: ISource[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 border-t border-slate-100 pt-1.5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[9px] font-semibold text-slate-450 hover:text-slate-600 uppercase tracking-wider transition-colors cursor-pointer"
+      >
+        <FileText size={10} />
+        Sources ({sources.length})
+        <ChevronDown size={10} className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {sources.map((source, i) => (
+            <div key={i} className="bg-slate-50 border border-slate-200 rounded p-2">
+              <div className="flex items-center justify-between mb-1 text-[9px] font-medium text-slate-500">
+                <span className="truncate">{source.document} · chunk {source.chunk_index}</span>
+                <span className="shrink-0 ml-2 font-mono text-slate-400">
+                  {source.score.toFixed(3)}
+                </span>
+              </div>
+              <p className="text-[10px] leading-relaxed text-slate-600 line-clamp-3">
+                {source.content}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

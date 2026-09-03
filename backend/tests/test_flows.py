@@ -5,8 +5,10 @@ are monkeypatched; the repository runs against an in-memory sqlite. No test
 touches Pinecone, an LLM provider, a real Postgres, or the real upload dir.
 """
 
+import config
 import importlib
 import io
+import json
 import os
 import pathlib
 import subprocess
@@ -75,7 +77,14 @@ class FakeVectorService:
         self.upserts = []
         self.deleted = []
         self.deleted_all = False
-        self.matches = ["chunk about topic"]
+        self.matches = [
+            {
+                "content": "chunk about topic",
+                "document": "doc.pdf",
+                "chunk_index": 0,
+                "score": 0.92,
+            }
+        ]
 
     def upsert_vectors(self, embeddings, texts, filename):
         self.upserts.append((embeddings, texts, filename))
@@ -102,7 +111,7 @@ def fake_vectors(monkeypatch, app_module):
 
 @pytest.fixture
 def fake_ai(monkeypatch, app_module):
-    calls = {"embedded": [], "answered": []}
+    calls = {"embedded": [], "answered": [], "streamed": []}
 
     def extract_text(pdf_content):
         return "fake document text"
@@ -123,9 +132,31 @@ def fake_ai(monkeypatch, app_module):
         calls["answered"].append((query, context))
         return "The answer is 42."
 
+    def stream_response(query, context):
+        calls["streamed"].append((query, context))
+        yield "The answer "
+        yield "is 42."
+
     monkeypatch.setattr(app_module.AIService, "get_embeddings", staticmethod(get_embeddings))
     monkeypatch.setattr(app_module.AIService, "generate_response", staticmethod(generate_response))
+    monkeypatch.setattr(app_module.AIService, "stream_response", staticmethod(stream_response))
     return calls
+
+
+def parse_sse(body):
+    """Split an SSE body into (event, data) tuples."""
+    events = []
+    for block in body.split("\n\n"):
+        if not block.strip():
+            continue
+        name, data = None, None
+        for line in block.split("\n"):
+            if line.startswith("event: "):
+                name = line[len("event: "):]
+            elif line.startswith("data: "):
+                data = json.loads(line[len("data: "):])
+        events.append((name, data))
+    return events
 
 
 @pytest.fixture
@@ -177,24 +208,143 @@ def test_process_embeds_and_marks_processed(client, fake_vectors, fake_ai):
     ] is True
 
 
-def test_ask_stores_messages_and_returns_answer(client, fake_vectors, fake_ai):
+def test_ask_streams_tokens_and_persists_sources(client, fake_vectors, fake_ai):
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
 
     response = client.post("/response", json={"query": "what?", "filename": filename})
 
     assert response.status_code == 200
-    assert response.get_json()["results"] == "The answer is 42."
-    assert fake_ai["answered"][0][0] == "what?"
+    assert response.mimetype == "text/event-stream"
+    events = parse_sse(response.get_data(as_text=True))
+
+    tokens = [data["text"] for name, data in events if name == "token"]
+    assert "".join(tokens) == "The answer is 42.", "tokens should arrive as fragments"
+
+    done_name, done_data = events[-1]
+    assert done_name == "done"
+    assert done_data["done"] is True
+    assert done_data["sources"] == [
+        {
+            "content": "chunk about topic",
+            "document": "doc.pdf",
+            "chunk_index": 0,
+            "score": 0.92,
+        }
+    ]
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
     assert [(m["sender"], m["text"]) for m in history] == [
         ("user", "what?"),
         ("bot", "The answer is 42."),
     ]
+    assert history[1]["sources"] == done_data["sources"], (
+        "the terminal event must carry the sources persisted with the answer"
+    )
+
+
+def test_provider_failure_still_leaves_a_visible_reply(client, fake_vectors, fake_ai, app_module, capsys):
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+
+    def broken_stream(query, context):
+        raise RuntimeError("provider down")
+        yield  # pragma: no cover
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(app_module.AIService, "stream_response", staticmethod(broken_stream))
+    try:
+        response = client.post("/response", json={"query": "what?", "filename": filename})
+    finally:
+        monkeypatch.undo()
+
+    events = parse_sse(response.get_data(as_text=True))
+    names = [name for name, _ in events]
+    assert "error" in names, "a provider failure must surface as an error event"
+
+    error_data = next(data for name, data in events if name == "error")
+    assert error_data["error"], "the error event should carry a readable message"
+
+    history = client.get(f"/messages?filename={filename}").get_json()["messages"]
+    assert [m["sender"] for m in history] == ["user", "bot"], (
+        "a failed turn must still end with an assistant reply, not a stranded question"
+    )
+    assert error_data["error"] in history[-1]["text"]
+
+
+def test_primary_provider_failure_falls_back_to_secondary(app_module, monkeypatch):
+    """The primary provider failing before any token hands off to the fallback."""
+    from services.ai_service import AIService
+    from services.groq_service import GroqService
+    from services.google_service import GoogleService
+
+    monkeypatch.setattr(config, "MODE", "groq")
+
+    def primary_stream(query, context):
+        raise RuntimeError("primary down")
+        yield  # pragma: no cover
+
+    def fallback_stream(query, context):
+        yield "fallback "
+
+    monkeypatch.setattr(
+        GroqService, "stream_response", staticmethod(primary_stream)
+    )
+    monkeypatch.setattr(
+        GoogleService, "stream_response", staticmethod(fallback_stream)
+    )
+
+    tokens = list(AIService.stream_response("q", "ctx"))
+    assert "".join(tokens) == "fallback "
+
+
+def test_midstream_primary_failure_does_not_replay_via_fallback(app_module, monkeypatch):
+    """A primary that dies mid-stream surfaces the error instead of restarting."""
+    from services.ai_service import AIService
+    from services.groq_service import GroqService
+    from services.google_service import GoogleService
+
+    monkeypatch.setattr(config, "MODE", "groq")
+
+    def primary_stream(query, context):
+        yield "partial"
+        raise RuntimeError("midstream failure")
+
+    fallback_calls = []
+
+    def fallback_stream(query, context):
+        fallback_calls.append((query, context))
+        yield "fallback"
+
+    monkeypatch.setattr(
+        GroqService, "stream_response", staticmethod(primary_stream)
+    )
+    monkeypatch.setattr(
+        GoogleService, "stream_response", staticmethod(fallback_stream)
+    )
+
+    with pytest.raises(RuntimeError):
+        list(AIService.stream_response("q", "ctx"))
+
+    assert fallback_calls == [], "fallback must not duplicate a half-streamed answer"
 
 
 def test_delete_removes_everything_with_no_orphans(client, fake_storage, fake_vectors, repo):
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+    client.post("/response", json={"query": "what?", "filename": filename})
+
+    response = client.delete(f"/files/remove?path={filename}")
+
+    assert response.status_code == 200
+    assert fake_storage.blobs == {}
+    assert fake_vectors.deleted == [filename]
+    assert repo.list_files() == []
+    assert client.get(f"/messages?filename={filename}").get_json()["messages"] == []
+    assert client.get("/files").get_json()["files"] == []
+
+
+def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
     client.post("/response", json={"query": "what?", "filename": filename})

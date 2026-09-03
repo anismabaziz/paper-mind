@@ -20,6 +20,7 @@ class VectorService:
 
     @staticmethod
     def query_vectors(embedding, filename, top_k=3):
+        """Return retrieved chunks as source dicts the repository can persist."""
         search_results = config.vector_index.query(
             vector=embedding,
             top_k=top_k,
@@ -29,13 +30,23 @@ class VectorService:
 
         matches = search_results.get("matches", []) if isinstance(search_results, dict) else getattr(search_results, "matches", [])
 
-        contexts = []
+        sources = []
         for match in matches or []:
             metadata = match.get("metadata", {}) if isinstance(match, dict) else getattr(match, "metadata", {})
-            if metadata and metadata.get("content"):
-                contexts.append(metadata["content"])
+            content = metadata.get("content") if metadata else None
+            if not content:
+                continue
+            score = match.get("score", 0.0) if isinstance(match, dict) else (getattr(match, "score", 0.0) or 0.0)
+            sources.append(
+                {
+                    "content": content,
+                    "document": metadata.get("pdf_name", filename),
+                    "chunk_index": metadata.get("chunk_index", 0),
+                    "score": float(score),
+                }
+            )
 
-        return contexts
+        return sources
 
     @staticmethod
     def delete_by_filename(filename):

@@ -38,3 +38,23 @@ class GoogleService:
                 return "\n".join(collected_parts)
 
         return "I don't know based on the given context."
+
+    @staticmethod
+    def stream_response(query: str, context: str):
+        system_instruction = (
+            "You must only answer questions based on the provided context. "
+            "If the context does not contain the answer, say 'I don't know based on the given context.' "
+            "Do not use any outside knowledge."
+        )
+
+        for chunk in config.genai_client.models.generate_content_stream(
+            model=CHAT_MODEL,
+            config=types.GenerateContentConfig(system_instruction=system_instruction),
+            contents=[
+                f"Context: {context}",
+                query,
+            ],
+        ):
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text

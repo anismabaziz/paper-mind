@@ -62,6 +62,19 @@ class Message(Base):
     )
 
 
+class Source(Base):
+    __tablename__ = "sources"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    message_id: Mapped[str] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE")
+    )
+    content: Mapped[str] = mapped_column(String(8192))
+    document: Mapped[str] = mapped_column(String(255))
+    chunk_index: Mapped[int] = mapped_column()
+    score: Mapped[float] = mapped_column()
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -203,11 +216,26 @@ class Repository:
 
     # -- messages ---------------------------------------------------------
 
-    def add_message(self, conversation_id: str, sender: str, text: str) -> None:
+    def add_message(
+        self, conversation_id: str, sender: str, text: str, sources=None
+    ) -> str:
         with self._session_factory() as session, session.begin():
-            session.add(
-                Message(conversation_id=conversation_id, sender=sender, text=text)
+            message = Message(
+                conversation_id=conversation_id, sender=sender, text=text
             )
+            session.add(message)
+            session.flush()
+            for source in sources or []:
+                session.add(
+                    Source(
+                        message_id=message.id,
+                        content=source["content"],
+                        document=source["document"],
+                        chunk_index=source["chunk_index"],
+                        score=source["score"],
+                    )
+                )
+            return message.id
 
     def get_messages(self, conversation_id: str) -> list[dict]:
         with self._session_factory() as session:
@@ -221,10 +249,32 @@ class Repository:
                     "id": m.id,
                     "text": m.text,
                     "sender": m.sender,
+                    "sources": [
+                        self._source_dict(s) for s in self._sources_for(session, m.id)
+                    ],
                     "created_at": m.created_at.isoformat() if m.created_at else None,
                 }
                 for m in rows
             ]
+
+    @staticmethod
+    def _sources_for(session, message_id: str) -> list[Source]:
+        return list(
+            session.scalars(
+                select(Source)
+                .where(Source.message_id == message_id)
+                .order_by(Source.chunk_index)
+            ).all()
+        )
+
+    @staticmethod
+    def _source_dict(source: Source) -> dict:
+        return {
+            "content": source.content,
+            "document": source.document,
+            "chunk_index": source.chunk_index,
+            "score": source.score,
+        }
 
     def delete_messages(self, conversation_id: str) -> None:
         with self._session_factory() as session, session.begin():
