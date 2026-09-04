@@ -78,8 +78,10 @@ def test_import_does_not_build_clients(monkeypatch):
 
 
 def test_booting_without_env_exits_readably():
-    """End to end: starting the app with an empty env exits with the named
-    variable on stderr, not a library traceback."""
+    """
+        End to end: starting the app with an empty env exits with the named
+            variable on stderr, not a library traceback.
+    """
     import pathlib
 
     backend_dir = pathlib.Path(__file__).resolve().parent.parent

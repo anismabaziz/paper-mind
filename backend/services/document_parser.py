@@ -1,9 +1,10 @@
-"""Document parser seam: per-format extraction, shared chunking.
+"""
+    Document parser seam: per-format extraction, shared chunking.
 
-Extraction lives behind :class:`DocumentParser` so a new format becomes a
-new parser rather than a rewrite. Chunking is intentionally owned by the
-seam itself, not by any parser, so swapping parsers cannot silently change
-chunk sizes or overlap.
+    Extraction lives behind :class:`DocumentParser` so a new format becomes a
+    new parser rather than a rewrite. Chunking is intentionally owned by the
+    seam itself, not by any parser, so swapping parsers cannot silently change
+    chunk sizes or overlap.
 """
 
 import os

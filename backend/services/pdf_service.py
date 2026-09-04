@@ -1,4 +1,6 @@
-"""PDF parser: the first implementation behind the document parser seam."""
+"""
+    PDF parser: the first implementation behind the document parser seam.
+"""
 
 import io
 import re

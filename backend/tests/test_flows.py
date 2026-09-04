@@ -1,8 +1,9 @@
-"""Service-layer flow tests.
+"""
+    Service-layer flow tests.
 
-Every external edge is a fake: vector index, embeddings, LLM, and storage
-are monkeypatched; the repository runs against an in-memory sqlite. No test
-touches Pinecone, an LLM provider, a real Postgres, or the real upload dir.
+    Every external edge is a fake: vector index, embeddings, LLM, and storage
+    are monkeypatched; the repository runs against an in-memory sqlite. No test
+    touches Pinecone, an LLM provider, a real Postgres, or the real upload dir.
 """
 
 import config
@@ -44,7 +45,9 @@ def repo():
 
 
 class FakeStorage:
-    """In-memory stand-in for the storage seam."""
+    """
+        In-memory stand-in for the storage seam.
+    """
 
     def __init__(self):
         self.blobs = {}
@@ -149,7 +152,9 @@ def fake_ai(monkeypatch, app_module):
 
 
 def parse_sse(body):
-    """Split an SSE body into (event, data) tuples."""
+    """
+        Split an SSE body into (event, data) tuples.
+    """
     events = []
     for block in body.split("\n\n"):
         if not block.strip():
@@ -278,7 +283,9 @@ def test_provider_failure_still_leaves_a_visible_reply(client, fake_vectors, fak
 
 
 def test_primary_provider_failure_falls_back_to_secondary(app_module, monkeypatch):
-    """The primary provider failing before any token hands off to the fallback."""
+    """
+        The primary provider failing before any token hands off to the fallback.
+    """
     from services.ai_service import AIService
     from services.groq_service import GroqService
     from services.google_service import GoogleService
@@ -304,7 +311,9 @@ def test_primary_provider_failure_falls_back_to_secondary(app_module, monkeypatc
 
 
 def test_midstream_primary_failure_does_not_replay_via_fallback(app_module, monkeypatch):
-    """A primary that dies mid-stream surfaces the error instead of restarting."""
+    """
+        A primary that dies mid-stream surfaces the error instead of restarting.
+    """
     from services.ai_service import AIService
     from services.groq_service import GroqService
     from services.google_service import GoogleService
@@ -335,7 +344,9 @@ def test_midstream_primary_failure_does_not_replay_via_fallback(app_module, monk
 
 
 def test_primary_success_does_not_invoke_fallback(app_module, monkeypatch):
-    """When the primary streams fully, the fallback must never be called."""
+    """
+        When the primary streams fully, the fallback must never be called.
+    """
     from services.ai_service import AIService
     from services.groq_service import GroqService
     from services.google_service import GoogleService
@@ -405,7 +416,9 @@ def test_delete_removes_everything_with_no_orphans(client, fake_storage, fake_ve
 
 
 def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
-    """Running the migrations on an empty database produces the app schema."""
+    """
+        Running the migrations on an empty database produces the app schema.
+    """
     db_path = tmp_path / "fresh.db"
     backend_dir = pathlib.Path(__file__).resolve().parent.parent
     env = {

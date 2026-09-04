@@ -1,9 +1,10 @@
-"""Tests for the document parser seam and retrieval shaping.
+"""
+    Tests for the document parser seam and retrieval shaping.
 
-The parser seam owns extraction and chunking; the PDF implementation is one
-parser among future ones. Retrieval shaping turns raw vector matches into a
-deduped, score-ordered, bounded source list. Both run against fakes or
-in-memory data only.
+    The parser seam owns extraction and chunking; the PDF implementation is one
+    parser among future ones. Retrieval shaping turns raw vector matches into a
+    deduped, score-ordered, bounded source list. Both run against fakes or
+    in-memory data only.
 """
 
 import pytest
@@ -68,7 +69,9 @@ class FakeVectorIndex:
 
 @pytest.fixture
 def fake_index(monkeypatch):
-    """Install a fake vector index behind the config.vector_index seam."""
+    """
+        Install a fake vector index behind the config.vector_index seam.
+    """
     installed = {}
 
     def install(matches):

@@ -1,7 +1,8 @@
-"""Storage seam for uploaded PDF bytes.
+"""
+    Storage seam for uploaded PDF bytes.
 
-The app only knows the interface below; swapping local disk for a bucket
-service means implementing the same five methods.
+    The app only knows the interface below; swapping local disk for a bucket
+    service means implementing the same five methods.
 """
 
 from pathlib import Path

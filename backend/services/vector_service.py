@@ -8,10 +8,11 @@ MAX_RETRIEVED_SOURCES = 5
 
 
 def shape_sources(sources, limit=MAX_RETRIEVED_SOURCES):
-    """Dedupe by content, order by score, and bound the result.
+    """
+        Dedupe by content, order by score, and bound the result.
 
-    The returned order is the order the LLM receives as context and the
-    order the Sources panel shows, so both always agree.
+            The returned order is the order the LLM receives as context and the
+            order the Sources panel shows, so both always agree.
     """
     shaped = {}
     for source in sorted(sources, key=lambda s: s["score"], reverse=True):
@@ -22,7 +23,9 @@ def shape_sources(sources, limit=MAX_RETRIEVED_SOURCES):
 
 
 def matches_to_sources(matches, filename):
-    """Turn raw index matches into the shared source shape."""
+    """
+        Turn raw index matches into the shared source shape.
+    """
     sources = []
     for match in matches or []:
         metadata = (
@@ -66,7 +69,9 @@ class VectorService:
 
     @staticmethod
     def query_vectors(embedding, filename, top_k=TOP_K):
-        """Return shaped sources: deduped, score-ordered, bounded."""
+        """
+            Return shaped sources: deduped, score-ordered, bounded.
+        """
         search_results = config.vector_index.query(
             vector=embedding,
             top_k=top_k,

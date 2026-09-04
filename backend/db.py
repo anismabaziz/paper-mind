@@ -1,7 +1,8 @@
-"""Database engine, ORM models, and the repository seam.
+"""
+    Database engine, ORM models, and the repository seam.
 
-All relational access goes through :class:`Repository`; routes and services
-never touch a Session directly.
+    All relational access goes through :class:`Repository`; routes and services
+    never touch a Session directly.
 """
 
 import uuid
@@ -103,7 +104,9 @@ SessionLocal = None
 
 
 def get_session_factory():
-    """Build the engine and session factory on first use, from the live env."""
+    """
+        Build the engine and session factory on first use, from the live env.
+    """
     global _engine, SessionLocal
     if _engine is None:
         _engine = create_engine(config.DATABASE_URL, **_engine_kwargs(config.DATABASE_URL))
@@ -119,7 +122,9 @@ def _to_dict(record, **extra):
 
 
 class Repository:
-    """Repository seam: the only relational access point for the app."""
+    """
+        Repository seam: the only relational access point for the app.
+    """
 
     def __init__(self, session_factory=None):
         # Resolved lazily so importing this module never requires env vars.

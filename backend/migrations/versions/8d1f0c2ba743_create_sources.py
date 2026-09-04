@@ -1,9 +1,9 @@
-"""create sources
+"""
+    create sources
 
-Revision ID: 8d1f0c2ba743
-Revises: 4206402c3f83
-Create Date: 2026-09-04
-
+    Revision ID: 8d1f0c2ba743
+    Revises: 4206402c3f83
+    Create Date: 2026-09-04
 """
 from typing import Sequence, Union
 
@@ -19,7 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
+    """
+        Upgrade schema.
+    """
     op.create_table('sources',
     sa.Column('id', sa.String(length=32), nullable=False),
     sa.Column('message_id', sa.String(length=32), nullable=False),
@@ -33,5 +35,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    """
+        Downgrade schema.
+    """
     op.drop_table('sources')

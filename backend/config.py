@@ -1,9 +1,10 @@
-"""Application configuration.
+"""
+    Application configuration.
 
-Environment variables are validated lazily: importing this module never
-builds a client or touches an external service. Clients are created on
-first access through module-level ``__getattr__`` so routes only pay for
-what they actually use.
+    Environment variables are validated lazily: importing this module never
+    builds a client or touches an external service. Clients are created on
+    first access through module-level ``__getattr__`` so routes only pay for
+    what they actually use.
 """
 
 import os
@@ -41,7 +42,9 @@ PROVIDER_API_KEYS = {"google": "GOOGLE_API_KEY", "groq": "GROQ_API_KEY"}
 
 
 def missing_required_vars():
-    """Return the list of required environment variables that are unset or invalid."""
+    """
+        Return the list of required environment variables that are unset or invalid.
+    """
     # Read MODE fresh from the environment so validation reflects the
     # process's current state, not whatever was set at import time.
     mode = os.getenv("MODE", "google").lower()
@@ -61,7 +64,9 @@ def missing_required_vars():
 
 
 def validate():
-    """Exit with a readable error if any required variable is missing."""
+    """
+        Exit with a readable error if any required variable is missing.
+    """
     missing = missing_required_vars()
     if missing:
         print("PaperMind backend is missing required configuration:", file=sys.stderr)

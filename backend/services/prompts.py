@@ -1,4 +1,6 @@
-"""Prompts shared by the chat providers."""
+"""
+    Prompts shared by the chat providers.
+"""
 
 SYSTEM_INSTRUCTION = (
     "You must only answer questions based on the provided context. "

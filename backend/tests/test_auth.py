@@ -1,7 +1,8 @@
-"""Auth tests: hashing, token issue/verify, demo bypass.
+"""
+    Auth tests: hashing, token issue/verify, demo bypass.
 
-Auth flows run against a fake repository (dict-backed users) so no database
-is touched; endpoint tests go through the Flask test client.
+    Auth flows run against a fake repository (dict-backed users) so no database
+    is touched; endpoint tests go through the Flask test client.
 """
 
 import datetime

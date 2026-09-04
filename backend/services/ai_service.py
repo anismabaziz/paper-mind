@@ -31,11 +31,12 @@ class AIService:
 
     @staticmethod
     def stream_response(query: str, context: str):
-        """Yield answer fragments from the primary provider.
+        """
+            Yield answer fragments from the primary provider.
 
-        If the primary provider fails before producing any output, the
-        fallback provider answers instead. A failure that happens
-        mid-stream is re-raised so the caller can surface it.
+                    If the primary provider fails before producing any output, the
+                    fallback provider answers instead. A failure that happens
+                    mid-stream is re-raised so the caller can surface it.
         """
         primary, fallback = AIService._providers()
         emitted = False

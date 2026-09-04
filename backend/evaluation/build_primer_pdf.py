@@ -1,11 +1,12 @@
-"""Build the in-repo sample PDF from its markdown source.
+"""
+    Build the in-repo sample PDF from its markdown source.
 
-Run from backend/ when the primer source changes:
+    Run from backend/ when the primer source changes:
 
-    python -m evaluation.build_primer_pdf
+        python -m evaluation.build_primer_pdf
 
-The generated file is committed, so this only needs rerunning after an
-edit to sample_docs/papermind-rag-primer.md.
+    The generated file is committed, so this only needs rerunning after an
+    edit to sample_docs/papermind-rag-primer.md.
 """
 
 from pathlib import Path

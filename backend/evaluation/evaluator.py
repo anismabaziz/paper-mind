@@ -1,14 +1,15 @@
-"""End-to-end evaluation of the RAG pipeline against the ground-truth fixture.
+"""
+    End-to-end evaluation of the RAG pipeline against the ground-truth fixture.
 
-Every external capability is injected:
+    Every external capability is injected:
 
-- ``embed_fn``: texts -> list of embedding vectors
-- ``index``: Pinecone-compatible store with ``upsert``, ``query``, ``delete``
-- ``generate_fn``: (query, context) -> answer text
-- ``judge_fn``: judge prompt -> verdict reply (see evaluation.judge)
+    - ``embed_fn``: texts -> list of embedding vectors
+    - ``index``: Pinecone-compatible store with ``upsert``, ``query``, ``delete``
+    - ``generate_fn``: (query, context) -> answer text
+    - ``judge_fn``: judge prompt -> verdict reply (see evaluation.judge)
 
-Tests wire deterministic fakes into all four; the CLI wires the real
-providers, and only behind ``--live``.
+    Tests wire deterministic fakes into all four; the CLI wires the real
+    providers, and only behind ``--live``.
 """
 
 import json
@@ -56,13 +57,14 @@ def read_document(filename: str, docs_dir=SAMPLE_DOCS_DIR) -> bytes:
 def index_document(
     filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR, pdf_name=None
 ):
-    """Parse, chunk, embed, and upsert one sample document.
+    """
+        Parse, chunk, embed, and upsert one sample document.
 
-    ``pdf_name`` names the stored vectors (defaults to ``filename``), so a
-    live run can namespace them under an eval- prefix without changing
-    which file is read. Uses the same parser seam and vector shape as the
-    /process-file route, so the evaluator exercises the real ingestion
-    path.
+            ``pdf_name`` names the stored vectors (defaults to ``filename``), so a
+            live run can namespace them under an eval- prefix without changing
+            which file is read. Uses the same parser seam and vector shape as the
+            /process-file route, so the evaluator exercises the real ingestion
+            path.
     """
     text = DocumentParser.for_filename(filename).extract_text(
         read_document(filename, docs_dir)
@@ -90,7 +92,9 @@ def remove_document(filename: str, index):
 
 
 def retrieve(query_embedding, filename, index, k=DEFAULT_K, prefix=""):
-    """Fetch candidates and shape them exactly like the /response route."""
+    """
+        Fetch candidates and shape them exactly like the /response route.
+    """
     results = index.query(
         vector=query_embedding,
         top_k=FETCH_K,
@@ -115,10 +119,11 @@ def evaluate(
     docs_dir=SAMPLE_DOCS_DIR,
     prefix="",
 ) -> EvaluationReport:
-    """Run every fixture question through retrieval and generation.
+    """
+        Run every fixture question through retrieval and generation.
 
-    ``judge_fn`` may be None to skip faithfulness scoring (retrieval-only
-    runs and tests that focus on the metrics).
+            ``judge_fn`` may be None to skip faithfulness scoring (retrieval-only
+            runs and tests that focus on the metrics).
     """
     question_results = []
     per_question = []

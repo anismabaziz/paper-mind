@@ -1,11 +1,12 @@
-"""Opt-in live evaluation CLI.
+"""
+    Opt-in live evaluation CLI.
 
-Without ``--live`` this refuses to run: the point of the evaluator is a
-measured number, but a live run costs provider calls and writes into the
-real vector index, so it only ever happens on purpose.
+    Without ``--live`` this refuses to run: the point of the evaluator is a
+    measured number, but a live run costs provider calls and writes into the
+    real vector index, so it only ever happens on purpose.
 
-    python -m evaluation.cli --live            # full run with LLM judge
-    python -m evaluation.cli --live --no-judge # retrieval metrics only
+        python -m evaluation.cli --live            # full run with LLM judge
+        python -m evaluation.cli --live --no-judge # retrieval metrics only
 """
 
 import argparse
@@ -25,7 +26,9 @@ EVAL_PREFIX = "eval-"
 
 
 def make_live_components():
-    """Wire the evaluator to the real providers via config's lazy clients."""
+    """
+        Wire the evaluator to the real providers via config's lazy clients.
+    """
     # Reuse the app's own embedding and generation paths (provider,
     # fallback, prompt) so the numbers describe what users actually get.
     from services.ai_service import AIService

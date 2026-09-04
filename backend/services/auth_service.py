@@ -1,8 +1,9 @@
-"""Vendor-neutral authentication: bcrypt password hashing and JWT issuing.
+"""
+    Vendor-neutral authentication: bcrypt password hashing and JWT issuing.
 
-The ``require_auth`` decorator protects endpoints. When demo mode is on it
-lets every request through so a local run needs zero clicks; the decorator
-itself stays in place either way.
+    The ``require_auth`` decorator protects endpoints. When demo mode is on it
+    lets every request through so a local run needs zero clicks; the decorator
+    itself stays in place either way.
 """
 
 import datetime
@@ -55,7 +56,9 @@ class AuthError(Exception):
 
 
 def verify_token(token: str) -> str:
-    """Return the token's subject email, or raise AuthError."""
+    """
+        Return the token's subject email, or raise AuthError.
+    """
     try:
         payload = jwt.decode(token, _secret(), algorithms=["HS256"])
     except jwt.ExpiredSignatureError:

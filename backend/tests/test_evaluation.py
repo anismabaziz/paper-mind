@@ -1,13 +1,14 @@
-"""Tests for the evaluation package.
+"""
+    Tests for the evaluation package.
 
-Everything runs offline against deterministic fakes: a hash-based
-embedder, an in-memory cosine index, a canned generator, and a canned
-judge. The only real component exercised is the document parser, which is
-also real in production ingestion.
+    Everything runs offline against deterministic fakes: a hash-based
+    embedder, an in-memory cosine index, a canned generator, and a canned
+    judge. The only real component exercised is the document parser, which is
+    also real in production ingestion.
 
-Metric values are asserted on a synthetic fixture whose vectors make
-retrieval fully controllable; the real fixture run is a plumbing check,
-because a lexical fake embedder says nothing about real embedding quality.
+    Metric values are asserted on a synthetic fixture whose vectors make
+    retrieval fully controllable; the real fixture run is a plumbing check,
+    because a lexical fake embedder says nothing about real embedding quality.
 """
 
 import hashlib
@@ -39,10 +40,11 @@ def _tokens(text):
 
 
 def hash_embed(texts):
-    """Deterministic TF embeddings over content words (stable hashing).
+    """
+        Deterministic TF embeddings over content words (stable hashing).
 
-    Good enough to exercise retrieval plumbing; deliberately not a
-    semantic model, so tests never assert retrieval perfection from it.
+            Good enough to exercise retrieval plumbing; deliberately not a
+            semantic model, so tests never assert retrieval perfection from it.
     """
     vectors = []
     for text in texts:
@@ -54,7 +56,9 @@ def hash_embed(texts):
 
 
 class InMemoryIndex:
-    """Pinecone-shaped store: upsert, filtered cosine query, delete."""
+    """
+        Pinecone-shaped store: upsert, filtered cosine query, delete.
+    """
 
     def __init__(self):
         self.vectors = []
@@ -107,10 +111,11 @@ def indexed_index(fixture):
 
 
 def one_hot_embed(texts, token_map, dims=None):
-    """Embedding that maps marker tokens to fixed unit vectors.
+    """
+        Embedding that maps marker tokens to fixed unit vectors.
 
-    ``token_map`` maps a token to an axis, so tests point queries at
-    exactly the chunks they should retrieve.
+            ``token_map`` maps a token to an axis, so tests point queries at
+            exactly the chunks they should retrieve.
     """
     dims = dims or (max(token_map.values()) + 1)
     vectors = []
@@ -192,8 +197,10 @@ class TestFixtureIntegrity:
             assert (evaluator.SAMPLE_DOCS_DIR / doc["filename"]).is_file()
 
     def test_every_question_has_gold_snippets_in_its_document(self, fixture):
-        """The fixture stays honest: gold snippets must survive the real
-        parser, meaning retrieval could actually find them."""
+        """
+            The fixture stays honest: gold snippets must survive the real
+                    parser, meaning retrieval could actually find them.
+        """
         for item in fixture["questions"]:
             text = DocumentParser.for_filename(item["document"]).extract_text(
                 evaluator.read_document(item["document"])
@@ -213,11 +220,12 @@ class TestFixtureIntegrity:
 class TestEvaluator:
     @staticmethod
     def synthetic_setup():
-        """Fixture + index where retrieval is pinned by marker tokens.
+        """
+            Fixture + index where retrieval is pinned by marker tokens.
 
-        Each question has a marker token ("both"/"one"/"none") that only
-        its own seed chunks contain, so what the top-k returns is fully
-        controlled by the test.
+                    Each question has a marker token ("both"/"one"/"none") that only
+                    its own seed chunks contain, so what the top-k returns is fully
+                    controlled by the test.
         """
         fixture = {
             "documents": [{"filename": "synthetic.pdf"}],
@@ -295,8 +303,10 @@ class TestEvaluator:
         assert report.retrieval.recall == pytest.approx(2 / 3)
 
     def test_partial_recall_when_gold_exceeds_top_k(self):
-        """One gold snippet beyond the top-k chunk lowers recall but the
-        question can still count as a hit."""
+        """
+            One gold snippet beyond the top-k chunk lowers recall but the
+                    question can still count as a hit.
+        """
         fixture, index, embed = self.synthetic_setup()
         report = evaluator.evaluate(
             fixture, index, embed, canned_generate, judge_fn=None, k=1
@@ -318,8 +328,10 @@ class TestEvaluator:
         assert report.per_question[0]["verdict"] == "faithful"
 
     def test_real_fixture_plumbing_end_to_end(self, fixture, indexed_index):
-        """Smoke check on the committed fixture: every question flows
-        through parsing, indexing, retrieval, and reporting."""
+        """
+            Smoke check on the committed fixture: every question flows
+                    through parsing, indexing, retrieval, and reporting.
+        """
         report = evaluator.evaluate(
             fixture, indexed_index, hash_embed, canned_generate, judge_fn=None
         )
@@ -332,9 +344,11 @@ class TestEvaluator:
         assert 0.0 <= report.retrieval.recall <= 1.0
 
     def test_prefixed_live_style_run_matches_fixture_documents(self, fixture):
-        """Regression: a live run indexes docs under an eval- prefix; the
-        retrieval filter must use the same prefixed name or every query
-        silently matches nothing."""
+        """
+            Regression: a live run indexes docs under an eval- prefix; the
+                    retrieval filter must use the same prefixed name or every query
+                    silently matches nothing.
+        """
         index = InMemoryIndex()
         for doc in fixture["documents"]:
             evaluator.index_document(
