@@ -1,6 +1,7 @@
 import json
-import uuid
 import os
+import time
+import uuid
 
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from flask_cors import CORS
@@ -123,12 +124,16 @@ def process_file():
         if not filename:
             return jsonify({"error": "Filename is required"}), 400
 
+        wall_start = time.time()
+
         # 1. Parse & Extract (format-specific parser, shared chunking)
         if not storage.exists(filename):
             return jsonify({"error": "Failed to fetch file"}), 400
         file_content = storage.open(filename)
 
+        parse_start = time.time()
         chunks, page_numbers = DocumentParser.get_chunks(filename, file_content)
+        parse_elapsed = time.time() - parse_start
 
         # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
         if not chunks:
@@ -138,8 +143,12 @@ def process_file():
             VectorService.delete_by_filename(filename)
         except Exception as e:
             print(f"/process-file vector cleanup warning for {filename}: {e}")
+        embed_start = time.time()
         embeddings = AIService.get_embeddings(chunks)
+        embed_elapsed = time.time() - embed_start
+        upsert_start = time.time()
         VectorService.upsert_vectors(embeddings, chunks, filename, page_numbers=page_numbers)
+        upsert_elapsed = time.time() - upsert_start
 
         # 3. Create Conversation (reuse one if the file is re-processed)
         file_record = repository.get_file(filename)
@@ -148,6 +157,13 @@ def process_file():
 
         # 4. Mark as Processed
         repository.set_processed(filename, True)
+
+        wall_elapsed = time.time() - wall_start
+        print(
+            f"/process-file {filename}: {len(chunks)} chunks | "
+            f"parse {parse_elapsed:.2f}s embed {embed_elapsed:.2f}s "
+            f"upsert {upsert_elapsed:.2f}s total {wall_elapsed:.2f}s"
+        )
 
         return jsonify({"message": "PDF processed"}), 200
     except Exception as e:

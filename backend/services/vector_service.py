@@ -2,6 +2,7 @@ import hashlib
 import uuid
 
 import config
+from services.concurrency import map_batches_concurrently
 
 # How many candidates the index is asked for vs. how many survive shaping.
 # Asking for more than we keep gives dedupe room to work.
@@ -65,33 +66,51 @@ class VectorService:
     UPSERT_BATCH_SIZE = 100
 
     @staticmethod
+    def _build_vectors(batch_embeddings, texts, filename, page_numbers, offset):
+        vectors = []
+        for j, embedding in enumerate(batch_embeddings):
+            idx = offset + j
+            chunk = texts[idx]
+            metadata = {
+                "content": chunk,
+                "pdf_name": filename,
+                "chunk_index": idx,
+                "page_no": page_numbers[idx] if page_numbers is not None and idx < len(page_numbers) else None,
+                "content_hash": _content_hash(chunk),
+            }
+            vectors.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "values": embedding,
+                    "metadata": metadata,
+                }
+            )
+        return vectors
+
+    @staticmethod
     def upsert_vectors(embeddings, texts, filename, page_numbers=None):
         if not embeddings:
             return None
-        last_response = None
+
+        num_batches = (len(embeddings) + VectorService.UPSERT_BATCH_SIZE - 1) // VectorService.UPSERT_BATCH_SIZE
+
+        # Single batch: preserve exact prior behavior without pool overhead
+        if num_batches <= 1:
+            vectors = VectorService._build_vectors(embeddings, texts, filename, page_numbers, 0)
+            return config.vector_index.upsert(vectors)
+
+        batches: list[list[dict]] = []
         for start in range(0, len(embeddings), VectorService.UPSERT_BATCH_SIZE):
             batch_embeddings = embeddings[start : start + VectorService.UPSERT_BATCH_SIZE]
-            offset = start
-            vectors = []
-            for j, embedding in enumerate(batch_embeddings):
-                idx = offset + j
-                chunk = texts[idx]
-                metadata = {
-                    "content": chunk,
-                    "pdf_name": filename,
-                    "chunk_index": idx,
-                    "page_no": page_numbers[idx] if page_numbers is not None and idx < len(page_numbers) else None,
-                    "content_hash": _content_hash(chunk),
-                }
-                vectors.append(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "values": embedding,
-                        "metadata": metadata,
-                    }
-                )
-            last_response = config.vector_index.upsert(vectors)
-        return last_response
+            vectors = VectorService._build_vectors(batch_embeddings, texts, filename, page_numbers, start)
+            batches.append(vectors)
+
+        ordered_responses = map_batches_concurrently(
+            batches,
+            config.vector_index.upsert,
+            label=f"VectorService.upsert_vectors: {len(embeddings)} vectors",
+        )
+        return ordered_responses[-1] if ordered_responses else None
 
     @staticmethod
     def query_vectors(embedding, filename, top_k=TOP_K):

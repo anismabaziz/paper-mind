@@ -3,6 +3,7 @@ import time
 
 import config
 from google.genai import types
+from services.concurrency import map_batches_concurrently
 from services.google_service import GoogleService
 from services.groq_service import GroqService
 
@@ -45,10 +46,16 @@ class AIService:
         if not texts:
             return []
 
-        all_values = []
-        for i in range(0, len(texts), AIService.EMBED_BATCH_SIZE):
-            batch = texts[i : i + AIService.EMBED_BATCH_SIZE]
-            result = AIService._embed_batch_with_retry(batch)
+        batches = [texts[i : i + AIService.EMBED_BATCH_SIZE] for i in range(0, len(texts), AIService.EMBED_BATCH_SIZE)]
+
+        results = map_batches_concurrently(
+            batches,
+            AIService._embed_batch_with_retry,
+            label=f"AIService.get_embeddings: {len(texts)} texts",
+        )
+
+        all_values: list = []
+        for result in results:
             all_values.extend(embedding.values for embedding in result.embeddings)
         return all_values
 
