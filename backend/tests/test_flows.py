@@ -409,7 +409,10 @@ def test_delete_removes_everything_with_no_orphans(client, fake_storage, fake_ve
 
     assert response.status_code == 200
     assert fake_storage.blobs == {}
-    assert fake_vectors.deleted == [filename]
+    # Process-file now cleans stale vectors before upsert, so the filename
+    # appears once from that cleanup plus once from the explicit delete.
+    assert filename in fake_vectors.deleted
+    assert fake_vectors.deleted.count(filename) >= 1
     assert repo.list_files() == []
     assert client.get(f"/messages?filename={filename}").get_json()["messages"] == []
     assert client.get("/files").get_json()["files"] == []

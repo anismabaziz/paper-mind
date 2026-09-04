@@ -1,20 +1,56 @@
+import re
+import time
+
 import config
 from google.genai import types
 from services.google_service import GoogleService
 from services.groq_service import GroqService
 
 class AIService:
+    # Gemini BatchEmbedContents is capped at 100 contents per request
+    EMBED_BATCH_SIZE = 100
+
+    @staticmethod
+    def _embed_batch_with_retry(batch, max_retries=3):
+        last_exc = None
+        for attempt in range(max_retries):
+            try:
+                result = config.genai_client.models.embed_content(
+                    model=config.EMBEDDING_MODEL,
+                    contents=batch,
+                    config=types.EmbedContentConfig(output_dimensionality=768),
+                )
+                return result
+            except Exception as exc:
+                last_exc = exc
+                msg = str(exc)
+                # 429 quota – respect RetryInfo if present, else exponential backoff
+                is_rate_limit = "429" in msg or "RESOURCE_EXHAUSTED" in msg or "Quota exceeded" in msg
+                if is_rate_limit and attempt < max_retries - 1:
+                    m = re.search(r"retry in ([\d.]+)s", msg)
+                    delay = float(m.group(1)) + 1 if m else (2 ** attempt) * 2
+                    # cap so a single batch never blocks longer than ~60s
+                    delay = min(delay, 60)
+                    print(f"Embedding rate-limited, retry {attempt + 1}/{max_retries} after {delay:.1f}s: {exc}")
+                    time.sleep(delay)
+                    continue
+                raise
+        raise last_exc  # pragma: no cover
+
     @staticmethod
     def get_embeddings(texts):
         if isinstance(texts, str):
             texts = [texts]
-        
-        result = config.genai_client.models.embed_content(
-            model=config.EMBEDDING_MODEL,
-            contents=texts,
-            config=types.EmbedContentConfig(output_dimensionality=768),
-        )
-        return [embedding.values for embedding in result.embeddings]
+
+        if not texts:
+            return []
+
+        all_values = []
+        for i in range(0, len(texts), AIService.EMBED_BATCH_SIZE):
+            batch = texts[i : i + AIService.EMBED_BATCH_SIZE]
+            result = AIService._embed_batch_with_retry(batch)
+            all_values.extend(embedding.values for embedding in result.embeddings)
+        return all_values
 
     @staticmethod
     def _providers():

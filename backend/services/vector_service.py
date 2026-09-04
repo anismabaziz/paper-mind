@@ -51,21 +51,33 @@ def matches_to_sources(matches, filename):
 
 
 class VectorService:
+    # Pinecone recommends batches well under the 4 MB / 1000-vector limit.
+    # Keep in sync with AIService.EMBED_BATCH_SIZE so one embedding batch maps
+    # to one upsert batch without re-chunking.
+    UPSERT_BATCH_SIZE = 100
+
     @staticmethod
     def upsert_vectors(embeddings, texts, filename):
-        vectors = [
-            {
-                "id": str(uuid.uuid4()),
-                "values": embedding,
-                "metadata": {
-                    "content": texts[i],
-                    "pdf_name": filename,
-                    "chunk_index": i,
-                },
-            }
-            for i, embedding in enumerate(embeddings)
-        ]
-        return config.vector_index.upsert(vectors)
+        if not embeddings:
+            return None
+        last_response = None
+        for start in range(0, len(embeddings), VectorService.UPSERT_BATCH_SIZE):
+            batch_embeddings = embeddings[start : start + VectorService.UPSERT_BATCH_SIZE]
+            offset = start
+            vectors = [
+                {
+                    "id": str(uuid.uuid4()),
+                    "values": embedding,
+                    "metadata": {
+                        "content": texts[offset + j],
+                        "pdf_name": filename,
+                        "chunk_index": offset + j,
+                    },
+                }
+                for j, embedding in enumerate(batch_embeddings)
+            ]
+            last_response = config.vector_index.upsert(vectors)
+        return last_response
 
     @staticmethod
     def query_vectors(embedding, filename, top_k=TOP_K):

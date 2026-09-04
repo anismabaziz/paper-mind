@@ -132,7 +132,14 @@ def process_file():
         text = parser.extract_text(file_content)
         chunks = DocumentParser.split_text(text)
 
-        # 2. Embed & Vectorize
+        # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
+        if not chunks:
+            return jsonify({"error": "No text extracted from document"}), 400
+        # Remove any vectors left from a previous failed attempt
+        try:
+            VectorService.delete_by_filename(filename)
+        except Exception as e:
+            print(f"/process-file vector cleanup warning for {filename}: {e}")
         embeddings = AIService.get_embeddings(chunks)
         VectorService.upsert_vectors(embeddings, chunks, filename)
 
@@ -146,6 +153,9 @@ def process_file():
 
         return jsonify({"message": "PDF processed"}), 200
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"/process-file failed for {locals().get('filename', '?')}: {e}")
         return jsonify({"error": str(e)}), 500
 
 
