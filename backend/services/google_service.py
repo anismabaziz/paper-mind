@@ -1,18 +1,15 @@
 from google.genai import types
-from config import genai_client, CHAT_MODEL
+import config
+from services.prompts import SYSTEM_INSTRUCTION
+
+CHAT_MODEL = config.CHAT_MODEL
 
 class GoogleService:
     @staticmethod
     def generate_response(query: str, context: str) -> str:
-        system_instruction = (
-            "You must only answer questions based on the provided context. "
-            "If the context does not contain the answer, say 'I don't know based on the given context.' "
-            "Do not use any outside knowledge."
-        )
-
-        result = genai_client.models.generate_content(
+        result = config.genai_client.models.generate_content(
             model=CHAT_MODEL,
-            config=types.GenerateContentConfig(system_instruction=system_instruction),
+            config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
                 f"Context: {context}",
                 query,
@@ -36,3 +33,17 @@ class GoogleService:
                 return "\n".join(collected_parts)
 
         return "I don't know based on the given context."
+
+    @staticmethod
+    def stream_response(query: str, context: str):
+        for chunk in config.genai_client.models.generate_content_stream(
+            model=CHAT_MODEL,
+            config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
+            contents=[
+                f"Context: {context}",
+                query,
+            ],
+        ):
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text

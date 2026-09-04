@@ -1,32 +1,41 @@
-import { MessageSquare, Send, ChevronRight, Loader2, Cpu, User, Copy, Check } from "lucide-react";
+import { MessageSquare, Send, ChevronRight, ChevronDown, Loader2, Cpu, User, Copy, Check, FileText } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import usePdfStore from "@/store/pdf-state";
-import { useEffect, useState, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { checkIsProcessed, askQuestion, getMessages } from "@/services/files";
+import { useEffect, useState, useRef, isValidElement, type ComponentPropsWithoutRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { useQuery } from "@tanstack/react-query";
+import { checkIsProcessed, chatStream, getMessages, ISource } from "@/services/files";
 import { cn } from "@/lib/utils";
+
+interface ChatMessage {
+  id: string;
+  text: string;
+  sender: 'user' | 'bot';
+  sources?: ISource[];
+  failed?: boolean;
+}
 
 export default function ChatPDF() {
   const { file } = usePdfStore();
-  const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
-  
+
   const questions = [
     "What is the main topic of this document?",
     "Summarize the key findings",
     "Methodology used in this paper?",
   ];
-  
+
   const [inputValue, setInputValue] = useState("");
-  const [messages, setMessages] = useState<{id: string, text: string, sender: 'user' | 'bot'}[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   const checkProcessedQuery = useQuery({
     queryKey: [file?.name, "is-processed"],
     queryFn: () => checkIsProcessed(file!),
     enabled: !!file,
     refetchInterval: (query) => {
-      // @ts-ignore
       return query.state.data?.is_processed ? false : 3000;
     }
   });
@@ -41,7 +50,7 @@ export default function ChatPDF() {
     if (file) {
       setInputValue("");
       if (messagesQuery.data?.messages) {
-        setMessages(messagesQuery.data.messages as any);
+        setMessages(messagesQuery.data.messages);
       } else {
         setMessages([]);
       }
@@ -57,25 +66,46 @@ export default function ChatPDF() {
     }
   }, [messages]);
 
-  const askMutation = useMutation({
-    mutationFn: (query: string) => askQuestion(query, file!.name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [file?.name, "messages"] });
-    },
-    onError: () => {
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), text: 'Connection lost. Please ensure the backend server is active.', sender: 'bot' }
-      ]);
-    }
-  });
-
-  const handleSend = () => {
-    if (!inputValue.trim() || !file || askMutation.isPending) return;
+  const handleSend = async () => {
+    if (!inputValue.trim() || !file || isStreaming) return;
     const q = inputValue.trim();
     setInputValue("");
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), text: q, sender: 'user' }]);
-    askMutation.mutate(q);
+    setIsStreaming(true);
+
+    const botId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), text: q, sender: 'user' },
+      { id: botId, text: "", sender: 'bot' },
+    ]);
+
+    try {
+      await chatStream(q, file.name, {
+        onToken: (text) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, text: msg.text + text } : msg)
+          );
+        },
+        onError: (message) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, text: message, failed: true } : msg)
+          );
+        },
+        onDone: (sources) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, sources } : msg)
+          );
+        },
+      });
+    } catch {
+      setMessages((prev) =>
+        prev.map((msg) => msg.id === botId
+          ? { ...msg, text: "Connection lost. Please ensure the backend server is active.", failed: true }
+          : msg)
+      );
+    } finally {
+      setIsStreaming(false);
+    }
   };
 
   return (
@@ -146,16 +176,25 @@ export default function ChatPDF() {
             
             <div className={cn(
               "max-w-[85%] px-3.5 py-2.5 rounded text-xs leading-relaxed border shadow-none",
-              msg.sender === 'user' 
-                ? "bg-primary text-white border-primary rounded-tr-none font-medium" 
-                : "bg-white border-slate-200 text-slate-800 rounded-tl-none"
+              msg.sender === 'user'
+                ? "bg-primary text-white border-primary rounded-tr-none font-medium"
+                : msg.failed
+                  ? "bg-red-50 border-red-200 text-red-800 rounded-tl-none"
+                  : "bg-white border-slate-200 text-slate-800 rounded-tl-none"
             )}>
               {msg.sender === 'bot' ? (
                 <>
                   <div className="flex items-center gap-1 mb-1.5 text-[9px] font-semibold text-slate-450 uppercase tracking-wider">
                     System Response
                   </div>
-                  <MarkdownRenderer text={msg.text} />
+                  {msg.text ? (
+                    <MarkdownRenderer text={msg.text} />
+                  ) : (
+                    <Loader2 size={12} className="animate-spin text-slate-400" />
+                  )}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <SourcesPanel sources={msg.sources} />
+                  )}
                 </>
               ) : (
                 <p className="whitespace-pre-wrap">{msg.text}</p>
@@ -164,7 +203,7 @@ export default function ChatPDF() {
           </div>
         ))}
 
-        {askMutation.isPending && (
+        {isStreaming && (
           <div className="flex gap-2.5 animate-pulse">
             <div className="h-7 w-7 rounded border bg-slate-50 border-slate-200 text-slate-400 flex items-center justify-center shrink-0">
               <Loader2 size={11} className="animate-spin" />
@@ -190,9 +229,9 @@ export default function ChatPDF() {
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             className="h-10 pl-3.5 pr-11 bg-white border-slate-200 ring-primary/20 rounded text-xs placeholder:text-slate-450 transition-all focus-visible:ring-offset-0 focus-visible:ring-2"
           />
-          <Button 
+          <Button
             onClick={handleSend}
-            disabled={!inputValue.trim() || askMutation.isPending}
+            disabled={!inputValue.trim() || isStreaming}
             className="absolute right-1 top-1 h-8 w-8 p-0 bg-primary hover:bg-primary/95 text-white rounded shadow-sm transition-colors"
           >
             <Send size={14} />
@@ -202,6 +241,39 @@ export default function ChatPDF() {
           PaperMind Quantitative Ingestion Node
         </p>
       </div>
+    </div>
+  );
+}
+
+function SourcesPanel({ sources }: { sources: ISource[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 border-t border-slate-100 pt-1.5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[9px] font-semibold text-slate-450 hover:text-slate-600 uppercase tracking-wider transition-colors cursor-pointer"
+      >
+        <FileText size={10} />
+        Sources ({sources.length})
+        <ChevronDown size={10} className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {sources.map((source, i) => (
+            <div key={i} className="bg-slate-50 border border-slate-200 rounded p-2">
+              <div className="flex items-center justify-between mb-1 text-[9px] font-medium text-slate-500">
+                <span className="truncate">{source.document} · chunk {source.chunk_index}</span>
+                <span className="shrink-0 ml-2 font-mono text-slate-400">
+                  {source.score.toFixed(3)}
+                </span>
+              </div>
+              <p className="text-[10px] leading-relaxed text-slate-600 line-clamp-3">
+                {source.content}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -232,81 +304,38 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   );
 }
 
-function renderInlineCode(text: string) {
-  const codeParts = text.split(/(`.*?`)/g);
-  return codeParts.map((cPart, cIdx) => {
-    if (cPart.startsWith("`") && cPart.endsWith("`")) {
-      const codeText = cPart.slice(1, -1);
-      return (
-        <code
-          key={cIdx}
-          className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-mono text-[10px] text-slate-800 font-medium mx-0.5"
-        >
-          {codeText}
-        </code>
-      );
-    }
-    return cPart;
-  });
+function MarkdownPre({ children }: ComponentPropsWithoutRef<"pre">) {
+  if (isValidElement<ComponentPropsWithoutRef<"code">>(children)) {
+    const { className, children: code } = children.props;
+    const lang = /language-(\S+)/.exec(className ?? "")?.[1] ?? "";
+    return <CodeBlock code={String(code).replace(/\n$/, "")} lang={lang} />;
+  }
+  return <pre>{children}</pre>;
 }
 
-function renderInlineMarkdown(text: string) {
-  const boldParts = text.split(/(\*\*.*?\*\*)/g);
-  return boldParts.map((bPart, bIdx) => {
-    if (bPart.startsWith("**") && bPart.endsWith("**")) {
-      const boldText = bPart.slice(2, -2);
-      return (
-        <strong key={bIdx} className="font-semibold text-slate-900">
-          {renderInlineCode(boldText)}
-        </strong>
-      );
-    }
-    return <span key={bIdx}>{renderInlineCode(bPart)}</span>;
-  });
+function MarkdownInlineCode({ children, ...props }: ComponentPropsWithoutRef<"code">) {
+  return (
+    <code
+      className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-mono text-[10px] text-slate-800 font-medium mx-0.5"
+      {...props}
+    >
+      {children}
+    </code>
+  );
 }
 
 function MarkdownRenderer({ text }: { text: string }) {
-  const parts = text.split(/(```[\s\S]*?```)/g);
-
   return (
-    <div className="space-y-2">
-      {parts.map((part, index) => {
-        if (part.startsWith("```")) {
-          const lines = part.split("\n");
-          const firstLine = lines[0];
-          const lang = firstLine.replace("```", "").trim();
-          const code = lines.slice(1, -1).join("\n");
-          return <CodeBlock key={index} code={code} lang={lang} />;
-        } else {
-          const paragraphs = part.split("\n\n");
-          return paragraphs.map((para, paraIdx) => {
-            const trimmed = para.trim();
-            if (!trimmed) return null;
-
-            const lines = trimmed.split("\n");
-            const isBulletList = lines.every(
-              (line) => line.trim().startsWith("- ") || line.trim().startsWith("* ")
-            );
-
-            if (isBulletList) {
-              return (
-                <ul key={paraIdx} className="list-disc pl-4 space-y-1 my-1.5">
-                  {lines.map((line, lineIdx) => {
-                    const content = line.replace(/^[-*]\s+/, "");
-                    return <li key={lineIdx}>{renderInlineMarkdown(content)}</li>;
-                  })}
-                </ul>
-              );
-            }
-
-            return (
-              <p key={paraIdx} className="my-1.5">
-                {renderInlineMarkdown(para)}
-              </p>
-            );
-          });
-        }
-      })}
+    <div className="space-y-2 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:space-y-1 [&_ul]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:space-y-1 [&_ol]:my-1.5 [&_li]:leading-relaxed [&_strong]:font-semibold [&_strong]:text-slate-900 [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:text-xs [&_h2]:font-semibold [&_h3]:text-xs [&_h3]:font-semibold [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-200 [&_blockquote]:pl-2 [&_blockquote]:text-slate-600 [&_table]:text-[10px] [&_th]:border [&_th]:border-slate-200 [&_th]:px-1.5 [&_th]:py-1 [&_td]:border [&_td]:border-slate-200 [&_td]:px-1.5 [&_td]:py-1">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          pre: MarkdownPre,
+          code: MarkdownInlineCode,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
