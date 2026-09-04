@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: papermind
+      POSTGRES_PASSWORD: papermind
+      POSTGRES_DB: papermind
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U papermind"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://papermind:papermind@db:5432/papermind
+      PINECONE_API_KEY: ${PINECONE_API_KEY:?set PINECONE_API_KEY in your shell or .env}
+      MODE: ${MODE:-google}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      DEMO_MODE: ${DEMO_MODE:-false}
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/app/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  uploads:

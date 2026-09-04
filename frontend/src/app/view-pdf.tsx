@@ -29,40 +29,38 @@ export default function ViewPDF() {
   });
 
   return (
-    <div className="flex flex-col h-full glass rounded-3xl overflow-hidden shadow-xl border-white/40">
-      <div className="p-5 border-b border-white/20 bg-white/20 backdrop-blur-md flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-600">
-            <File size={20} />
-          </div>
-          <h3 className="font-bold text-slate-800 truncate max-w-[200px]">
-            {file ? file.name.replace(/\.[^/.]+$/, "") : "Document"}
+    <div className="flex flex-col h-full glass rounded-xl overflow-hidden shadow-sm">
+      <div className="h-[52px] px-4 border-b border-slate-200/80 bg-slate-50 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <File size={16} className="text-slate-600" />
+          <h3 className="font-semibold text-xs uppercase tracking-wider text-slate-700 truncate max-w-[200px]">
+            {file ? file.name.replace(/\.[^/.]+$/, "") : "Document Viewer"}
           </h3>
         </div>
 
         {file && (
           <div className="flex items-center gap-2">
             <span className={cn(
-                "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                checkProcessedQuery.data?.is_processed 
-                    ? "bg-emerald-100 text-emerald-600 border border-emerald-200" 
-                    : "bg-amber-100 text-amber-600 border border-amber-200"
+              "px-2 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider border",
+              checkProcessedQuery.data?.is_processed 
+                ? "bg-slate-100 text-slate-600 border-slate-200" 
+                : "bg-slate-50 text-slate-400 border-slate-200 animate-pulse"
             )}>
-              {checkProcessedQuery.data?.is_processed ? "Analyzed" : "Pending"}
+              {checkProcessedQuery.data?.is_processed ? "Indexed" : "Indexing"}
             </span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
-                  <MoreHorizontal size={16} />
+                <Button variant="ghost" size="icon" className="h-7 w-7 rounded">
+                  <MoreHorizontal size={14} />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="glass-dark text-white border-none min-w-[140px]">
+              <DropdownMenuContent align="end" className="bg-white text-slate-800 border border-slate-200/80 shadow-md min-w-[140px] p-1 rounded-md z-50">
                 <DropdownMenuItem
-                  className="text-red-400 focus:bg-red-500/10 focus:text-red-400 cursor-pointer p-2.5 rounded-lg"
+                  className="text-red-600 focus:bg-red-50 focus:text-red-700 cursor-pointer p-2 rounded text-xs font-medium flex items-center transition-colors"
                   onClick={() => deleteFileMutation.mutate(file)}
                 >
-                  <Trash2 size={15} className="mr-2" />
-                  <span className="text-[13px] font-medium">Delete Permanently</span>
+                  <Trash2 size={14} className="mr-2" />
+                  <span>Delete Permanently</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -70,23 +68,23 @@ export default function ViewPDF() {
         )}
       </div>
 
-      <div className="flex-grow bg-slate-50/30 overflow-hidden relative">
+      <div className="flex-grow bg-slate-100 overflow-hidden relative">
         {file ? (
           <div className="h-full w-full flex flex-col">
             <iframe
               src={`${file.url}#toolbar=0&navpanes=0&scrollbar=0`}
-              className="w-full h-full border-none"
+              className="w-full h-full border-none bg-white"
               title={file.name}
             ></iframe>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full p-10 text-center">
-            <div className="w-20 h-20 bg-slate-100 rounded-3xl flex items-center justify-center mb-6 text-slate-300">
-                <UploadIcon size={40} />
+          <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+            <div className="w-12 h-12 bg-white border border-slate-200 rounded flex items-center justify-center mb-4 text-slate-400 shadow-sm">
+              <UploadIcon size={20} />
             </div>
-            <h3 className="text-xl font-bold text-slate-800 mb-2">Immersive Viewer</h3>
-            <p className="text-sm text-slate-500 max-w-[240px]">
-               Select a research paper from your library to visualize it here in high fidelity.
+            <h4 className="text-sm font-semibold text-slate-700 mb-1.5">No Document Selected</h4>
+            <p className="text-xs text-slate-400 max-w-[240px]">
+              Select a publication from your library to review its contents in this pane.
             </p>
           </div>
         )}
