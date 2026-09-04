@@ -7,6 +7,8 @@
     network or disk is faked per-test with monkeypatch.
 """
 
+import os
+
 import pytest
 
 DUMMY_ENV = {
@@ -19,6 +21,12 @@ DUMMY_ENV = {
     # override DEMO_MODE explicitly.
     "DEMO_MODE": "true",
 }
+
+# Test modules import app (and trigger config validation) during collection,
+# before any fixture runs, so the dummy environment must be in place at
+# conftest import time too. The autouse fixture below re-applies it per test,
+# since monkeypatch may have reverted individual variables mid-run.
+os.environ.update(DUMMY_ENV)
 
 
 @pytest.fixture(autouse=True)
