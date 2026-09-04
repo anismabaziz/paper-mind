@@ -66,23 +66,40 @@ def index_document(
             /process-file route, so the evaluator exercises the real ingestion
             path.
     """
-    text = DocumentParser.for_filename(filename).extract_text(
-        read_document(filename, docs_dir)
-    )
-    chunks = DocumentParser.split_text(text)
+    parser = DocumentParser.for_filename(filename)
+    raw = read_document(filename, docs_dir)
+    if hasattr(parser, "extract_pages"):
+        try:
+            page_texts = parser.extract_pages(raw)
+            chunks_with_page = DocumentParser.split_pages(page_texts)
+            chunks = [c for c, _ in chunks_with_page]
+            page_numbers = [p for _, p in chunks_with_page]
+        except Exception:
+            text = parser.extract_text(raw)
+            chunks = DocumentParser.split_text(text)
+            page_numbers = [None] * len(chunks)
+    else:
+        text = parser.extract_text(raw)
+        chunks = DocumentParser.split_text(text)
+        page_numbers = [None] * len(chunks)
     embeddings = embed_fn(chunks)
-    vectors = [
-        {
-            "id": str(uuid.uuid4()),
-            "values": embeddings[i],
-            "metadata": {
-                "content": chunks[i],
-                "pdf_name": pdf_name or filename,
-                "chunk_index": i,
-            },
-        }
-        for i in range(len(chunks))
-    ]
+    vectors = []
+    for i in range(len(chunks)):
+        import hashlib
+
+        vectors.append(
+            {
+                "id": str(uuid.uuid4()),
+                "values": embeddings[i],
+                "metadata": {
+                    "content": chunks[i],
+                    "pdf_name": pdf_name or filename,
+                    "chunk_index": i,
+                    "page_no": page_numbers[i] if page_numbers else None,
+                    "content_hash": hashlib.sha256(chunks[i].encode("utf-8")).hexdigest(),
+                },
+            }
+        )
     index.upsert(vectors)
     return len(chunks)
 

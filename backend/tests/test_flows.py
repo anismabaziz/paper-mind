@@ -92,7 +92,7 @@ class FakeVectorService:
             }
         ]
 
-    def upsert_vectors(self, embeddings, texts, filename):
+    def upsert_vectors(self, embeddings, texts, filename, page_numbers=None):
         self.upserts.append((embeddings, texts, filename))
 
     def query_vectors(self, embedding, filename, top_k=TOP_K):

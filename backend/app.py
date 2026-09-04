@@ -129,8 +129,22 @@ def process_file():
         file_content = storage.open(filename)
 
         parser = DocumentParser.for_filename(filename)
-        text = parser.extract_text(file_content)
-        chunks = DocumentParser.split_text(text)
+        # Prefer page-aware extraction so page_no flows to metadata.
+        # Fall back to flat text for parsers that do not expose pages.
+        if hasattr(parser, "extract_pages"):
+            try:
+                page_texts = parser.extract_pages(file_content)
+                chunks_with_page = DocumentParser.split_pages(page_texts)
+                chunks = [c for c, _ in chunks_with_page]
+                page_numbers = [p for _, p in chunks_with_page]
+            except Exception:
+                text = parser.extract_text(file_content)
+                chunks = DocumentParser.split_text(text)
+                page_numbers = None
+        else:
+            text = parser.extract_text(file_content)
+            chunks = DocumentParser.split_text(text)
+            page_numbers = None
 
         # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
         if not chunks:
@@ -141,7 +155,7 @@ def process_file():
         except Exception as e:
             print(f"/process-file vector cleanup warning for {filename}: {e}")
         embeddings = AIService.get_embeddings(chunks)
-        VectorService.upsert_vectors(embeddings, chunks, filename)
+        VectorService.upsert_vectors(embeddings, chunks, filename, page_numbers=page_numbers)
 
         # 3. Create Conversation (reuse one if the file is re-processed)
         file_record = repository.get_file(filename)

@@ -34,17 +34,67 @@ class TestDocumentParserSeam:
         assert "  " not in text
 
     def test_split_text_defaults_preserve_chunking_behavior(self):
+        import tiktoken
+
+        enc = tiktoken.get_encoding("cl100k_base")
         text = " ".join(f"word{i}" for i in range(3000))
 
         chunks = DocumentParser.split_text(text)
 
         assert len(chunks) > 1
-        assert all(len(chunk) <= 600 for chunk in chunks)
-        # Defaults must be pinned: calling with no args equals an explicit
-        # 600/100 call, so a refactor cannot silently change chunking.
+        # Token-bounded: each chunk is ~512 tokens; last may be smaller.
+        for chunk in chunks[:-1]:
+            n = len(enc.encode(chunk))
+            assert 487 <= n <= 537, f"chunk {n} tokens outside 512±25"
+        assert len(enc.encode(chunks[-1])) <= 537
+        # Defaults must be pinned: no-arg equals explicit 512/50.
         assert chunks == DocumentParser.split_text(
-            text, chunk_size=600, chunk_overlap=100
+            text, chunk_size=512, chunk_overlap=50
         )
+        # Overlap preservation: boundary words appear in both chunks.
+        first_words = chunks[0].split()
+        second_words = chunks[1].split()
+        tail = set(first_words[-50:])
+        head = set(second_words[:50])
+        assert len(tail & head) >= 15, "overlap should preserve ~50 tokens across boundary"
+
+    def test_split_pages_preserves_page_numbers(self):
+        import pymupdf
+
+        doc = pymupdf.open()
+        for i, words in enumerate(["page one content " * 200, "page two content " * 200]):
+            page = doc.new_page()
+            page.insert_text((72, 72), words)
+        pdf_bytes = doc.tobytes()
+
+        parser = DocumentParser.for_filename("paper.pdf")
+        pages = parser.extract_pages(pdf_bytes)
+        assert len(pages) == 2
+        chunks_with_page = DocumentParser.split_pages(pages)
+        # Every chunk knows its page
+        assert all(page_no in (1, 2) for _, page_no in chunks_with_page)
+        # Chunks from page 1 and page 2 both exist
+        page_nos = {p for _, p in chunks_with_page}
+        assert page_nos == {1, 2}
+
+    def test_extract_pages_keeps_table_rows(self):
+        import pymupdf
+
+        doc = pymupdf.open()
+        page = doc.new_page()
+        # Simulate a table as lines
+        page.insert_text((72, 72), "colA colB\nrow1 val1\nrow2 val2")
+        pdf_bytes = doc.tobytes()
+
+        parser = DocumentParser.for_filename("paper.pdf")
+        pages = parser.extract_pages(pdf_bytes)
+        assert len(pages) == 1
+        # Rows preserved as newlines, not collapsed to spaces
+        assert "colA" in pages[0]
+        assert "\n" in pages[0]
+        # Flat text still normalizes
+        flat = parser.extract_text(pdf_bytes)
+        assert "\n" not in flat
 
     @staticmethod
     def _two_page_pdf() -> bytes:
@@ -149,3 +199,102 @@ class TestRetrievalShaping:
         VectorService.query_vectors([0.1], "doc.pdf")
 
         assert index.queries[0]["filter"] == {"pdf_name": "doc.pdf"}
+
+
+class TestChunkMetadata:
+    def test_upsert_includes_page_no_and_content_hash(self, monkeypatch):
+        import hashlib
+
+        import config
+
+        captured = {}
+
+        def fake_upsert(self, vectors):
+            captured["vectors"] = vectors
+            return {"upserted": len(vectors)}
+
+        fake_index = type("Idx", (), {"upsert": fake_upsert})()
+        monkeypatch.setattr(config, "_pinecone_index", fake_index)
+
+        chunks = ["hello world", "second chunk"]
+        embeddings = [[0.1, 0.2], [0.3, 0.4]]
+        VectorService.upsert_vectors(embeddings, chunks, "doc.pdf", page_numbers=[2, 5])
+
+        vecs = captured["vectors"]
+        assert vecs[0]["metadata"]["page_no"] == 2
+        assert vecs[1]["metadata"]["page_no"] == 5
+        assert vecs[0]["metadata"]["content_hash"] == hashlib.sha256(chunks[0].encode()).hexdigest()
+        assert vecs[1]["metadata"]["content_hash"] == hashlib.sha256(chunks[1].encode()).hexdigest()
+        assert vecs[0]["metadata"]["content"] == chunks[0]
+        assert vecs[0]["metadata"]["chunk_index"] == 0
+
+    def test_upsert_without_page_numbers_still_hashes(self, monkeypatch):
+        import hashlib
+
+        import config
+
+        captured = {}
+
+        def fake_upsert(self, vectors):
+            captured["vectors"] = vectors
+            return {}
+
+        fake_index = type("Idx", (), {"upsert": fake_upsert})()
+        monkeypatch.setattr(config, "_pinecone_index", fake_index)
+
+        chunks = ["hello"]
+        VectorService.upsert_vectors([[0.1]], chunks, "doc.pdf")
+
+        assert captured["vectors"][0]["metadata"]["content_hash"] == hashlib.sha256(b"hello").hexdigest()
+        assert captured["vectors"][0]["metadata"]["page_no"] is None
+
+    def test_matches_to_sources_preserves_page_no_and_hash(self):
+        from services.vector_service import matches_to_sources
+
+        matches = [
+            {
+                "score": 0.9,
+                "metadata": {
+                    "content": "some content",
+                    "pdf_name": "doc.pdf",
+                    "chunk_index": 3,
+                    "page_no": 7,
+                    "content_hash": "abc123",
+                },
+            }
+        ]
+        sources = matches_to_sources(matches, "doc.pdf")
+        assert sources[0]["page_no"] == 7
+        assert sources[0]["content_hash"] == "abc123"
+        assert sources[0]["chunk_index"] == 3
+
+    def test_shape_sources_keeps_metadata_through_dedupe(self, fake_index):
+        # Highest scoring duplicate should keep its page_no/hash
+        matches = [
+            {
+                "id": "v-low",
+                "score": 0.4,
+                "metadata": {
+                    "content": "same text",
+                    "pdf_name": "doc.pdf",
+                    "chunk_index": 0,
+                    "page_no": 1,
+                    "content_hash": "hash1",
+                },
+            },
+            {
+                "id": "v-high",
+                "score": 0.9,
+                "metadata": {
+                    "content": "same text",
+                    "pdf_name": "doc.pdf",
+                    "chunk_index": 1,
+                    "page_no": 5,
+                    "content_hash": "hash2",
+                },
+            },
+        ]
+        sources, _ = TestRetrievalShaping().run_shaping(fake_index, matches)
+        assert len(sources) == 1
+        assert sources[0]["page_no"] == 5
+        assert sources[0]["content_hash"] == "hash2"

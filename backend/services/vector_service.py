@@ -1,10 +1,16 @@
+import hashlib
 import uuid
+
 import config
 
 # How many candidates the index is asked for vs. how many survive shaping.
 # Asking for more than we keep gives dedupe room to work.
 TOP_K = 8
 MAX_RETRIEVED_SOURCES = 5
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def shape_sources(sources, limit=MAX_RETRIEVED_SOURCES):
@@ -44,6 +50,8 @@ def matches_to_sources(matches, filename):
                 "content": content,
                 "document": metadata.get("pdf_name", filename),
                 "chunk_index": metadata.get("chunk_index", 0),
+                "page_no": metadata.get("page_no"),
+                "content_hash": metadata.get("content_hash") or _content_hash(content),
                 "score": float(score),
             }
         )
@@ -57,25 +65,31 @@ class VectorService:
     UPSERT_BATCH_SIZE = 100
 
     @staticmethod
-    def upsert_vectors(embeddings, texts, filename):
+    def upsert_vectors(embeddings, texts, filename, page_numbers=None):
         if not embeddings:
             return None
         last_response = None
         for start in range(0, len(embeddings), VectorService.UPSERT_BATCH_SIZE):
             batch_embeddings = embeddings[start : start + VectorService.UPSERT_BATCH_SIZE]
             offset = start
-            vectors = [
-                {
-                    "id": str(uuid.uuid4()),
-                    "values": embedding,
-                    "metadata": {
-                        "content": texts[offset + j],
-                        "pdf_name": filename,
-                        "chunk_index": offset + j,
-                    },
+            vectors = []
+            for j, embedding in enumerate(batch_embeddings):
+                idx = offset + j
+                chunk = texts[idx]
+                metadata = {
+                    "content": chunk,
+                    "pdf_name": filename,
+                    "chunk_index": idx,
+                    "page_no": page_numbers[idx] if page_numbers is not None and idx < len(page_numbers) else None,
+                    "content_hash": _content_hash(chunk),
                 }
-                for j, embedding in enumerate(batch_embeddings)
-            ]
+                vectors.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "values": embedding,
+                        "metadata": metadata,
+                    }
+                )
             last_response = config.vector_index.upsert(vectors)
         return last_response
 
