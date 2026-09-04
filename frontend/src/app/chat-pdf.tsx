@@ -1,32 +1,41 @@
-import { MessageSquare, Send, ChevronRight, Loader2, Bot, User, Sparkles } from "lucide-react";
+import { MessageSquare, Send, ChevronRight, ChevronDown, Loader2, Cpu, User, Copy, Check, FileText } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import usePdfStore from "@/store/pdf-state";
-import { useEffect, useState, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { checkIsProcessed, askQuestion, getMessages } from "@/services/files";
+import { useEffect, useState, useRef, isValidElement, type ComponentPropsWithoutRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { useQuery } from "@tanstack/react-query";
+import { checkIsProcessed, chatStream, getMessages, ISource } from "@/services/files";
 import { cn } from "@/lib/utils";
+
+interface ChatMessage {
+  id: string;
+  text: string;
+  sender: 'user' | 'bot';
+  sources?: ISource[];
+  failed?: boolean;
+}
 
 export default function ChatPDF() {
   const { file } = usePdfStore();
-  const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
-  
+
   const questions = [
     "What is the main topic of this document?",
     "Summarize the key findings",
     "Methodology used in this paper?",
   ];
-  
+
   const [inputValue, setInputValue] = useState("");
-  const [messages, setMessages] = useState<{id: string, text: string, sender: 'user' | 'bot'}[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   const checkProcessedQuery = useQuery({
     queryKey: [file?.name, "is-processed"],
     queryFn: () => checkIsProcessed(file!),
     enabled: !!file,
     refetchInterval: (query) => {
-      // @ts-ignore
       return query.state.data?.is_processed ? false : 3000;
     }
   });
@@ -41,10 +50,13 @@ export default function ChatPDF() {
     if (file) {
       setInputValue("");
       if (messagesQuery.data?.messages) {
-        setMessages(messagesQuery.data.messages as any);
+        setMessages(messagesQuery.data.messages);
       } else {
         setMessages([]);
       }
+    } else {
+      setInputValue("");
+      setMessages([]);
     }
   }, [file, messagesQuery.data]);
 
@@ -54,152 +66,276 @@ export default function ChatPDF() {
     }
   }, [messages]);
 
-  const askMutation = useMutation({
-    mutationFn: (query: string) => askQuestion(query, file!.name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [file?.name, "messages"] });
-    },
-    onError: () => {
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), text: 'Connection lost. Please ensure the backend server is active.', sender: 'bot' }
-      ]);
-    }
-  });
-
-  const handleSend = () => {
-    if (!inputValue.trim() || !file || askMutation.isPending) return;
+  const handleSend = async () => {
+    if (!inputValue.trim() || !file || isStreaming) return;
     const q = inputValue.trim();
     setInputValue("");
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), text: q, sender: 'user' }]);
-    askMutation.mutate(q);
+    setIsStreaming(true);
+
+    const botId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), text: q, sender: 'user' },
+      { id: botId, text: "", sender: 'bot' },
+    ]);
+
+    try {
+      await chatStream(q, file.name, {
+        onToken: (text) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, text: msg.text + text } : msg)
+          );
+        },
+        onError: (message) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, text: message, failed: true } : msg)
+          );
+        },
+        onDone: (sources) => {
+          setMessages((prev) =>
+            prev.map((msg) => msg.id === botId ? { ...msg, sources } : msg)
+          );
+        },
+      });
+    } catch {
+      setMessages((prev) =>
+        prev.map((msg) => msg.id === botId
+          ? { ...msg, text: "Connection lost. Please ensure the backend server is active.", failed: true }
+          : msg)
+      );
+    } finally {
+      setIsStreaming(false);
+    }
   };
 
   return (
-    <div className="flex flex-col h-full glass rounded-3xl overflow-hidden shadow-xl border-white/40">
-      <div className="p-5 border-b border-white/20 bg-white/20 backdrop-blur-md flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-600">
-            <MessageSquare size={20} />
-          </div>
-          <h3 className="font-bold text-slate-800">Research Chat</h3>
+    <div className="flex flex-col h-full glass rounded-xl overflow-hidden shadow-sm">
+      <div className="h-[52px] px-4 border-b border-slate-200/80 bg-slate-50 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <MessageSquare size={16} className="text-slate-600" />
+          <h3 className="font-semibold text-xs uppercase tracking-wider text-slate-700">Research Chat</h3>
         </div>
       </div>
 
-      <div className="flex-grow overflow-y-auto p-4 space-y-6" ref={scrollRef}>
+      <div className="flex-grow overflow-y-auto p-4 space-y-5" ref={scrollRef}>
         {!file && (
-          <div className="flex flex-col items-center justify-center h-full text-center p-8">
-            <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-4 text-slate-300">
-              <MessageSquare size={32} />
+          <div className="flex flex-col items-center justify-center h-full text-center p-6">
+            <div className="w-12 h-12 bg-white border border-slate-200 rounded flex items-center justify-center mb-4 text-slate-400 shadow-sm">
+              <MessageSquare size={18} />
             </div>
-            <p className="text-sm font-semibold text-slate-600">Select a paper to chat</p>
-            <p className="text-xs text-slate-400 max-w-[200px] mt-1">Our AI will help you summarize and analyze its content instantly.</p>
+            <h4 className="text-sm font-semibold text-slate-700 mb-1.5">No Active Session</h4>
+            <p className="text-xs text-slate-400 max-w-[220px]">
+              Select a research paper from your library to start an interactive analysis session.
+            </p>
           </div>
         )}
 
         {file && !checkProcessedQuery.data?.is_processed && (
-           <div className="flex flex-col items-center justify-center h-full text-center p-8 space-y-4">
-              <div className="relative">
-                 <Loader2 className="animate-spin text-primary" size={48} />
-                 <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary/40" size={20} />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-800">Synthesizing Paper...</p>
-                <p className="text-xs text-slate-400 mt-1 max-w-[220px]">Preparing vector embeddings for deep contextual analysis.</p>
-              </div>
-           </div>
+          <div className="flex flex-col items-center justify-center h-full text-center p-6 space-y-3">
+            <Loader2 className="animate-spin text-slate-500" size={24} />
+            <div>
+              <h4 className="text-xs font-semibold text-slate-700">Indexing Document...</h4>
+              <p className="text-[11px] text-slate-400 mt-1 max-w-[220px]">Generating semantic vector representations for retrieval-augmented analysis.</p>
+            </div>
+          </div>
         )}
 
         {file && checkProcessedQuery.data?.is_processed && messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center min-h-full py-10">
-            <div className="glass p-6 rounded-3xl border-white/60 shadow-lg text-center max-w-[280px]">
-               <Sparkles className="text-primary mx-auto mb-4" size={32} />
-               <h4 className="font-bold text-slate-800 mb-2 text-lg">AI Ready</h4>
-               <p className="text-xs text-slate-500 leading-relaxed mb-6">Ask anything about the researchers, methodology, or results of this paper.</p>
+          <div className="flex flex-col items-center justify-center min-h-full py-6">
+            <div className="w-full max-w-[320px] p-5 rounded-lg border border-slate-250 bg-white shadow-sm text-center">
+              <h4 className="text-xs font-semibold text-slate-705 uppercase tracking-wider mb-1">Session Initialized</h4>
+              <p className="text-[11px] text-slate-400 leading-relaxed mb-5">Select a query template below or enter a custom prompt in the input workbench.</p>
                
-               <div className="space-y-2">
-                 {questions.map((q, i) => (
-                    <button 
-                      key={i}
-                      onClick={() => setInputValue(q)}
-                      className="w-full text-left p-2.5 text-[11px] font-medium text-slate-600 bg-white/50 border border-white/20 rounded-xl hover:bg-primary/5 hover:border-primary/20 transition-all flex items-center justify-between group"
-                    >
-                      <span className="truncate">{q}</span>
-                      <ChevronRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </button>
-                 ))}
-               </div>
+              <div className="space-y-1.5">
+                {questions.map((q, i) => (
+                  <button 
+                    key={i}
+                    onClick={() => setInputValue(q)}
+                    className="w-full text-left px-3 py-2 text-[11px] font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded transition-colors flex items-center justify-between group"
+                  >
+                    <span className="truncate">{q}</span>
+                    <ChevronRight size={12} className="opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
         {messages.map((msg) => (
           <div key={msg.id} className={cn(
-              "flex gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300",
-              msg.sender === 'user' ? "flex-row-reverse" : "flex-row"
+            "flex gap-2.5 animate-in fade-in duration-200",
+            msg.sender === 'user' ? "flex-row-reverse" : "flex-row"
           )}>
             <div className={cn(
-                "h-8 w-8 rounded-xl flex items-center justify-center shadow-md shrink-0",
-                msg.sender === 'user' ? "bg-primary text-white" : "bg-white text-emerald-600 border border-slate-100"
+              "h-7 w-7 rounded border flex items-center justify-center shrink-0 text-xs font-semibold",
+              msg.sender === 'user' ? "bg-primary text-white border-primary" : "bg-slate-50 text-slate-600 border-slate-200"
             )}>
-              {msg.sender === 'user' ? <User size={14} strokeWidth={2.5} /> : <Bot size={14} strokeWidth={2.5} />}
+              {msg.sender === 'user' ? <User size={13} strokeWidth={2} /> : <Cpu size={13} strokeWidth={2} />}
             </div>
             
             <div className={cn(
-                "max-w-[85%] p-4 rounded-2xl shadow-sm text-[13px] leading-relaxed",
-                msg.sender === 'user' 
-                  ? "bg-primary text-white font-medium rounded-tr-none" 
-                  : "bg-white border border-slate-100 text-slate-700 rounded-tl-none"
+              "max-w-[85%] px-3.5 py-2.5 rounded text-xs leading-relaxed border shadow-none",
+              msg.sender === 'user'
+                ? "bg-primary text-white border-primary rounded-tr-none font-medium"
+                : msg.failed
+                  ? "bg-red-50 border-red-200 text-red-800 rounded-tl-none"
+                  : "bg-white border-slate-200 text-slate-800 rounded-tl-none"
             )}>
-              {msg.sender === 'bot' && (
-                <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest">
-                  <Sparkles size={10} />
-                  AI Analysis
-                </div>
+              {msg.sender === 'bot' ? (
+                <>
+                  <div className="flex items-center gap-1 mb-1.5 text-[9px] font-semibold text-slate-450 uppercase tracking-wider">
+                    System Response
+                  </div>
+                  {msg.text ? (
+                    <MarkdownRenderer text={msg.text} />
+                  ) : (
+                    <Loader2 size={12} className="animate-spin text-slate-400" />
+                  )}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <SourcesPanel sources={msg.sources} />
+                  )}
+                </>
+              ) : (
+                <p className="whitespace-pre-wrap">{msg.text}</p>
               )}
-              <p className="whitespace-pre-wrap">{msg.text}</p>
             </div>
           </div>
         ))}
 
-        {askMutation.isPending && (
-          <div className="flex gap-3 animate-pulse">
-            <div className="h-8 w-8 rounded-xl bg-white border border-slate-100 flex items-center justify-center shrink-0">
-               <Loader2 size={12} className="animate-spin text-emerald-600" />
+        {isStreaming && (
+          <div className="flex gap-2.5 animate-pulse">
+            <div className="h-7 w-7 rounded border bg-slate-50 border-slate-200 text-slate-400 flex items-center justify-center shrink-0">
+              <Loader2 size={11} className="animate-spin" />
             </div>
-            <div className="bg-white/60 border border-slate-100 rounded-2xl rounded-tl-none p-4 max-w-[85%]">
-               <div className="flex gap-2">
-                  <div className="h-2 w-2 bg-emerald-400 rounded-full animate-bounce" />
-                  <div className="h-2 w-2 bg-emerald-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-                  <div className="h-2 w-2 bg-emerald-400 rounded-full animate-bounce [animation-delay:0.4s]" />
-               </div>
+            <div className="bg-white border border-slate-200 rounded rounded-tl-none px-3.5 py-2.5 max-w-[85%] flex items-center">
+              <div className="flex gap-1.5">
+                <div className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce" />
+                <div className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                <div className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      <div className="p-4 bg-white/20 backdrop-blur-md border-t border-white/20">
-        <div className="relative group">
+      <div className="p-3 bg-slate-50 border-t border-slate-200/80">
+        <div className="relative flex items-center">
           <Input
-            placeholder={file ? "Type your command..." : "Select a paper..."}
+            placeholder={file ? "Query document contents..." : "Select a paper..."}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             disabled={!file || !checkProcessedQuery.data?.is_processed}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            className="h-12 pl-4 pr-12 bg-white border-white ring-primary/20 rounded-2xl shadow-inner text-[13px] font-medium placeholder:text-slate-400 transition-all focus-visible:ring-offset-0 focus-visible:ring-4"
+            className="h-10 pl-3.5 pr-11 bg-white border-slate-200 ring-primary/20 rounded text-xs placeholder:text-slate-450 transition-all focus-visible:ring-offset-0 focus-visible:ring-2"
           />
-          <Button 
+          <Button
             onClick={handleSend}
-            disabled={!inputValue.trim() || askMutation.isPending}
-            className="absolute right-1.5 top-1.5 h-9 w-9 p-0 bg-primary hover:bg-primary/90 text-white rounded-xl shadow-lg shadow-primary/20 transition-all hover:scale-105"
+            disabled={!inputValue.trim() || isStreaming}
+            className="absolute right-1 top-1 h-8 w-8 p-0 bg-primary hover:bg-primary/95 text-white rounded shadow-sm transition-colors"
           >
-            <Send size={16} />
+            <Send size={14} />
           </Button>
         </div>
-        <p className="text-[10px] text-center text-slate-400 mt-2 font-medium tracking-wide">
-            Powered by PaperMind AI Integration
+        <p className="text-[9px] text-center text-slate-400 mt-2 font-medium tracking-wider uppercase">
+          PaperMind Quantitative Ingestion Node
         </p>
       </div>
+    </div>
+  );
+}
+
+function SourcesPanel({ sources }: { sources: ISource[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 border-t border-slate-100 pt-1.5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[9px] font-semibold text-slate-450 hover:text-slate-600 uppercase tracking-wider transition-colors cursor-pointer"
+      >
+        <FileText size={10} />
+        Sources ({sources.length})
+        <ChevronDown size={10} className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {sources.map((source, i) => (
+            <div key={i} className="bg-slate-50 border border-slate-200 rounded p-2">
+              <div className="flex items-center justify-between mb-1 text-[9px] font-medium text-slate-500">
+                <span className="truncate">{source.document} · chunk {source.chunk_index}</span>
+                <span className="shrink-0 ml-2 font-mono text-slate-400">
+                  {source.score.toFixed(3)}
+                </span>
+              </div>
+              <p className="text-[10px] leading-relaxed text-slate-600 line-clamp-3">
+                {source.content}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CodeBlock({ code, lang }: { code: string; lang: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div className="my-2 border border-slate-200 rounded-md overflow-hidden bg-slate-50 font-mono text-[11px] leading-relaxed shadow-sm">
+      <div className="bg-slate-100/80 px-3 py-1.5 border-b border-slate-200 text-[10px] text-slate-500 uppercase font-sans font-medium flex justify-between items-center">
+        <span>{lang || "code"}</span>
+        <button
+          onClick={handleCopy}
+          className="text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1 cursor-pointer"
+        >
+          {copied ? <Check size={10} className="text-green-600" /> : <Copy size={10} />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
+      <pre className="p-3 overflow-x-auto text-slate-800">
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+function MarkdownPre({ children }: ComponentPropsWithoutRef<"pre">) {
+  if (isValidElement<ComponentPropsWithoutRef<"code">>(children)) {
+    const { className, children: code } = children.props;
+    const lang = /language-(\S+)/.exec(className ?? "")?.[1] ?? "";
+    return <CodeBlock code={String(code).replace(/\n$/, "")} lang={lang} />;
+  }
+  return <pre>{children}</pre>;
+}
+
+function MarkdownInlineCode({ children, ...props }: ComponentPropsWithoutRef<"code">) {
+  return (
+    <code
+      className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-mono text-[10px] text-slate-800 font-medium mx-0.5"
+      {...props}
+    >
+      {children}
+    </code>
+  );
+}
+
+function MarkdownRenderer({ text }: { text: string }) {
+  return (
+    <div className="space-y-2 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:space-y-1 [&_ul]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:space-y-1 [&_ol]:my-1.5 [&_li]:leading-relaxed [&_strong]:font-semibold [&_strong]:text-slate-900 [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:text-xs [&_h2]:font-semibold [&_h3]:text-xs [&_h3]:font-semibold [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-200 [&_blockquote]:pl-2 [&_blockquote]:text-slate-600 [&_table]:text-[10px] [&_th]:border [&_th]:border-slate-200 [&_th]:px-1.5 [&_th]:py-1 [&_td]:border [&_td]:border-slate-200 [&_td]:px-1.5 [&_td]:py-1">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          pre: MarkdownPre,
+          code: MarkdownInlineCode,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
