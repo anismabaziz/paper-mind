@@ -36,7 +36,7 @@ MODE = os.getenv("MODE", "google").lower()
 # Model Constants
 EMBEDDING_MODEL = "gemini-embedding-001"
 CHAT_MODEL = "gemini-2.0-flash"
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 PROVIDER_API_KEYS = {"google": "GOOGLE_API_KEY", "groq": "GROQ_API_KEY"}
 
