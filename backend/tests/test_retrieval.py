@@ -51,12 +51,12 @@ class TestDocumentParserSeam:
         assert chunks == DocumentParser.split_text(
             text, chunk_size=512, chunk_overlap=50
         )
-        # Overlap preservation: boundary words appear in both chunks.
-        first_words = chunks[0].split()
-        second_words = chunks[1].split()
-        tail = set(first_words[-50:])
-        head = set(second_words[:50])
-        assert len(tail & head) >= 15, "overlap should preserve ~50 tokens across boundary"
+        # Overlap preservation: ~50 tokens across boundary (token-level check).
+        t0 = enc.encode(chunks[0])
+        t1 = enc.encode(chunks[1])
+        tail_tokens = set(t0[-50:])
+        head_tokens = set(t1[:60])
+        assert len(tail_tokens & head_tokens) >= 15, "overlap should preserve ~50 tokens across boundary"
 
     def test_split_pages_preserves_page_numbers(self):
         import pymupdf

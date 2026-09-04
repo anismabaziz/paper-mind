@@ -71,3 +71,27 @@ class DocumentParser:
             for chunk in page_chunks:
                 chunks_with_page.append((chunk, page_no))
         return chunks_with_page
+
+    @classmethod
+    def get_chunks(cls, filename: str, file_bytes: bytes):
+        """
+            Parse and chunk a file, returning (chunks, page_numbers).
+
+            Page-aware when the parser exposes extract_pages; otherwise falls
+            back to flat text. Single seam so app and evaluator share the
+            same logic.
+        """
+        parser = cls.for_filename(filename)
+        if hasattr(parser, "extract_pages"):
+            try:
+                page_texts = parser.extract_pages(file_bytes)
+                chunks_with_page = cls.split_pages(page_texts)
+                chunks = [c for c, _ in chunks_with_page]
+                page_numbers = [p for _, p in chunks_with_page]
+                if chunks:
+                    return chunks, page_numbers
+            except Exception:
+                pass
+        text = parser.extract_text(file_bytes)
+        chunks = cls.split_text(text)
+        return chunks, [None] * len(chunks)

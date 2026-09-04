@@ -128,23 +128,7 @@ def process_file():
             return jsonify({"error": "Failed to fetch file"}), 400
         file_content = storage.open(filename)
 
-        parser = DocumentParser.for_filename(filename)
-        # Prefer page-aware extraction so page_no flows to metadata.
-        # Fall back to flat text for parsers that do not expose pages.
-        if hasattr(parser, "extract_pages"):
-            try:
-                page_texts = parser.extract_pages(file_content)
-                chunks_with_page = DocumentParser.split_pages(page_texts)
-                chunks = [c for c, _ in chunks_with_page]
-                page_numbers = [p for _, p in chunks_with_page]
-            except Exception:
-                text = parser.extract_text(file_content)
-                chunks = DocumentParser.split_text(text)
-                page_numbers = None
-        else:
-            text = parser.extract_text(file_content)
-            chunks = DocumentParser.split_text(text)
-            page_numbers = None
+        chunks, page_numbers = DocumentParser.get_chunks(filename, file_content)
 
         # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
         if not chunks:
