@@ -17,6 +17,7 @@ dependencies = [
     "pymupdf>=1.27.2.2",
     "pyjwt>=2.10.0",
     "python-dotenv>=1.2.2",
+    "qdrant-client>=1.15.0",
     "sqlalchemy>=2.0.0",
     "tiktoken>=0.14.0",
 ]
