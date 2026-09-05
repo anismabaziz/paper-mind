@@ -27,15 +27,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # App Constants
 INDEX_NAME = "pdf-index"
 
-# Mode Selector: which provider answers chat requests ("google" or "groq")
-MODE = os.getenv("MODE", "google").lower()
-
 # Demo mode (DEMO_MODE env) is read per-request by the auth service, so it
 # can be toggled without reloading this module.
-
-# Model Constants
-CHAT_MODEL = "gemini-2.0-flash"
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 # Local embedding model (free, CPU-capable). BGE-M3 supports dense+sparse, 8192
 # context, and Matryoshka truncation to 1024d.
@@ -60,8 +53,6 @@ def is_rerank_enabled() -> bool:
     return os.getenv("RERANK", "false").lower() in ("1", "true", "yes")
 
 
-PROVIDER_API_KEYS = {"google": "GOOGLE_API_KEY", "groq": "GROQ_API_KEY"}
-
 from enum import Enum
 
 
@@ -71,23 +62,11 @@ class VectorBackend(str, Enum):
     QDRANT = "qdrant"
 
 
-class ChatProvider(str, Enum):
-    """ChatProvider."""
-
-    GOOGLE = "google"
-    GROQ = "groq"
-
-
 _VALID_VECTOR_BACKENDS = {b.value for b in VectorBackend}
-_VALID_PROVIDERS = {p.value for p in ChatProvider}
 
 
 def _vector_backend() -> str:
     return os.getenv("VECTOR_BACKEND", VectorBackend.QDRANT.value).lower()
-
-
-def _chat_provider() -> str:
-    return os.getenv("MODE", ChatProvider.GOOGLE.value).lower()
 
 
 def missing_required_vars():
@@ -96,8 +75,8 @@ def missing_required_vars():
 
     Validation is driven by the backend enums above so adding a new
     backend only touches the enum definition, not a cascade of if/else.
+    Chat providers and keys are per-user settings now, not boot config.
     """
-    mode = _chat_provider()
     vector_backend = _vector_backend()
 
     required = ["DATABASE_URL"]
@@ -110,12 +89,6 @@ def missing_required_vars():
         missing.append(
             f"VECTOR_BACKEND (got {vector_backend!r}, expected 'qdrant')"
         )
-
-    provider_key = PROVIDER_API_KEYS.get(mode)
-    if mode not in _VALID_PROVIDERS:
-        missing.append(f"MODE (got {mode!r}, expected 'google' or 'groq')")
-    elif provider_key and not os.getenv(provider_key):
-        missing.append(provider_key)
 
     return missing
 
@@ -152,8 +125,6 @@ def validate():
 
 _qdrant_client = None
 _qdrant_index = None
-_genai_client = None
-_groq_client = None
 
 
 def _get_qdrant_client():
@@ -184,30 +155,8 @@ def get_vector_index():
     return _get_qdrant_index()
 
 
-def get_genai_client():
-    """Do get genai client."""
-    global _genai_client
-    if _genai_client is None:
-        from google import genai
-
-        _genai_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-    return _genai_client
-
-
-def get_groq_client():
-    """Do get groq client."""
-    global _groq_client
-    if _groq_client is None:
-        from groq import Groq
-
-        _groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-    return _groq_client
-
-
 _LAZY_ATTRS = {
     "vector_index": get_vector_index,
-    "genai_client": get_genai_client,
-    "groq_client": get_groq_client,
 }
 
 

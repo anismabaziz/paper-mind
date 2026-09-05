@@ -13,9 +13,8 @@ import pytest
 
 DUMMY_ENV = {
     "DATABASE_URL": "sqlite:///:memory:",
-    "MODE": "google",
-    "GOOGLE_API_KEY": "dummy-google-key",
-    "GROQ_API_KEY": "dummy-groq-key",
+    # Deterministic secret so encryption round-trips and tokens are stable.
+    "JWT_SECRET": "test-jwt-secret",
     # Demo on by default so flow tests exercise business logic; auth tests
     # override DEMO_MODE explicitly.
     "DEMO_MODE": "true",

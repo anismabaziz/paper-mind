@@ -20,9 +20,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from db import Base, Repository
+from db import Base, Repository, User, UserSetting
 from services.document_parser import DocumentParser
 from services.pdf_service import PDFParser
+from services.secrets_service import encrypt_api_key
 from services.vector_service import TOP_K, shape_sources
 
 
@@ -43,7 +44,22 @@ def repo():
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    return Repository(sessionmaker(bind=engine))
+    repository = Repository(sessionmaker(bind=engine))
+    # Demo mode resolves chat to the seeded demo user, whose settings the
+    # chat route requires before it will answer.
+    with repository._session_factory() as session, session.begin():
+        demo = User(email="demo@papermind.local", password_hash="x")
+        session.add(demo)
+        session.flush()
+        session.add(
+            UserSetting(
+                user_id=demo.id,
+                provider="groq",
+                model="openai/gpt-oss-120b",
+                encrypted_api_key=encrypt_api_key("sk-test-chat-key"),
+            )
+        )
+    return repository
 
 
 class FakeStorage:
@@ -164,12 +180,12 @@ def fake_ai(monkeypatch, app_module):
         calls["embedded"].extend(texts)
         return [[0.1, 0.2] for _ in texts]
 
-    def generate_response(query, context):
+    def generate_response(query, context, provider, model, api_key):
         """Do generate response."""
         calls["answered"].append((query, context))
         return "The answer is 42."
 
-    def stream_response(query, context):
+    def stream_response(query, context, provider, model, api_key):
         """Do stream response."""
         calls["streamed"].append((query, context))
         yield "The answer "
@@ -296,6 +312,67 @@ def test_ask_streams_tokens_and_persists_sources(client, fake_vectors, fake_ai):
     )
 
 
+def test_chat_dispatches_on_settings_arguments(app_module, monkeypatch):
+    """Provider/model/key come from the settings arguments, not config."""
+    from services.ai_service import AIService
+    from services.google_service import GoogleService
+    from services.groq_service import GroqService
+
+    seen = []
+
+    def groq_stream(query, context, api_key, model):
+        """Do groq stream."""
+        seen.append(("groq", api_key, model))
+        yield "groq answer"
+
+    def google_stream(query, context, api_key, model):
+        """Do google stream."""
+        seen.append(("google", api_key, model))
+        yield "google answer"
+
+    monkeypatch.setattr(GroqService, "stream_response", staticmethod(groq_stream))
+    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(google_stream))
+
+    assert "".join(AIService.stream_response("q", "ctx", "groq", "m1", "key-a")) == "groq answer"
+    assert "".join(AIService.stream_response("q", "ctx", "google", "m2", "key-b")) == "google answer"
+    assert seen == [("groq", "key-a", "m1"), ("google", "key-b", "m2")]
+
+
+def test_provider_failure_surfaces_without_fallback(app_module, monkeypatch):
+    """A primary failure propagates; the other provider is never tried."""
+    from services.ai_service import AIService
+    from services.google_service import GoogleService
+    from services.groq_service import GroqService
+
+    def broken_stream(query, context, api_key, model):
+        """Do broken stream."""
+        raise RuntimeError("provider down")
+        yield  # pragma: no cover
+
+    def never_called(query, context, api_key, model):
+        """Do never called."""
+        raise AssertionError("fallback provider must not be invoked")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(GroqService, "stream_response", staticmethod(broken_stream))
+    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(never_called))
+
+    with pytest.raises(RuntimeError):
+        list(AIService.stream_response("q", "ctx", "groq", "m1", "key-a"))
+
+
+def test_chat_without_settings_asks_user_to_configure(client, app_module, repo):
+    """A user with no saved settings gets a settings-oriented 400, not an LLM call."""
+    with repo._session_factory() as session, session.begin():
+        session.query(UserSetting).delete(synchronize_session=False)
+
+    filename = upload(client).get_json()["file"]["name"]
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == 400
+    assert "Settings" in response.get_json()["error"]
+
+
 def test_provider_failure_still_leaves_a_visible_reply(
     client, fake_vectors, fake_ai, app_module, capsys
 ):
@@ -303,7 +380,7 @@ def test_provider_failure_still_leaves_a_visible_reply(
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
 
-    def broken_stream(query, context):
+    def broken_stream(query, context, provider, model, api_key):
         """Do broken stream."""
         raise RuntimeError("provider down")
         yield  # pragma: no cover
@@ -331,88 +408,6 @@ def test_provider_failure_still_leaves_a_visible_reply(
         "a failed turn must still end with an assistant reply, not a stranded question"
     )
     assert error_data["error"] in history[-1]["text"]
-
-
-def test_primary_provider_failure_falls_back_to_secondary(app_module, monkeypatch):
-    """The primary provider failing before any token hands off to the fallback."""
-    from services.ai_service import AIService
-    from services.groq_service import GroqService
-    from services.google_service import GoogleService
-
-    monkeypatch.setattr(config, "MODE", "groq")
-
-    def primary_stream(query, context):
-        """Do primary stream."""
-        raise RuntimeError("primary down")
-        yield  # pragma: no cover
-
-    def fallback_stream(query, context):
-        """Do fallback stream."""
-        yield "fallback "
-
-    monkeypatch.setattr(GroqService, "stream_response", staticmethod(primary_stream))
-    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(fallback_stream))
-
-    tokens = list(AIService.stream_response("q", "ctx"))
-    assert "".join(tokens) == "fallback "
-
-
-def test_midstream_primary_failure_does_not_replay_via_fallback(
-    app_module, monkeypatch
-):
-    """A primary that dies mid-stream surfaces the error instead of restarting."""
-    from services.ai_service import AIService
-    from services.groq_service import GroqService
-    from services.google_service import GoogleService
-
-    monkeypatch.setattr(config, "MODE", "groq")
-
-    def primary_stream(query, context):
-        """Do primary stream."""
-        yield "partial"
-        raise RuntimeError("midstream failure")
-
-    fallback_calls = []
-
-    def fallback_stream(query, context):
-        """Do fallback stream."""
-        fallback_calls.append((query, context))
-        yield "fallback"
-
-    monkeypatch.setattr(GroqService, "stream_response", staticmethod(primary_stream))
-    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(fallback_stream))
-
-    with pytest.raises(RuntimeError):
-        list(AIService.stream_response("q", "ctx"))
-
-    assert fallback_calls == [], "fallback must not duplicate a half-streamed answer"
-
-
-def test_primary_success_does_not_invoke_fallback(app_module, monkeypatch):
-    """When the primary streams fully, the fallback must never be called."""
-    from services.ai_service import AIService
-    from services.groq_service import GroqService
-    from services.google_service import GoogleService
-
-    monkeypatch.setattr(config, "MODE", "groq")
-
-    def primary_stream(query, context):
-        """Do primary stream."""
-        yield "primary answer"
-
-    fallback_calls = []
-
-    def fallback_stream(query, context):
-        """Do fallback stream."""
-        fallback_calls.append((query, context))
-        yield "fallback"
-
-    monkeypatch.setattr(GroqService, "stream_response", staticmethod(primary_stream))
-    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(fallback_stream))
-
-    tokens = list(AIService.stream_response("q", "ctx"))
-    assert "".join(tokens) == "primary answer"
-    assert fallback_calls == []
 
 
 def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fake_ai):

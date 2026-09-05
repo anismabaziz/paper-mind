@@ -1,25 +1,30 @@
-"""Module docstring."""
+"""
+Groq chat provider.
 
-import os
+Clients are built per API key (cached) so every user's stored key can be
+used without process-global state.
+"""
 
-import config
+from functools import lru_cache
+
+from groq import Groq
+
 from services.prompts import SYSTEM_INSTRUCTION
 
-GROQ_MODEL = config.GROQ_MODEL
+
+@lru_cache(maxsize=32)
+def _client(api_key: str) -> Groq:
+    """Do client."""
+    return Groq(api_key=api_key)
 
 
 class GroqService:
     """GroqService."""
 
     @staticmethod
-    def generate_response(query: str, context: str) -> str:
+    def generate_response(query: str, context: str, api_key: str, model: str) -> str:
         """Do generate response."""
-        if not os.getenv("GROQ_API_KEY"):
-            raise ValueError(
-                "Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file."
-            )
-
-        chat_completion = config.groq_client.chat.completions.create(
+        chat_completion = _client(api_key).chat.completions.create(
             messages=[
                 {
                     "role": "system",
@@ -30,21 +35,16 @@ class GroqService:
                     "content": f"Context: {context}\n\nQuery: {query}",
                 },
             ],
-            model=GROQ_MODEL,
+            model=model,
         )
 
         result = chat_completion.choices[0].message.content
         return result or "I don't know based on the given context."
 
     @staticmethod
-    def stream_response(query: str, context: str):
+    def stream_response(query: str, context: str, api_key: str, model: str):
         """Do stream response."""
-        if not os.getenv("GROQ_API_KEY"):
-            raise ValueError(
-                "Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file."
-            )
-
-        stream = config.groq_client.chat.completions.create(
+        stream = _client(api_key).chat.completions.create(
             messages=[
                 {
                     "role": "system",
@@ -55,7 +55,7 @@ class GroqService:
                     "content": f"Context: {context}\n\nQuery: {query}",
                 },
             ],
-            model=GROQ_MODEL,
+            model=model,
             stream=True,
         )
 

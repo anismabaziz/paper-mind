@@ -1,20 +1,32 @@
-"""Module docstring."""
+"""
+Google chat provider.
 
+Clients are built per API key (cached) so every user's stored key can be
+used without process-global state.
+"""
+
+from functools import lru_cache
+
+from google import genai
 from google.genai import types
-import config
+
 from services.prompts import SYSTEM_INSTRUCTION
 
-CHAT_MODEL = config.CHAT_MODEL
+
+@lru_cache(maxsize=32)
+def _client(api_key: str) -> genai.Client:
+    """Do client."""
+    return genai.Client(api_key=api_key)
 
 
 class GoogleService:
     """GoogleService."""
 
     @staticmethod
-    def generate_response(query: str, context: str) -> str:
+    def generate_response(query: str, context: str, api_key: str, model: str) -> str:
         """Do generate response."""
-        result = config.genai_client.models.generate_content(
-            model=CHAT_MODEL,
+        result = _client(api_key).models.generate_content(
+            model=model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
                 f"Context: {context}",
@@ -41,10 +53,10 @@ class GoogleService:
         return "I don't know based on the given context."
 
     @staticmethod
-    def stream_response(query: str, context: str):
+    def stream_response(query: str, context: str, api_key: str, model: str):
         """Do stream response."""
-        for chunk in config.genai_client.models.generate_content_stream(
-            model=CHAT_MODEL,
+        for chunk in _client(api_key).models.generate_content_stream(
+            model=model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
                 f"Context: {context}",

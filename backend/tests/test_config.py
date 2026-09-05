@@ -14,38 +14,12 @@ def reload_config():
 
 def test_all_required_vars_missing_are_named(monkeypatch):
     """Do test all required vars missing are named."""
-    for var in (
-        "DATABASE_URL",
-        "MODE",
-        "GOOGLE_API_KEY",
-        "GROQ_API_KEY",
-    ):
-        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     cfg = reload_config()
     missing = cfg.missing_required_vars()
 
     assert "DATABASE_URL" in missing
-    # MODE defaults to "google", so the Google key is the one required
-    assert "GOOGLE_API_KEY" in missing
-
-
-def test_provider_key_follows_mode(monkeypatch):
-    """Do test provider key follows mode."""
-    monkeypatch.setenv("MODE", "groq")
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-
-    cfg = reload_config()
-    assert "GROQ_API_KEY" in cfg.missing_required_vars()
-    assert "GOOGLE_API_KEY" not in cfg.missing_required_vars()
-
-
-def test_invalid_mode_is_reported(monkeypatch):
-    """Do test invalid mode is reported."""
-    monkeypatch.setenv("MODE", "azure")
-
-    cfg = reload_config()
-    assert any("MODE" in var for var in cfg.missing_required_vars())
 
 
 def test_complete_env_validates_clean():
@@ -82,8 +56,6 @@ def test_import_does_not_build_clients(monkeypatch):
     cfg = reload_config()
     assert cfg._qdrant_index is None
     assert cfg._qdrant_client is None
-    assert cfg._genai_client is None
-    assert cfg._groq_client is None
 
 
 def test_vector_backend_defaults_to_qdrant(monkeypatch):
@@ -136,14 +108,8 @@ def test_booting_without_env_exits_readably():
     backend_dir = pathlib.Path(__file__).resolve().parent.parent
     # Empty-string values shadow any local .env (dotenv does not override
     # existing vars) and count as missing to the validator.
-    empty_env = {
-        var: ""
-        for var in (
-            "DATABASE_URL",
-            "GOOGLE_API_KEY",
-            "GROQ_API_KEY",
-        )
-    }
+    # Provider keys are per-user settings now; only DATABASE_URL is required.
+    empty_env = {"DATABASE_URL": ""}
     result = subprocess.run(
         [sys.executable, "-c", "import app"],
         capture_output=True,

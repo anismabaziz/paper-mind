@@ -1,6 +1,5 @@
-"""Module docstring."""
+"""Chat orchestration over the per-user provider settings."""
 
-import config
 from services.concurrency import map_batches_concurrently
 from services.google_service import GoogleService
 from services.groq_service import GroqService
@@ -37,62 +36,36 @@ class AIService:
         return all_values
 
     @staticmethod
-    def _providers():
-        # MODE picks the primary provider; the other one is the fallback.
-        # Read config.MODE directly so tests that monkeypatch it keep working;
-        # _chat_provider is used for validation, not for streaming selection.
-        primary = config.MODE if config.MODE in ("groq", "google") else "google"
-        fallback = "google" if primary == "groq" else "groq"
-        return primary, fallback
-
-    @staticmethod
-    def _stream_with(provider: str, query: str, context: str):
+    def _stream_with(provider: str, query: str, context: str, api_key: str, model: str):
         # Direct dispatch (not a pre-bound dict) so monkeypatched
         # GroqService/GoogleService in tests is respected.
         if provider == "groq":
-            return GroqService.stream_response(query, context)
-        return GoogleService.stream_response(query, context)
+            return GroqService.stream_response(query, context, api_key, model)
+        return GoogleService.stream_response(query, context, api_key, model)
 
     @staticmethod
-    def stream_response(query: str, context: str):
+    def stream_response(
+        query: str, context: str, provider: str, model: str, api_key: str
+    ):
         """
-        Yield answer fragments from the primary provider.
+        Yield answer fragments from the user's chosen provider.
 
-                If the primary provider fails before producing any output, the
-                fallback provider answers instead. A failure that happens
-                mid-stream is re-raised so the caller can surface it.
+        Failures propagate: the caller surfaces them as an SSE error event.
+        There is no cross-provider fallback — the user picked this provider.
         """
-        primary, fallback = AIService._providers()
-        emitted = False
-        try:
-            for token in AIService._stream_with(primary, query, context):
-                emitted = True
-                yield token
-            return
-        except Exception as e:
-            print(f"AI Streaming Error ({primary}): {e}")
-            if emitted:
-                # Partial answer already streamed; replaying via the
-                # fallback would duplicate or contradict it.
-                raise
-
-        # Primary never produced a token — let the fallback answer.
-        try:
-            yield from AIService._stream_with(fallback, query, context)
-        except Exception as e:
-            print(f"AI Streaming Error ({fallback}): {e}")
-            raise
+        yield from AIService._stream_with(provider, query, context, api_key, model)
 
     @staticmethod
-    def generate_response(query: str, context: str) -> str:
+    def generate_response(
+        query: str, context: str, provider: str, model: str, api_key: str
+    ) -> str:
         """Do generate response."""
         try:
-            provider = config.MODE if config.MODE in ("groq", "google") else "google"
             if provider == "groq":
-                return GroqService.generate_response(query, context)
-            return GoogleService.generate_response(query, context)
+                return GroqService.generate_response(query, context, api_key, model)
+            return GoogleService.generate_response(query, context, api_key, model)
         except Exception as e:
-            print(f"AI Generation Error ({config.MODE}): {e}")
+            print(f"AI Generation Error ({provider}): {e}")
             if context and context.strip():
                 return (
                     "I couldn't use the language model right now, so here is relevant context from your document:\n\n"

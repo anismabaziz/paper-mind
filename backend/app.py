@@ -221,6 +221,28 @@ def get_response():
     if not query or not filename:
         return jsonify({"error": "Query and Filename are required"}), 400
 
+    # Chat runs on the requester's own provider settings; without saved
+    # settings there is no key to answer with, so the turn is refused here.
+    user = _current_user()
+    if not user:
+        return jsonify({"error": "User not found"}), 401
+    stored = repository.get_user_settings(user["id"])
+    if not stored:
+        return jsonify(
+            {"error": "No chat provider configured. Add a provider and API key in Settings."}
+        ), 400
+    try:
+        api_key = decrypt_api_key(stored["encrypted_api_key"])
+    except Exception as e:
+        print(f"/response decrypt error for user {user['id']}: {e}")
+        return jsonify(
+            {
+                "error": "Stored API key could not be decrypted. "
+                "Re-save your provider settings, then try again."
+            }
+        ), 500
+    provider, model = stored["provider"], stored["model"]
+
     file_record = repository.get_file(filename)
     if not file_record:
         return jsonify({"error": "File not found"}), 404
@@ -251,7 +273,7 @@ def get_response():
         """Do generate."""
         fragments = []
         try:
-            for token in AIService.stream_response(query, context):
+            for token in AIService.stream_response(query, context, provider, model, api_key):
                 fragments.append(token)
                 yield event("token", {"text": token})
         except Exception as e:
