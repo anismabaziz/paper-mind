@@ -30,15 +30,27 @@ DEMO_MODE=true uv run python app.py   # API on http://127.0.0.1:3000 (GET /healt
 
 Keys path (opt-in):
 
-```bash
-# MODE=google needs GOOGLE_API_KEY, MODE=groq needs GROQ_API_KEY
-docker compose -f backend/compose.yaml up -d
-cd backend && uv run python app.py
-```
-
 Either path boots Postgres (+ Qdrant when `VECTOR_BACKEND=qdrant`). The backend
 runs locally via `uv run python app.py` and serves the API on `http://127.0.0.1:3000`
 (`GET /health` to check) after `uv run alembic upgrade head`.
+
+## Chat provider settings
+
+There are no provider env vars. Chat provider, model, and API key are per-user
+settings stored encrypted in Postgres and configured through the app's
+Settings dialog:
+
+- `GET /settings` — current settings (masked key) plus the supported
+  provider → models map
+- `PUT /settings` — validate provider/model and encrypt the key
+- `POST /settings/verify` — one-token completion against the chosen
+  provider/model with the stored key
+
+All three are authenticated; in demo mode they operate on the seeded demo
+user's record. Chat runs on the requester's own settings — a user with no
+saved settings gets a clear "configure a provider in Settings" error, and the
+backend boots fine with no keys at all. Retrieval-only evaluation
+(`evaluation.cli --live --no-judge`) needs no chat key either.
 
 ## Setup (manual, without Docker)
 
@@ -106,7 +118,7 @@ cd backend
 # (requires: docker compose -f compose.yaml up -d qdrant, or QDRANT_URL=http://localhost:6333;
 #  VECTOR_BACKEND=qdrant is the default)
 uv run python -m evaluation.cli --live --no-judge          # retrieval only, no LLM key
-uv run python -m evaluation.cli --live                     # + LLM-as-judge faithfulness (needs MODE key)
+uv run python -m evaluation.cli --live                     # + LLM-as-judge faithfulness (needs a chat key)
 uv run python -m evaluation.cli --live --json              # machine-readable
 uv run python -m evaluation.cli --live --rerank            # force RERANK=true (local cross-encoder 50→5)
 uv run python -m evaluation.cli --live --compare-rerank    # with vs without reranker + latency delta
@@ -116,5 +128,5 @@ A live run indexes the sample docs under an `eval-` prefix in the vector
 index and deletes them afterwards. When `VECTOR_BACKEND=qdrant` (default)
 the index lives at `http://localhost:6333` (compose exposes 6333→6333 and
 6334→6334);
-no Google key is required for retrieval-only (`--no-judge`).
+no chat key is required for retrieval-only (`--no-judge`).
 

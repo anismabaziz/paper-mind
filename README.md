@@ -14,6 +14,9 @@ machine.
 - PDF upload, parsing, chunking, and indexing into a vector store
 - Streaming chat over the indexed document (SSE), with retrieved sources
   attached to each answer
+- Per-user chat settings: bring your own provider (Google or Groq), model, and
+  API key via the Settings dialog — stored encrypted, never returned in
+  plaintext
 - JWT auth with a demo mode for frictionless local use
 - Retrieval evaluator with a committed ground-truth fixture
 - Postgres for persistence, local filesystem for uploaded files
@@ -44,25 +47,28 @@ Then open the printed localhost URL. Environment variables for the frontend
 are documented in [frontend/.env.example](frontend/.env.example), and the
 backend's in [backend/.env.example](backend/.env.example).
 
-Keys path — flip an env var and keep using paid providers:
+## Configuring a chat provider
 
-```bash
-export MODE=google        # or groq with GROQ_API_KEY
-docker compose -f backend/compose.yaml up -d
-cd backend && uv run python app.py
-```
+There are no provider keys in the environment. Open the Settings dialog in the
+app, pick a provider (Google or Groq) and a model from the curated list, paste
+your own API key, and hit "Test connection" to verify before saving. Keys are
+stored encrypted per user and applied to new chats immediately. In demo mode
+the dialog configures the seeded demo user, so a recruiter can run the whole
+flow without an account — the only thing they still need is one API key of
+their own.
 
-## Free local vs keys
+Everything below runs free and local — no API keys anywhere in the pipeline
+except the chat LLM, which each user configures in the app:
 
-| Concern | Free local (default) | Keys (opt-in) |
-|---|---|---|
-| Vector store | `VECTOR_BACKEND=qdrant` on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`), collection `pdf-index` |
-| Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume — no API key | Same |
-| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, `FETCH_K=50` → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) | Same |
-| Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata | Same |
-| Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all | Same |
-| Chat LLM | Still needs `MODE=google` (`GOOGLE_API_KEY`) or `MODE=groq` (`GROQ_API_KEY`) for answers | Same |
-| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no Google) — see `backend/README.md` | `--live` with judge needs the chat key |
+| Concern | Detail |
+|---|---|
+| Vector store | Qdrant on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`), collection `pdf-index` |
+| Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume — no API key |
+| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, `FETCH_K=50` → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
+| Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata |
+| Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
+| Chat LLM | Per-user Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest |
+| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no chat key); `--live` with the LLM-as-judge needs a key |
 
 All free-path knobs live in `backend/.env.example`:
 `VECTOR_BACKEND`, `RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
@@ -93,6 +99,7 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 │   Frontend   │────────────▶│              Backend (Flask)          │
 └──────────────┘             │                                       │
                              │  auth ── JWT (bcrypt) or demo bypass  │
+                             │  settings ── per-user provider config │
                              │  chat ── SSE stream, answers + sources│
                              │  eval ── retrieval/answer evaluator   │
                              │                                       │
@@ -101,9 +108,10 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
                              └──────┬──────────────┬───────────┬─────┘
                                     │              │           │
                              ┌──────▼─────┐ ┌──────▼────┐ ┌────▼─────┐
-                             │  Postgres  │ │ Qdrant    │ │ LLM API  │
-                             │ (metadata, │ │ (default) │ │ (Google  │
-                             │  messages) │ │ or Pinec. │ │ or Groq) │
+                             │  Postgres  │ │ Qdrant    │ │ Chat LLM │
+                             │ (metadata, │ │ (vectors, │ │ (Google  │
+                             │  messages, │ │  only)    │ │ or Groq, │
+                             │  settings) │ │           │ │ per user)│
                              └────────────┘ └───────────┘ └──────────┘
 ```
 
@@ -135,9 +143,19 @@ documented as not fine for anything shared.
 rather than arriving as one block, because a retrieval answer can take long
 enough to generate that blocking feels broken. Sources are attached when the
 stream completes and stored alongside the answer, so the conversation survives
-a reload. If the primary provider fails mid-stream, the backend does not
-replay the partial answer through the fallback; it surfaces the failure
-instead.
+a reload. If the chosen provider fails mid-stream, the backend does not
+silently answer through a different one; it surfaces the failure so the user
+can fix their own key or quota. That no-fallback rule is deliberate — with
+user-supplied keys, a silent switch would bill someone else's account
+(see [docs/adr/0001-per-user-byo-provider-keys.md](docs/adr/0001-per-user-byo-provider-keys.md)).
+
+**Per-user BYO keys.** Provider, model, and API key are per-user settings
+configured in the Settings dialog, not server environment variables. Keys are
+encrypted at rest with Fernet and only ever returned masked. The app boots
+with no provider key present; a user who has not saved settings gets a clear
+error pointing at Settings rather than a crash or an env default. Demo mode
+maps anonymous requests to a seeded demo user whose settings are edited
+through the same dialog.
 
 **Retrieval evaluation.** `backend/evaluation/` measures the retrieval
 pipeline against a committed ground-truth fixture: ten questions over two
@@ -162,7 +180,7 @@ The evaluator (`backend/evaluation/`) measures retrieval against
 `ingest sec/PDF` (parse/embed/upsert wall time) via
 `evaluation/evaluator.py`; live runs are opt-in (`--live`). See
 [backend/README.md](backend/README.md) for free local live instructions
-(`http://localhost:6333` without Google keys).
+(`http://localhost:6333` without any chat key).
 
 ## Technologies
 
@@ -171,6 +189,6 @@ The evaluator (`backend/evaluation/`) measures retrieval against
 - Database: Postgres
 - Vector store: Qdrant (local, `http://localhost:6333`)
 - Embeddings: BGE-M3 local via `sentence-transformers` (CPU, 1024d, no key)
-- LLM: Google Gemini or Groq (chosen with `MODE`)
+- LLM: Google Gemini or Groq, per user via the Settings dialog (BYO key, encrypted at rest)
 - Chunking: `tiktoken` `cl100k_base`, `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50`
 - Retrieval: hybrid dense + BM25 (`rank-bm25`) with RRF, gated local cross-encoder reranker
