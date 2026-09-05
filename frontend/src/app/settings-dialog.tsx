@@ -16,10 +16,12 @@ type Feedback = { kind: "success" | "error"; text: string } | null;
 
 export default function SettingsDialog() {
   const { isOpen, close } = useSettingsUi();
-  const [loggedIn, setLoggedIn] = useState(!!getToken());
+  // Demo mode serves settings with no token, so we try the load first and
+  // only fall back to the login form when the backend answers 401.
+  const [loginRequired, setLoginRequired] = useState(!getToken());
 
   useEffect(() => {
-    if (isOpen) setLoggedIn(!!getToken());
+    if (isOpen) setLoginRequired(!getToken());
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -40,10 +42,10 @@ export default function SettingsDialog() {
             Settings
           </h2>
         </div>
-        {loggedIn ? (
-          <SettingsForm />
+        {loginRequired ? (
+          <LoginForm onLoggedIn={() => setLoginRequired(false)} />
         ) : (
-          <LoginForm onLoggedIn={() => setLoggedIn(true)} />
+          <SettingsForm onUnauthorized={() => setLoginRequired(true)} />
         )}
       </div>
     </div>
@@ -107,12 +109,18 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-function SettingsForm() {
+function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({
     queryKey: ["settings"],
     queryFn: getSettings,
+    retry: false,
   });
+
+  useEffect(() => {
+    const status = axiosStatus(settingsQuery.error);
+    if (status === 401) onUnauthorized();
+  }, [settingsQuery.error, onUnauthorized]);
 
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
@@ -289,6 +297,13 @@ function FormFeedback({ kind, text }: { kind: "success" | "error"; text: string 
       {text}
     </p>
   );
+}
+
+function axiosStatus(e: unknown): number | null {
+  if (e instanceof Error && "response" in e) {
+    return (e as { response?: { status?: number } }).response?.status ?? null;
+  }
+  return null;
 }
 
 function errorMessage(e: unknown, fallback: string): string {
