@@ -26,6 +26,9 @@ const SETTINGS_ERROR_PATTERNS = [
   "Re-save your provider settings",
 ];
 
+const isSettingsError = (message: string) =>
+  SETTINGS_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
+
 export default function ChatPDF() {
   const { file } = usePdfStore();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -101,7 +104,7 @@ export default function ChatPDF() {
               ...msg,
               text: message,
               failed: true,
-              needsSettings: SETTINGS_ERROR_PATTERNS.some((p) => message.includes(p)),
+              needsSettings: isSettingsError(message),
             } : msg)
           );
         },
@@ -119,7 +122,7 @@ export default function ChatPDF() {
               ...msg,
               text: message || "Connection lost. Please ensure the backend server is active.",
               failed: true,
-              needsSettings: SETTINGS_ERROR_PATTERNS.some((p) => message.includes(p)),
+              needsSettings: isSettingsError(message),
             }
           : msg)
       );

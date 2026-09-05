@@ -64,11 +64,7 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
       await login(email.trim(), password);
       onLoggedIn();
     } catch (e) {
-      setError(
-        e instanceof Error && "response" in e
-          ? String((e as { response?: { data?: { error?: string } } }).response?.data?.error ?? "Login failed")
-          : "Login failed. Is the backend server active?"
-      );
+      setError(errorMessage(e, "Login failed. Check your credentials."));
     } finally {
       setSubmitting(false);
     }
@@ -160,10 +156,21 @@ function SettingsForm() {
     setTesting(true);
     setFeedback(null);
     try {
+      // The verify route runs against saved settings, so unsaved edits go
+      // to storage first; otherwise the test would check the old key.
+      if (dirty) {
+        if (!provider || !model || !apiKey) {
+          setFeedback({ kind: "error", text: "Provider, model, and API key are required before testing." });
+          return;
+        }
+        await saveSettings({ provider, model, api_key: apiKey });
+        setApiKey("");
+        await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      }
       const result = await verifySettings();
       setFeedback(
         result.ok
-          ? { kind: "success", text: "Connection works." }
+          ? { kind: "success", text: dirty ? "Settings saved and the connection works." : "Connection works." }
           : { kind: "error", text: result.error ?? "Connection failed." }
       );
     } catch (e) {
@@ -249,7 +256,7 @@ function SettingsForm() {
             </Button>
             <Button
               onClick={handleTest}
-              disabled={dirty || saving || testing}
+              disabled={saving || testing}
               variant="outline"
               className="flex-1 h-10 text-xs border-slate-200 bg-white hover:bg-slate-50"
             >
@@ -257,11 +264,6 @@ function SettingsForm() {
               Test connection
             </Button>
           </div>
-          {dirty && (
-            <p className="text-[10px] text-slate-400">
-              Save the new key before testing — the test runs against saved settings.
-            </p>
-          )}
           <button
             onClick={handleLogout}
             className="text-[10px] font-medium text-slate-400 hover:text-slate-600 uppercase tracking-wider cursor-pointer"
