@@ -8,6 +8,7 @@ import uuid
 from flask import (
     Flask,
     Response,
+    g,
     jsonify,
     request,
     send_from_directory,
@@ -24,10 +25,20 @@ from services.ai_service import AIService
 from services.vector_service import VectorService
 from services.auth_service import (
     hash_password,
+    is_demo_mode,
     issue_token,
     require_auth,
     verify_password,
 )
+from services.chat_settings_service import (
+    DEMO_EMAIL,
+    SUPPORTED_MODELS,
+    SettingsError,
+    mask_key,
+    validate,
+    verify_api_key,
+)
+from services.secrets_service import decrypt_api_key, encrypt_api_key
 
 config.validate()
 
@@ -353,6 +364,111 @@ def delete_embeddings():
     """Do delete embeddings."""
     VectorService.delete_all()
     return jsonify({"message": "Embeddings Deleted"}), 200
+
+
+def _current_user():
+    """
+    Resolve the user whose settings this request touches.
+
+    Demo mode has no token, so every request operates on the seeded demo
+    user; authenticated requests use the token's subject email.
+    """
+    email = DEMO_EMAIL if is_demo_mode() else getattr(g, "user_email", None)
+    if not email:
+        return None
+    return repository.get_user_by_email(email)
+
+
+def _settings_payload(stored, plaintext_key=None):
+    if not stored:
+        return {
+            "provider": None,
+            "model": None,
+            "masked_key": None,
+            "supported_models": SUPPORTED_MODELS,
+        }
+    if plaintext_key is None:
+        plaintext_key = decrypt_api_key(stored["encrypted_api_key"])
+    return {
+        "provider": stored["provider"],
+        "model": stored["model"],
+        "masked_key": mask_key(plaintext_key),
+        "supported_models": SUPPORTED_MODELS,
+    }
+
+
+@app.route("/settings", methods=["GET"])
+@require_auth
+def get_settings():
+    """Do get settings."""
+    user = _current_user()
+    if not user:
+        return jsonify({"error": "User not found"}), 401
+
+    stored = repository.get_user_settings(user["id"])
+    try:
+        payload = _settings_payload(stored)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify(payload), 200
+
+
+@app.route("/settings", methods=["PUT"])
+@require_auth
+def save_settings():
+    """Do save settings."""
+    user = _current_user()
+    if not user:
+        return jsonify({"error": "User not found"}), 401
+
+    data = request.get_json() or {}
+    provider = (data.get("provider") or "").strip().lower()
+    model = (data.get("model") or "").strip()
+    api_key = data.get("api_key") or ""
+
+    if not api_key:
+        return jsonify({"error": "API key is required"}), 400
+    try:
+        validate(provider, model)
+    except SettingsError as e:
+        return jsonify({"error": str(e)}), 400
+
+    repository.upsert_user_settings(
+        user["id"], provider, model, encrypt_api_key(api_key)
+    )
+    return jsonify(
+        {
+            "provider": provider,
+            "model": model,
+            "masked_key": mask_key(api_key),
+            "supported_models": SUPPORTED_MODELS,
+        }
+    ), 200
+
+
+@app.route("/settings/verify", methods=["POST"])
+@require_auth
+def verify_settings():
+    """Do verify settings."""
+    user = _current_user()
+    if not user:
+        return jsonify({"error": "User not found"}), 401
+
+    stored = repository.get_user_settings(user["id"])
+    if not stored:
+        return jsonify({"error": "No chat settings saved yet"}), 400
+
+    try:
+        api_key = decrypt_api_key(stored["encrypted_api_key"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    ok, error = verify_api_key(stored["provider"], stored["model"], api_key)
+    # Provider errors can echo request context; the key must never reach
+    # the client even if a provider client leaks it into the message.
+    if error:
+        error = error.replace(api_key, "••••")
+    return jsonify({"ok": ok, "error": error}), 200
 
 
 if __name__ == "__main__":
