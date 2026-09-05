@@ -1,8 +1,18 @@
-import json
-import uuid
-import os
+"""Module docstring."""
 
-from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
+import json
+import os
+import time
+import uuid
+
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    request,
+    send_from_directory,
+    stream_with_context,
+)
 from flask_cors import CORS
 
 import config
@@ -25,19 +35,29 @@ app = Flask(__name__)
 CORS(app)
 
 
+def _timed_call(func, *args, **kwargs):
+    """Run ``func`` and return (result, elapsed_seconds) for phase timing."""
+    start = time.time()
+    result = func(*args, **kwargs)
+    return result, time.time() - start
+
+
 def file_url(filename):
     # Absolute, like the old hosted storage URLs, so the frontend can use
     # the value directly in an iframe pointed at the API host.
+    """Do file url."""
     return f"{request.host_url.rstrip('/')}{storage.url(filename)}"
 
 
 @app.route("/health", methods=["GET"])
 def get_health():
+    """Do get health."""
     return jsonify({"response": "OK"}), 200
 
 
 @app.route("/auth/register", methods=["POST"])
 def register():
+    """Do register."""
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
@@ -53,6 +73,7 @@ def register():
 
 @app.route("/auth/login", methods=["POST"])
 def login():
+    """Do login."""
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
@@ -67,12 +88,14 @@ def login():
 @app.route("/storage/<path:filename>", methods=["GET"])
 @require_auth
 def download_file(filename):
+    """Do download file."""
     return send_from_directory(config.STORAGE_DIR, filename)
 
 
 @app.route("/upload", methods=["POST"])
 @require_auth
 def upload_file():
+    """Do upload file."""
     if "file" not in request.files:
         return jsonify({"error": "No File Provided"}), 400
 
@@ -86,14 +109,16 @@ def upload_file():
         storage.save(unique_filename, file_content)
         file_record = repository.create_file(unique_filename)
 
-        return jsonify({
-            "message": "File uploaded successfully",
-            "file": {
-                "id": file_record["id"],
-                "name": unique_filename,
-                "url": file_url(unique_filename),
+        return jsonify(
+            {
+                "message": "File uploaded successfully",
+                "file": {
+                    "id": file_record["id"],
+                    "name": unique_filename,
+                    "url": file_url(unique_filename),
+                },
             }
-        })
+        )
     except Exception as e:
         storage.delete(unique_filename)
         return jsonify({"error": str(e)}), 500
@@ -102,6 +127,7 @@ def upload_file():
 @app.route("/file/is-processed", methods=["POST"])
 @require_auth
 def check_processed():
+    """Do check processed."""
     data = request.get_json()
     filename = data.get("filename")
     if not filename:
@@ -117,24 +143,37 @@ def check_processed():
 @app.route("/process-file", methods=["POST"])
 @require_auth
 def process_file():
+    """Do process file."""
     try:
         data = request.get_json()
         filename = data.get("filename")
         if not filename:
             return jsonify({"error": "Filename is required"}), 400
 
+        wall_start = time.time()
+
         # 1. Parse & Extract (format-specific parser, shared chunking)
         if not storage.exists(filename):
             return jsonify({"error": "Failed to fetch file"}), 400
         file_content = storage.open(filename)
 
-        parser = DocumentParser.for_filename(filename)
-        text = parser.extract_text(file_content)
-        chunks = DocumentParser.split_text(text)
+        chunk_objs, parse_elapsed = _timed_call(
+            DocumentParser.get_chunk_objects, filename, file_content
+        )
 
-        # 2. Embed & Vectorize
-        embeddings = AIService.get_embeddings(chunks)
-        VectorService.upsert_vectors(embeddings, chunks, filename)
+        # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
+        if not chunk_objs:
+            return jsonify({"error": "No text extracted from document"}), 400
+        # Remove any vectors left from a previous failed attempt
+        try:
+            VectorService.delete_by_filename(filename)
+        except Exception as e:
+            print(f"/process-file vector cleanup warning for {filename}: {e}")
+        texts = [c.text for c in chunk_objs]
+        embeddings, embed_elapsed = _timed_call(AIService.get_embeddings, texts)
+        _, upsert_elapsed = _timed_call(
+            VectorService.upsert_chunks, embeddings, chunk_objs, filename
+        )
 
         # 3. Create Conversation (reuse one if the file is re-processed)
         file_record = repository.get_file(filename)
@@ -144,14 +183,26 @@ def process_file():
         # 4. Mark as Processed
         repository.set_processed(filename, True)
 
+        wall_elapsed = time.time() - wall_start
+        print(
+            f"/process-file {filename}: {len(chunk_objs)} chunks | "
+            f"parse {parse_elapsed:.2f}s embed {embed_elapsed:.2f}s "
+            f"upsert {upsert_elapsed:.2f}s total {wall_elapsed:.2f}s"
+        )
+
         return jsonify({"message": "PDF processed"}), 200
     except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        print(f"/process-file failed for {locals().get('filename', '?')}: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/response", methods=["POST"])
 @require_auth
 def get_response():
+    """Do get response."""
     data = request.get_json() or {}
     query = data.get("query")
     filename = data.get("filename")
@@ -173,16 +224,20 @@ def get_response():
     try:
         repository.add_message(conversation_id, "user", query)
         query_embedding = AIService.get_embeddings(query)[0]
-        sources = VectorService.query_vectors(query_embedding, filename)
+        sources = VectorService.query_vectors(
+            query_embedding, filename, query_text=query
+        )
         context = "\n\n".join(source["content"] for source in sources)
     except Exception as e:
         print(f"/response retrieval error: {e}")
         return jsonify({"error": str(e)}), 500
 
     def event(name, payload):
+        """Do event."""
         return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
 
     def generate():
+        """Do generate."""
         fragments = []
         try:
             for token in AIService.stream_response(query, context):
@@ -191,15 +246,16 @@ def get_response():
         except Exception as e:
             print(f"/response generation error: {e}")
             failure = (
-                "Sorry — the language model is unavailable right now. "
-                "Please try again."
+                "Sorry — the language model is unavailable right now. Please try again."
             )
             repository.add_message(conversation_id, "bot", failure)
             yield event("error", {"error": failure})
             yield event("done", {"done": True, "sources": []})
             return
 
-        answer = "".join(fragments).strip() or "I don't know based on the given context."
+        answer = (
+            "".join(fragments).strip() or "I don't know based on the given context."
+        )
         repository.add_message(conversation_id, "bot", answer, sources)
         yield event("done", {"done": True, "sources": sources})
 
@@ -213,6 +269,7 @@ def get_response():
 @app.route("/messages", methods=["GET"])
 @require_auth
 def get_messages():
+    """Do get messages."""
     try:
         filename = request.args.get("filename")
         if not filename:
@@ -235,6 +292,7 @@ def get_messages():
 @app.route("/files", methods=["GET"])
 @require_auth
 def get_files():
+    """Do get files."""
     try:
         db_files = repository.list_files()
         storage_items = storage.list()
@@ -247,16 +305,15 @@ def get_files():
 
             size = storage_item["size"] if storage_item else 0
 
-            enriched_files.append({
-                "id": db_file["id"],
-                "name": filename,
-                "url": file_url(filename),
-                "is_processed": db_file["is_processed"],
-                "metadata": {
-                    "size": size,
-                    "content_type": "application/pdf"
+            enriched_files.append(
+                {
+                    "id": db_file["id"],
+                    "name": filename,
+                    "url": file_url(filename),
+                    "is_processed": db_file["is_processed"],
+                    "metadata": {"size": size, "content_type": "application/pdf"},
                 }
-            })
+            )
 
         return jsonify({"files": enriched_files}), 200
     except Exception as e:
@@ -266,6 +323,7 @@ def get_files():
 @app.route("/files/remove", methods=["DELETE"])
 @require_auth
 def remove_file():
+    """Do remove file."""
     try:
         filename = request.args.get("path")
         if not filename:
@@ -292,6 +350,7 @@ def remove_file():
 @app.route("/delete-embeddings", methods=["POST"])
 @require_auth
 def delete_embeddings():
+    """Do delete embeddings."""
     VectorService.delete_all()
     return jsonify({"message": "Embeddings Deleted"}), 200
 

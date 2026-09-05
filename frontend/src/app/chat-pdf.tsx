@@ -190,7 +190,11 @@ export default function ChatPDF() {
                   {msg.text ? (
                     <MarkdownRenderer text={msg.text} />
                   ) : (
-                    <Loader2 size={12} className="animate-spin text-slate-400" />
+                    <span className="flex items-center gap-1.5 py-1" aria-label="Loading agent response">
+                      <span className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce" />
+                      <span className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                      <span className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+                    </span>
                   )}
                   {msg.sources && msg.sources.length > 0 && (
                     <SourcesPanel sources={msg.sources} />
@@ -203,20 +207,7 @@ export default function ChatPDF() {
           </div>
         ))}
 
-        {isStreaming && (
-          <div className="flex gap-2.5 animate-pulse">
-            <div className="h-7 w-7 rounded border bg-slate-50 border-slate-200 text-slate-400 flex items-center justify-center shrink-0">
-              <Loader2 size={11} className="animate-spin" />
-            </div>
-            <div className="bg-white border border-slate-200 rounded rounded-tl-none px-3.5 py-2.5 max-w-[85%] flex items-center">
-              <div className="flex gap-1.5">
-                <div className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce" />
-                <div className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-                <div className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]" />
-              </div>
-            </div>
-          </div>
-        )}
+
       </div>
 
       <div className="p-3 bg-slate-50 border-t border-slate-200/80">
