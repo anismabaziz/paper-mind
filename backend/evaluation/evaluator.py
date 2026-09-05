@@ -15,9 +15,8 @@ providers, and only behind ``--live``. ``uv run pytest`` stays headless
 Gates per phase (recorded on ``sample_docs`` via this module):
 ``hit@5``/``recall@5`` + per-question breakdown and ingest ``sec/PDF``
 (see :func:`index_document_timed`; ``POST /process-file`` also logs
-parse/embed/upsert wall time). Free local path uses
-``VECTOR_BACKEND=qdrant`` on ``http://localhost:6333`` with no API keys
-(retrieval-only ``--no-judge``).
+parse/embed/upsert wall time). Free local path uses Qdrant on
+``http://localhost:6333`` with no API keys (retrieval-only ``--no-judge``).
 """
 
 import hashlib

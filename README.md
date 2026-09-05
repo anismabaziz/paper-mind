@@ -64,15 +64,15 @@ except the chat LLM, which each user configures in the app:
 |---|---|
 | Vector store | Qdrant on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`), collection `pdf-index` |
 | Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume — no API key |
-| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, `FETCH_K=50` → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
+| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
 | Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata |
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
 | Chat LLM | Per-user Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest |
 | Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no chat key); `--live` with the LLM-as-judge needs a key |
 
 All free-path knobs live in `backend/.env.example`:
-`VECTOR_BACKEND`, `RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
-`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`, `FETCH_K`.
+`RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
+`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`.
 
 The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only).
 Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backend/README.md).

@@ -7,7 +7,7 @@ Flask API for RAG chat over uploaded PDFs. Defaults to free local components
 
 Same table as the top-level README (kept here so env docs stay local):
 
-- `VECTOR_BACKEND=qdrant` (`http://localhost:6333`, compose `qdrant` service)
+- Qdrant on `http://localhost:6333` (compose `qdrant` service), no API key
 - Embeddings: `BAAI/bge-m3` 1024d via `sentence-transformers`, CPU, no API key
 - `RERANK=false` (default) / `true` — local cross-encoder over 50→5 (`cross-encoder/ms-marco-MiniLM-L-6-v2` 22M fast default, or `BAAI/bge-reranker-v2-m3`)
 - `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken cl100k_base`, per-page, with `page_no` + `content_hash`
@@ -30,7 +30,7 @@ DEMO_MODE=true uv run python app.py   # API on http://127.0.0.1:3000 (GET /healt
 
 Keys path (opt-in):
 
-Either path boots Postgres (+ Qdrant when `VECTOR_BACKEND=qdrant`). The backend
+Either path boots Postgres and Qdrant. The backend
 runs locally via `uv run python app.py` and serves the API on `http://127.0.0.1:3000`
 (`GET /health` to check) after `uv run alembic upgrade head`.
 
@@ -103,7 +103,7 @@ flow tests in `tests/test_flows.py` run against fakes and in-memory sqlite.
 ground-truth fixture (`evaluation/fixture.json`): ten questions over two
 sample documents in `evaluation/sample_docs/` — one authored in-repo
 (CC0), one published paper (CC BY 4.0). The evaluator reports
-`hit@5`/`recall@5` (k=5, `FETCH_K=10` internally) + per-question breakdown and
+`hit@5`/`recall@5` (k=5, 10 candidates fetched internally) + per-question breakdown and
 ingest `sec/PDF` (parse/embed/upsert wall time via `evaluation/evaluator.py`;
 `POST /process-file` also logs `parse/embed/upsert/total` per file).
 `uv run pytest` exercises the scoring on deterministic fakes and stays
@@ -115,8 +115,7 @@ judge costs LLM calls):
 ```bash
 cd backend
 # Free local path: Qdrant on http://localhost:6333, no API key needed
-# (requires: docker compose -f compose.yaml up -d qdrant, or QDRANT_URL=http://localhost:6333;
-#  VECTOR_BACKEND=qdrant is the default)
+# (requires: docker compose -f compose.yaml up -d qdrant, or QDRANT_URL=http://localhost:6333)
 uv run python -m evaluation.cli --live --no-judge          # retrieval only, no LLM key
 uv run python -m evaluation.cli --live                     # + LLM-as-judge faithfulness (needs a chat key)
 uv run python -m evaluation.cli --live --json              # machine-readable
@@ -125,8 +124,8 @@ uv run python -m evaluation.cli --live --compare-rerank    # with vs without rer
 ```
 
 A live run indexes the sample docs under an `eval-` prefix in the vector
-index and deletes them afterwards. When `VECTOR_BACKEND=qdrant` (default)
-the index lives at `http://localhost:6333` (compose exposes 6333→6333 and
+index and deletes them afterwards. The index lives at `http://localhost:6333`
+(compose exposes 6333→6333 and
 6334→6334);
 no chat key is required for retrieval-only (`--no-judge`).
 
