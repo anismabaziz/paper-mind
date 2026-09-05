@@ -8,7 +8,15 @@ never touch a Session directly.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, String, create_engine, func, select
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    String,
+    Text,
+    create_engine,
+    func,
+    select,
+)
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -96,6 +104,22 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class UserSetting(Base):
+    """UserSetting."""
+
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(128))
+    encrypted_api_key: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -219,6 +243,43 @@ class Repository:
                 "email": user.email,
                 "password_hash": user.password_hash,
             }
+
+    # -- user settings ----------------------------------------------------
+
+    @staticmethod
+    def _settings_dict(record: UserSetting) -> dict:
+        return {
+            "user_id": record.user_id,
+            "provider": record.provider,
+            "model": record.model,
+            "encrypted_api_key": record.encrypted_api_key,
+            "updated_at": (
+                record.updated_at.isoformat() if record.updated_at else None
+            ),
+        }
+
+    def get_user_settings(self, user_id: str) -> dict | None:
+        """Do get user settings."""
+        with self._session_factory() as session:
+            record = session.get(UserSetting, user_id)
+            if not record:
+                return None
+            return self._settings_dict(record)
+
+    def upsert_user_settings(
+        self, user_id: str, provider: str, model: str, encrypted_api_key: str
+    ) -> dict:
+        """Do upsert user settings."""
+        with self._session_factory() as session, session.begin():
+            record = session.get(UserSetting, user_id)
+            if record is None:
+                record = UserSetting(user_id=user_id)
+                session.add(record)
+            record.provider = provider
+            record.model = model
+            record.encrypted_api_key = encrypted_api_key
+            session.flush()
+            return self._settings_dict(record)
 
     # -- conversations ----------------------------------------------------
 
