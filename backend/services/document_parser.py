@@ -26,8 +26,26 @@ class Chunk:
     chunk_index: int
     content_hash: str
 
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 50
+def _chunk_size() -> int:
+    try:
+        import config as _cfg  # lazy so tests can monkeypatch env before import
+
+        return int(getattr(_cfg, "CHUNK_SIZE_TOKENS", 512))
+    except Exception:
+        return int(os.getenv("CHUNK_SIZE_TOKENS", "512"))
+
+
+def _chunk_overlap() -> int:
+    try:
+        import config as _cfg
+
+        return int(getattr(_cfg, "CHUNK_OVERLAP_TOKENS", 50))
+    except Exception:
+        return int(os.getenv("CHUNK_OVERLAP_TOKENS", "50"))
+
+
+CHUNK_SIZE = _chunk_size()
+CHUNK_OVERLAP = _chunk_overlap()
 
 # cl100k_base is the tokenizer for gpt-4 / embeddings; stable, no download.
 _ENCODING = tiktoken.get_encoding("cl100k_base")
@@ -106,7 +124,11 @@ class DocumentParser:
         return _PARSERS[".pdf"]
 
     @staticmethod
-    def split_text(text, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
+    def split_text(text, chunk_size=None, chunk_overlap=None):
+        if chunk_size is None:
+            chunk_size = _chunk_size()
+        if chunk_overlap is None:
+            chunk_overlap = _chunk_overlap()
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -117,7 +139,7 @@ class DocumentParser:
         return [doc.page_content for doc in texts]
 
     @staticmethod
-    def split_pages(page_texts: list[str], chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
+    def split_pages(page_texts: list[str], chunk_size=None, chunk_overlap=None):
         """
             Split per-page texts while preserving page numbers.
 

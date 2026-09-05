@@ -20,18 +20,14 @@ machine.
 
 ## Quick start
 
-You need Docker and API keys for Pinecone plus one chat provider (Google or
-Groq). From a clean clone:
+Free local path (no keys) — default:
 
 ```bash
-export PINECONE_API_KEY=...        # vector store
-export GOOGLE_API_KEY=...          # or GROQ_API_KEY, see MODE below
 export DEMO_MODE=true              # skip login, good for a first look
-
-docker compose up --build
+docker compose up --build          # uses Qdrant + BGE-M3 locally, no API keys
 ```
 
-That boots Postgres, runs the migrations, and serves the API on
+That boots Postgres + Qdrant, runs the migrations, and serves the API on
 `http://127.0.0.1:3000` (`GET /health` to check). The frontend is a Vite app
 and runs separately:
 
@@ -44,6 +40,31 @@ npm run dev
 Then open the printed localhost URL. Environment variables for the frontend
 are documented in [frontend/.env.example](frontend/.env.example), and the
 backend's in [backend/.env.example](backend/.env.example).
+
+Keys path — flip an env var and keep using paid providers:
+
+```bash
+export VECTOR_BACKEND=pinecone PINECONE_API_KEY=...
+export EMBED_BACKEND=gemini GOOGLE_API_KEY=...   # or keep local embeddings
+export MODE=google        # or groq with GROQ_API_KEY
+docker compose up --build
+```
+
+## Free local vs keys
+
+| Concern | Free local (default) | Keys (opt-in) |
+|---|---|---|
+| Vector store | `VECTOR_BACKEND=qdrant` on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`) | `VECTOR_BACKEND=pinecone` + `PINECONE_API_KEY`, collection `pdf-index` |
+| Embeddings | `EMBED_BACKEND=local` — `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume | `EMBED_BACKEND=gemini` — `gemini-embedding-001` (768d), needs `GOOGLE_API_KEY` |
+| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, `FETCH_K=50` → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) | Same, with Pinecone `alpha` blend (`HYBRID_ALPHA`) |
+| Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata | Same |
+| Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all | Same |
+| Chat LLM | Still needs `MODE=google` (`GOOGLE_API_KEY`) or `MODE=groq` (`GROQ_API_KEY`) for answers | Same |
+| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no Pinecone/Google) — see `backend/README.md` | `--live` with judge needs the chat key |
+
+All free-path knobs live in `backend/.env.example` and `backend/compose.yaml`:
+`VECTOR_BACKEND`, `EMBED_BACKEND`, `RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
+`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`, `HYBRID_ALPHA`/`FETCH_K`.
 
 If you'd rather run the backend without Docker, the manual path (uv, local
 Postgres, Alembic) is in [backend/README.md](backend/README.md).
@@ -73,14 +94,14 @@ Postgres, Alembic) is in [backend/README.md](backend/README.md).
                              │  chat ── SSE stream, answers + sources│
                              │  eval ── retrieval/answer evaluator   │
                              │                                       │
-                             │  parser seam (pluggable per format)   │
+                             │  parser seam (pymupdf fast / Docling) │
                              │  storage seam (LocalStorage impl)     │
                              └──────┬──────────────┬───────────┬─────┘
                                     │              │           │
                              ┌──────▼─────┐ ┌──────▼────┐ ┌────▼─────┐
-                             │  Postgres  │ │ Pinecone  │ │ LLM API  │
-                             │ (metadata, │ │ (vectors) │ │ (Google  │
-                             │  messages) │ │           │ │ or Groq) │
+                             │  Postgres  │ │ Qdrant    │ │ LLM API  │
+                             │ (metadata, │ │ (default) │ │ (Google  │
+                             │  messages) │ │ or Pinec. │ │ or Groq) │
                              └────────────┘ └───────────┘ └──────────┘
 ```
 
@@ -91,10 +112,15 @@ The storage seam (`backend/storage.py`) abstracts where uploaded files live;
 the app currently ships the `LocalStorage` implementation, and anything that
 can save, open, and serve a file can be substituted without touching route
 code. The parser seam (`backend/services/document_parser.py`) maps file
-extensions to parsers; PDF is the only one registered today, and adding
-another format means adding a parser class, not rewriting the ingest path.
-Chunking lives in the seam itself so swapping parsers cannot silently change
-chunk sizes.
+extensions to parsers; chunking is owned by the seam (token-based
+`CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken
+cl100k_base`) so swapping parsers cannot silently change chunk sizes.
+Honest note: PDF has two branches behind the same seam — `pymupdf` fast path
+default for born-digital single-column PDFs, and an opt-in Docling branch
+(`USE_DOCLING=auto|true`, `.[docling]` extra, `granite-docling-258M` ~1.1GB)
+that preserves tables as Markdown and reading order for two-column / scanned
+/ borderless-table PDFs. The heuristic in `services/pdf_heuristics.py`
+routes only those PDFs to Docling; everything else stays on `pymupdf`.
 
 **Vendor-neutral auth.** Auth is plain JWT with bcrypt-hashed passwords,
 implemented in `backend/services/auth_service.py`. `DEMO_MODE=true` disables
@@ -126,14 +152,23 @@ cd backend
 uv run pytest
 ```
 
-Tests run against fakes and in-memory sqlite; they never touch real Pinecone,
-the LLM, or real Postgres. The evaluator's live mode is documented in
-[backend/README.md](backend/README.md).
+Tests run against fakes and in-memory sqlite; they never touch real Qdrant/Pinecone,
+the LLM, or real Postgres (heavy models mocked or `pytest.importorskip`'d; `uv run pytest` stays headless).
+
+The evaluator (`backend/evaluation/`) measures retrieval against
+`fixture.json` with `hit@5`/`recall@5` (k=5) + per-question breakdown and
+`ingest sec/PDF` (parse/embed/upsert wall time) via
+`evaluation/evaluator.py`; live runs are opt-in (`--live`). See
+[backend/README.md](backend/README.md) for free local live instructions
+(`http://localhost:6333` without Pinecone/Google keys).
 
 ## Technologies
 
 - Backend: Python, Flask, SQLAlchemy, Alembic
 - Frontend: React, TypeScript, Vite, Tailwind CSS, Zustand, React Query
 - Database: Postgres
-- Vector store: Pinecone
-- LLM/embeddings: Google Gemini or Groq (chosen with `MODE`)
+- Vector store: Qdrant (default, local) or Pinecone (opt-in, `VECTOR_BACKEND`)
+- Embeddings: BGE-M3 local (`EMBED_BACKEND=local`, default) or Gemini (`gemini-embedding-001`)
+- LLM: Google Gemini or Groq (chosen with `MODE`)
+- Chunking: `tiktoken` `cl100k_base`, `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50`
+- Retrieval: hybrid dense + BM25 (`rank-bm25`) with RRF, gated local cross-encoder reranker

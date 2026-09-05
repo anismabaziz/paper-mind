@@ -4,12 +4,20 @@
     Every external capability is injected:
 
     - ``embed_fn``: texts -> list of embedding vectors
-    - ``index``: Pinecone-compatible store with ``upsert``, ``query``, ``delete``
+    - ``index``: Pinecone/Qdrant-compatible store with ``upsert``, ``query``, ``delete``
     - ``generate_fn``: (query, context) -> answer text
     - ``judge_fn``: judge prompt -> verdict reply (see evaluation.judge)
 
     Tests wire deterministic fakes into all four; the CLI wires the real
-    providers, and only behind ``--live``.
+    providers, and only behind ``--live``. ``uv run pytest`` stays headless
+    (no Qdrant/Pinecone/LLM; heavy models mocked or skipped).
+
+    Gates per phase (recorded on ``sample_docs`` via this module):
+    ``hit@5``/``recall@5`` + per-question breakdown and ingest ``sec/PDF``
+    (see :func:`index_document_timed`; ``POST /process-file`` also logs
+    parse/embed/upsert wall time). Free local path uses
+    ``VECTOR_BACKEND=qdrant`` on ``http://localhost:6333`` and
+    ``EMBED_BACKEND=local`` with no API keys (retrieval-only ``--no-judge``).
 """
 
 import hashlib
@@ -77,6 +85,8 @@ def index_document(
             which file is read. Uses the same parser seam and vector shape as the
             /process-file route, so the evaluator exercises the real ingestion
             path. Sparse BM25 vectors are stored alongside dense for hybrid retrieval.
+            Returns chunk count; timing is logged via :func:`index_document_timed`
+            for gate reports (sec/PDF).
     """
     raw = read_document(filename, docs_dir)
     chunks, page_numbers = DocumentParser.get_chunks(filename, raw)
@@ -108,6 +118,20 @@ def index_document(
     ]
     index.upsert(vectors)
     return len(chunks)
+
+
+def index_document_timed(filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR, pdf_name=None):
+    """
+        Like :func:`index_document` but returns ``(chunks, elapsed_seconds)``
+        for gate reports (ingest sec/PDF). Phase timing mirrors
+        ``POST /process-file`` parse/embed/upsert logging.
+    """
+    import time as _time
+
+    t0 = _time.time()
+    chunks = index_document(filename, index, embed_fn, docs_dir=docs_dir, pdf_name=pdf_name)
+    elapsed = _time.time() - t0
+    return chunks, elapsed
 
 
 def remove_document(filename: str, index):

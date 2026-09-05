@@ -48,6 +48,10 @@ HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.7"))
 FETCH_K = int(os.getenv("FETCH_K", "50"))
 RRF_K = int(os.getenv("RRF_K", "60"))
 
+# Chunking: token-based via tiktoken cl100k_base (512 tokens ~2000 chars, 10% overlap ~50)
+CHUNK_SIZE_TOKENS = int(os.getenv("CHUNK_SIZE_TOKENS", "512"))
+CHUNK_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "50"))
+
 # Reranker: gated local cross-encoder over FETCH_K candidates
 RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 # Alternative quality model: BAAI/bge-reranker-v2-m3 (~80ms/50 docs vs ~10ms/50 for MiniLM)

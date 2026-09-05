@@ -2,11 +2,19 @@
     Opt-in live evaluation CLI.
 
     Without ``--live`` this refuses to run: the point of the evaluator is a
-    measured number, but a live run costs provider calls and writes into the
-    real vector index, so it only ever happens on purpose.
+    measured number, but a live run writes into the real vector index, so it
+    only ever happens on purpose.
 
-        python -m evaluation.cli --live            # full run with LLM judge
-        python -m evaluation.cli --live --no-judge # retrieval metrics only
+    Free local (no keys, default):
+        docker compose up qdrant                          # or `docker compose up` (exposes http://localhost:6333)
+        VECTOR_BACKEND=qdrant EMBED_BACKEND=local \
+          uv run python -m evaluation.cli --live --no-judge  # hit@5/recall@5 only, no Pinecone/Google
+
+    With LLM judge (needs a chat key):
+        uv run python -m evaluation.cli --live            # full report (needs GOOGLE_API_KEY or GROQ_API_KEY per MODE)
+
+    Qdrant local URL is ``http://localhost:6333`` on the host
+    (``http://qdrant:6333`` inside compose, via ``QDRANT_URL``).
 """
 
 import argparse
@@ -61,19 +69,47 @@ def run(live: bool, judge: bool, k: int, rerank=None, compare_rerank: bool = Fal
         )
 
     fixture = load_fixture()
-    config.validate()
+    # Free local retrieval-only (--no-judge) must not require Pinecone/Google keys:
+    # VECTOR_BACKEND=qdrant + EMBED_BACKEND=local on http://localhost:6333 should work
+    # with no API keys. Full runs (--live) validate the chat provider as usual.
+    if not judge:
+        missing = config.missing_required_vars()
+        # Allow missing chat key for retrieval-only; still require DATABASE_URL etc.
+        provider_keys = set(config.PROVIDER_API_KEYS.values())
+        missing = [m for m in missing if m not in provider_keys]
+        # Also allow EMBED_BACKEND=gemini without GOOGLE_API_KEY when local is used?
+        # Keep strict: if EMBED_BACKEND=gemini still needs GOOGLE_API_KEY.
+        if missing:
+            print("PaperMind backend is missing required configuration:", file=sys.stderr)
+            for var in missing:
+                print(f"  - {var}", file=sys.stderr)
+            print(
+                "\nFix: copy backend/.env.example to backend/.env and fill in the "
+                "values above, then start the app again.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    else:
+        config.validate()
     embed_fn, generate_fn, judge_fn = make_live_components()
     if not judge:
         judge_fn = None
 
     index = config.vector_index
     try:
+        ingest_times: list[float] = []
         for doc in fixture["documents"]:
             name = f"{EVAL_PREFIX}{doc['filename']}"
-            chunks = index_document(
+            from evaluation.evaluator import index_document_timed
+
+            chunks, elapsed = index_document_timed(
                 doc["filename"], index, embed_fn, pdf_name=name
             )
-            print(f"indexed {name}: {chunks} chunks")
+            ingest_times.append(elapsed)
+            print(f"indexed {name}: {chunks} chunks in {elapsed:.2f}s ({elapsed:.2f}s/PDF)")
+        if ingest_times:
+            avg = sum(ingest_times) / len(ingest_times)
+            print(f"Ingest: {sum(ingest_times):.2f}s total, {avg:.2f}s/PDF over {len(ingest_times)} sample_docs (hit@5/recall@5 gate via evaluator.py)")
 
         if compare_rerank:
             from evaluation.evaluator import evaluate_with_rerank_comparison
