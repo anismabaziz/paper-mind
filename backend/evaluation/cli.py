@@ -7,8 +7,7 @@ only ever happens on purpose.
 
 Free local (no keys, default):
 docker compose up qdrant                          # or `docker compose up` (exposes http://localhost:6333)
-VECTOR_BACKEND=qdrant EMBED_BACKEND=local \
-          uv run python -m evaluation.cli --live --no-judge  # hit@5/recall@5 only, no Google
+uv run python -m evaluation.cli --live --no-judge  # hit@5/recall@5 only, no Google
 
 With LLM judge (needs a chat key):
 uv run python -m evaluation.cli --live            # full report (needs GOOGLE_API_KEY or GROQ_API_KEY per MODE)
@@ -73,15 +72,13 @@ def run(
 
     fixture = load_fixture()
     # Free local retrieval-only (--no-judge) must not require API keys:
-    # VECTOR_BACKEND=qdrant + EMBED_BACKEND=local on http://localhost:6333 should work
-    # with no API keys. Full runs (--live) validate the chat provider as usual.
+    # VECTOR_BACKEND=qdrant on http://localhost:6333 should work with no API
+    # keys. Full runs (--live) validate the chat provider as usual.
     if not judge:
         missing = config.missing_required_vars()
         # Allow missing chat key for retrieval-only; still require DATABASE_URL etc.
         provider_keys = set(config.PROVIDER_API_KEYS.values())
         missing = [m for m in missing if m not in provider_keys]
-        # Also allow EMBED_BACKEND=gemini without GOOGLE_API_KEY when local is used?
-        # Keep strict: if EMBED_BACKEND=gemini still needs GOOGLE_API_KEY.
         if missing:
             print(
                 "PaperMind backend is missing required configuration:", file=sys.stderr

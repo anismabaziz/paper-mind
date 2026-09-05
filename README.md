@@ -47,7 +47,6 @@ backend's in [backend/.env.example](backend/.env.example).
 Keys path — flip an env var and keep using paid providers:
 
 ```bash
-export EMBED_BACKEND=gemini GOOGLE_API_KEY=...   # or keep local embeddings
 export MODE=google        # or groq with GROQ_API_KEY
 docker compose -f backend/compose.yaml up -d
 cd backend && uv run python app.py
@@ -58,7 +57,7 @@ cd backend && uv run python app.py
 | Concern | Free local (default) | Keys (opt-in) |
 |---|---|---|
 | Vector store | `VECTOR_BACKEND=qdrant` on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`), collection `pdf-index` |
-| Embeddings | `EMBED_BACKEND=local` — `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume | `EMBED_BACKEND=gemini` — `gemini-embedding-001` (768d), needs `GOOGLE_API_KEY` |
+| Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume — no API key | Same |
 | Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, `FETCH_K=50` → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) | Same |
 | Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata | Same |
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all | Same |
@@ -66,7 +65,7 @@ cd backend && uv run python app.py
 | Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no Google) — see `backend/README.md` | `--live` with judge needs the chat key |
 
 All free-path knobs live in `backend/.env.example`:
-`VECTOR_BACKEND`, `EMBED_BACKEND`, `RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
+`VECTOR_BACKEND`, `RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
 `USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`, `FETCH_K`.
 
 The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only).
@@ -171,7 +170,7 @@ The evaluator (`backend/evaluation/`) measures retrieval against
 - Frontend: React, TypeScript, Vite, Tailwind CSS, Zustand, React Query
 - Database: Postgres
 - Vector store: Qdrant (local, `http://localhost:6333`)
-- Embeddings: BGE-M3 local (`EMBED_BACKEND=local`, default) or Gemini (`gemini-embedding-001`)
+- Embeddings: BGE-M3 local via `sentence-transformers` (CPU, 1024d, no key)
 - LLM: Google Gemini or Groq (chosen with `MODE`)
 - Chunking: `tiktoken` `cl100k_base`, `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50`
 - Retrieval: hybrid dense + BM25 (`rank-bm25`) with RRF, gated local cross-encoder reranker

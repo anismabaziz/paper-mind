@@ -34,7 +34,6 @@ MODE = os.getenv("MODE", "google").lower()
 # can be toggled without reloading this module.
 
 # Model Constants
-EMBEDDING_MODEL = "gemini-embedding-001"
 CHAT_MODEL = "gemini-2.0-flash"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
@@ -72,13 +71,6 @@ class VectorBackend(str, Enum):
     QDRANT = "qdrant"
 
 
-class EmbedBackend(str, Enum):
-    """EmbedBackend."""
-
-    LOCAL = "local"
-    GEMINI = "gemini"
-
-
 class ChatProvider(str, Enum):
     """ChatProvider."""
 
@@ -87,16 +79,11 @@ class ChatProvider(str, Enum):
 
 
 _VALID_VECTOR_BACKENDS = {b.value for b in VectorBackend}
-_VALID_EMBED_BACKENDS = {b.value for b in EmbedBackend}
 _VALID_PROVIDERS = {p.value for p in ChatProvider}
 
 
 def _vector_backend() -> str:
     return os.getenv("VECTOR_BACKEND", VectorBackend.QDRANT.value).lower()
-
-
-def _embed_backend() -> str:
-    return os.getenv("EMBED_BACKEND", EmbedBackend.LOCAL.value).lower()
 
 
 def _chat_provider() -> str:
@@ -107,12 +94,11 @@ def missing_required_vars():
     """
     Return the list of required environment variables that are unset or invalid.
 
-    Validation is driven by the three backend enums above so adding a new
+    Validation is driven by the backend enums above so adding a new
     backend only touches the enum definition, not a cascade of if/else.
     """
     mode = _chat_provider()
     vector_backend = _vector_backend()
-    embed_backend = _embed_backend()
 
     required = ["DATABASE_URL"]
     if vector_backend not in _VALID_VECTOR_BACKENDS:
@@ -130,14 +116,6 @@ def missing_required_vars():
         missing.append(f"MODE (got {mode!r}, expected 'google' or 'groq')")
     elif provider_key and not os.getenv(provider_key):
         missing.append(provider_key)
-
-    if embed_backend not in _VALID_EMBED_BACKENDS:
-        missing.append(
-            f"EMBED_BACKEND (got {embed_backend!r}, expected 'local' or 'gemini')"
-        )
-    elif embed_backend == EmbedBackend.GEMINI.value and not os.getenv("GOOGLE_API_KEY"):
-        if "GOOGLE_API_KEY" not in missing:
-            missing.append("GOOGLE_API_KEY")
 
     return missing
 

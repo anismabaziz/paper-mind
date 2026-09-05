@@ -15,7 +15,7 @@ Tests never load the real model: ``AIService.get_embeddings`` is monkeypatched
 or ``LocalEmbeddingService._embed_batch`` is stubbed, and the import of
 ``sentence_transformers`` is lazy so ``pytest`` does not require the package
 or a network call. When the package is not installed, a clear error is raised
-only when the local backend is actually selected.
+only when embeddings are actually generated.
 """
 
 import os
@@ -36,9 +36,8 @@ def _get_model():
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise ImportError(
-                "sentence-transformers is required for EMBED_BACKEND=local. "
-                "Install it with `uv sync` or `pip install sentence-transformers`, "
-                "or switch to EMBED_BACKEND=gemini."
+                "sentence-transformers is required for embedding. "
+                "Install it with `uv sync` or `pip install sentence-transformers`."
             ) from exc
 
         model_name = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-m3")
