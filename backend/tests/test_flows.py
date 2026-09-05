@@ -1,9 +1,9 @@
 """
-    Service-layer flow tests.
+Service-layer flow tests.
 
-    Every external edge is a fake: vector index, embeddings, LLM, and storage
-    are monkeypatched; the repository runs against an in-memory sqlite. No test
-    touches Pinecone, an LLM provider, a real Postgres, or the real upload dir.
+Every external edge is a fake: vector index, embeddings, LLM, and storage
+are monkeypatched; the repository runs against an in-memory sqlite. No test
+touches Pinecone, an LLM provider, a real Postgres, or the real upload dir.
 """
 
 import config
@@ -28,6 +28,7 @@ from services.vector_service import TOP_K, shape_sources
 
 @pytest.fixture
 def app_module(monkeypatch):
+    """Do app module."""
     import app
 
     return importlib.import_module("app")
@@ -35,6 +36,7 @@ def app_module(monkeypatch):
 
 @pytest.fixture
 def repo():
+    """Do repo."""
     engine = create_engine(
         "sqlite://",
         poolclass=StaticPool,
@@ -45,41 +47,53 @@ def repo():
 
 
 class FakeStorage:
-    """
-        In-memory stand-in for the storage seam.
-    """
+    """In-memory stand-in for the storage layer."""
 
     def __init__(self):
+        """Initialize."""
         self.blobs = {}
 
     def save(self, filename, content):
+        """Do save."""
         self.blobs[filename] = content
 
     def open(self, filename):
+        """Do open."""
         return self.blobs[filename]
 
     def exists(self, filename):
+        """Do exists."""
         return filename in self.blobs
 
     def delete(self, filename):
+        """Do delete."""
         self.blobs.pop(filename, None)
 
     def list(self):
-        return [{"name": name, "size": len(data)} for name, data in sorted(self.blobs.items())]
+        """Do list."""
+        return [
+            {"name": name, "size": len(data)}
+            for name, data in sorted(self.blobs.items())
+        ]
 
     def url(self, filename):
+        """Do url."""
         return f"/storage/{filename}"
 
 
 @pytest.fixture
 def fake_storage(monkeypatch, app_module):
+    """Do fake storage."""
     storage = FakeStorage()
     monkeypatch.setattr(app_module, "storage", storage)
     return storage
 
 
 class FakeVectorService:
+    """FakeVectorService."""
+
     def __init__(self):
+        """Initialize."""
         self.upserts = []
         self.deleted = []
         self.deleted_all = False
@@ -92,69 +106,89 @@ class FakeVectorService:
             }
         ]
 
-    def upsert_vectors(self, embeddings, texts, filename):
+    def upsert_vectors(self, embeddings, texts, filename, page_numbers=None, **kwargs):
+        """Do upsert vectors."""
         self.upserts.append((embeddings, texts, filename))
 
-    def query_vectors(self, embedding, filename, top_k=TOP_K):
+    def query_vectors(
+        self, embedding, filename, top_k=TOP_K, query_text=None, alpha=None, **kwargs
+    ):
         # Route through the real shaping so flow tests see the same
         # dedupe/bound/order behavior as production retrieval.
+        """Do query vectors."""
         return shape_sources(self.matches)
 
     def delete_by_filename(self, filename):
+        """Do delete by filename."""
         self.deleted.append(filename)
 
     def delete_all(self):
+        """Do delete all."""
         self.deleted_all = True
 
 
 @pytest.fixture
 def fake_vectors(monkeypatch, app_module):
+    """Do fake vectors."""
     fake = FakeVectorService()
     monkeypatch.setattr(app_module.VectorService, "upsert_vectors", fake.upsert_vectors)
+    monkeypatch.setattr(app_module.VectorService, "upsert_chunks", fake.upsert_vectors)
     monkeypatch.setattr(app_module.VectorService, "query_vectors", fake.query_vectors)
-    monkeypatch.setattr(app_module.VectorService, "delete_by_filename", fake.delete_by_filename)
+    monkeypatch.setattr(
+        app_module.VectorService, "delete_by_filename", fake.delete_by_filename
+    )
     monkeypatch.setattr(app_module.VectorService, "delete_all", fake.delete_all)
     return fake
 
 
 @pytest.fixture
 def fake_ai(monkeypatch, app_module):
+    """Do fake ai."""
     calls = {"embedded": [], "answered": [], "streamed": []}
 
     def extract_text(pdf_content):
+        """Do extract text."""
         return "fake document text"
 
     def split_text(text, chunk_size=600, chunk_overlap=100):
+        """Do split text."""
         return ["chunk about topic", "another chunk"]
 
     monkeypatch.setattr(PDFParser, "extract_text", staticmethod(extract_text))
     monkeypatch.setattr(DocumentParser, "split_text", staticmethod(split_text))
 
     def get_embeddings(texts):
+        """Do get embeddings."""
         if isinstance(texts, str):
             texts = [texts]
         calls["embedded"].extend(texts)
         return [[0.1, 0.2] for _ in texts]
 
     def generate_response(query, context):
+        """Do generate response."""
         calls["answered"].append((query, context))
         return "The answer is 42."
 
     def stream_response(query, context):
+        """Do stream response."""
         calls["streamed"].append((query, context))
         yield "The answer "
         yield "is 42."
 
-    monkeypatch.setattr(app_module.AIService, "get_embeddings", staticmethod(get_embeddings))
-    monkeypatch.setattr(app_module.AIService, "generate_response", staticmethod(generate_response))
-    monkeypatch.setattr(app_module.AIService, "stream_response", staticmethod(stream_response))
+    monkeypatch.setattr(
+        app_module.AIService, "get_embeddings", staticmethod(get_embeddings)
+    )
+    monkeypatch.setattr(
+        app_module.AIService, "generate_response", staticmethod(generate_response)
+    )
+    monkeypatch.setattr(
+        app_module.AIService, "stream_response", staticmethod(stream_response)
+    )
     return calls
 
 
 def parse_sse(body):
-    """
-        Split an SSE body into (event, data) tuples.
-    """
+    """Split an SSE body into (event, data) tuples."""
     events = []
     for block in body.split("\n\n"):
         if not block.strip():
@@ -162,15 +196,16 @@ def parse_sse(body):
         name, data = None, None
         for line in block.split("\n"):
             if line.startswith("event: "):
-                name = line[len("event: "):]
+                name = line[len("event: ") :]
             elif line.startswith("data: "):
-                data = json.loads(line[len("data: "):])
+                data = json.loads(line[len("data: ") :])
         events.append((name, data))
     return events
 
 
 @pytest.fixture
 def client(app_module, repo, fake_storage, fake_vectors, fake_ai):
+    """Do client."""
     monkeypatch_fixture = pytest.MonkeyPatch()
     monkeypatch_fixture.setattr(app_module, "repository", repo)
     with app_module.app.test_client() as client:
@@ -179,11 +214,13 @@ def client(app_module, repo, fake_storage, fake_vectors, fake_ai):
 
 
 def upload(client, name="doc.pdf"):
+    """Do upload."""
     data = {"file": (io.BytesIO(b"%PDF-fake-bytes"), name)}
     return client.post("/upload", data=data, content_type="multipart/form-data")
 
 
 def test_upload_stores_bytes_and_creates_record(client, fake_storage, repo):
+    """Do test upload stores bytes and creates record."""
     response = upload(client)
 
     assert response.status_code == 200
@@ -199,10 +236,12 @@ def test_upload_stores_bytes_and_creates_record(client, fake_storage, repo):
 
 
 def test_upload_without_file_is_rejected(client):
+    """Do test upload without file is rejected."""
     assert client.post("/upload", data={}).status_code == 400
 
 
 def test_process_embeds_and_marks_processed(client, fake_vectors, fake_ai):
+    """Do test process embeds and marks processed."""
     filename = upload(client).get_json()["file"]["name"]
 
     response = client.post("/process-file", json={"filename": filename})
@@ -213,12 +252,16 @@ def test_process_embeds_and_marks_processed(client, fake_vectors, fake_ai):
     assert upserted_file == filename
     assert texts, "chunks should be extracted before embedding"
     assert fake_ai["embedded"], "chunks should be embedded"
-    assert client.post("/file/is-processed", json={"filename": filename}).get_json()[
-        "is_processed"
-    ] is True
+    assert (
+        client.post("/file/is-processed", json={"filename": filename}).get_json()[
+            "is_processed"
+        ]
+        is True
+    )
 
 
 def test_ask_streams_tokens_and_persists_sources(client, fake_vectors, fake_ai):
+    """Do test ask streams tokens and persists sources."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
 
@@ -253,18 +296,26 @@ def test_ask_streams_tokens_and_persists_sources(client, fake_vectors, fake_ai):
     )
 
 
-def test_provider_failure_still_leaves_a_visible_reply(client, fake_vectors, fake_ai, app_module, capsys):
+def test_provider_failure_still_leaves_a_visible_reply(
+    client, fake_vectors, fake_ai, app_module, capsys
+):
+    """Do test provider failure still leaves a visible reply."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
 
     def broken_stream(query, context):
+        """Do broken stream."""
         raise RuntimeError("provider down")
         yield  # pragma: no cover
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(app_module.AIService, "stream_response", staticmethod(broken_stream))
+    monkeypatch.setattr(
+        app_module.AIService, "stream_response", staticmethod(broken_stream)
+    )
     try:
-        response = client.post("/response", json={"query": "what?", "filename": filename})
+        response = client.post(
+            "/response", json={"query": "what?", "filename": filename}
+        )
     finally:
         monkeypatch.undo()
 
@@ -283,9 +334,7 @@ def test_provider_failure_still_leaves_a_visible_reply(client, fake_vectors, fak
 
 
 def test_primary_provider_failure_falls_back_to_secondary(app_module, monkeypatch):
-    """
-        The primary provider failing before any token hands off to the fallback.
-    """
+    """The primary provider failing before any token hands off to the fallback."""
     from services.ai_service import AIService
     from services.groq_service import GroqService
     from services.google_service import GoogleService
@@ -293,27 +342,25 @@ def test_primary_provider_failure_falls_back_to_secondary(app_module, monkeypatc
     monkeypatch.setattr(config, "MODE", "groq")
 
     def primary_stream(query, context):
+        """Do primary stream."""
         raise RuntimeError("primary down")
         yield  # pragma: no cover
 
     def fallback_stream(query, context):
+        """Do fallback stream."""
         yield "fallback "
 
-    monkeypatch.setattr(
-        GroqService, "stream_response", staticmethod(primary_stream)
-    )
-    monkeypatch.setattr(
-        GoogleService, "stream_response", staticmethod(fallback_stream)
-    )
+    monkeypatch.setattr(GroqService, "stream_response", staticmethod(primary_stream))
+    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(fallback_stream))
 
     tokens = list(AIService.stream_response("q", "ctx"))
     assert "".join(tokens) == "fallback "
 
 
-def test_midstream_primary_failure_does_not_replay_via_fallback(app_module, monkeypatch):
-    """
-        A primary that dies mid-stream surfaces the error instead of restarting.
-    """
+def test_midstream_primary_failure_does_not_replay_via_fallback(
+    app_module, monkeypatch
+):
+    """A primary that dies mid-stream surfaces the error instead of restarting."""
     from services.ai_service import AIService
     from services.groq_service import GroqService
     from services.google_service import GoogleService
@@ -321,21 +368,19 @@ def test_midstream_primary_failure_does_not_replay_via_fallback(app_module, monk
     monkeypatch.setattr(config, "MODE", "groq")
 
     def primary_stream(query, context):
+        """Do primary stream."""
         yield "partial"
         raise RuntimeError("midstream failure")
 
     fallback_calls = []
 
     def fallback_stream(query, context):
+        """Do fallback stream."""
         fallback_calls.append((query, context))
         yield "fallback"
 
-    monkeypatch.setattr(
-        GroqService, "stream_response", staticmethod(primary_stream)
-    )
-    monkeypatch.setattr(
-        GoogleService, "stream_response", staticmethod(fallback_stream)
-    )
+    monkeypatch.setattr(GroqService, "stream_response", staticmethod(primary_stream))
+    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(fallback_stream))
 
     with pytest.raises(RuntimeError):
         list(AIService.stream_response("q", "ctx"))
@@ -344,9 +389,7 @@ def test_midstream_primary_failure_does_not_replay_via_fallback(app_module, monk
 
 
 def test_primary_success_does_not_invoke_fallback(app_module, monkeypatch):
-    """
-        When the primary streams fully, the fallback must never be called.
-    """
+    """When the primary streams fully, the fallback must never be called."""
     from services.ai_service import AIService
     from services.groq_service import GroqService
     from services.google_service import GoogleService
@@ -354,20 +397,18 @@ def test_primary_success_does_not_invoke_fallback(app_module, monkeypatch):
     monkeypatch.setattr(config, "MODE", "groq")
 
     def primary_stream(query, context):
+        """Do primary stream."""
         yield "primary answer"
 
     fallback_calls = []
 
     def fallback_stream(query, context):
+        """Do fallback stream."""
         fallback_calls.append((query, context))
         yield "fallback"
 
-    monkeypatch.setattr(
-        GroqService, "stream_response", staticmethod(primary_stream)
-    )
-    monkeypatch.setattr(
-        GoogleService, "stream_response", staticmethod(fallback_stream)
-    )
+    monkeypatch.setattr(GroqService, "stream_response", staticmethod(primary_stream))
+    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(fallback_stream))
 
     tokens = list(AIService.stream_response("q", "ctx"))
     assert "".join(tokens) == "primary answer"
@@ -375,12 +416,23 @@ def test_primary_success_does_not_invoke_fallback(app_module, monkeypatch):
 
 
 def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fake_ai):
+    """Do test sources panel order matches llm context order."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
 
     fake_vectors.matches = [
-        {"content": "weak chunk", "document": "doc.pdf", "chunk_index": 2, "score": 0.31},
-        {"content": "strong chunk", "document": "doc.pdf", "chunk_index": 1, "score": 0.95},
+        {
+            "content": "weak chunk",
+            "document": "doc.pdf",
+            "chunk_index": 2,
+            "score": 0.31,
+        },
+        {
+            "content": "strong chunk",
+            "document": "doc.pdf",
+            "chunk_index": 1,
+            "score": 0.95,
+        },
     ]
 
     response = client.post("/response", json={"query": "what?", "filename": filename})
@@ -400,7 +452,10 @@ def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fak
     )
 
 
-def test_delete_removes_everything_with_no_orphans(client, fake_storage, fake_vectors, repo):
+def test_delete_removes_everything_with_no_orphans(
+    client, fake_storage, fake_vectors, repo
+):
+    """Do test delete removes everything with no orphans."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
     client.post("/response", json={"query": "what?", "filename": filename})
@@ -419,9 +474,7 @@ def test_delete_removes_everything_with_no_orphans(client, fake_storage, fake_ve
 
 
 def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
-    """
-        Running the migrations on an empty database produces the app schema.
-    """
+    """Running the migrations on an empty database produces the app schema."""
     db_path = tmp_path / "fresh.db"
     backend_dir = pathlib.Path(__file__).resolve().parent.parent
     env = {

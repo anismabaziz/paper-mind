@@ -15,5 +15,18 @@ services:
       timeout: 3s
       retries: 15
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      # VECTOR_BACKEND is read by the app; qdrant itself needs no config.
+      # Exposed on localhost:6333 for host runs and on qdrant:6333 inside compose.
+      QDRANT__SERVICE__GRPC_PORT: 6334
+
 volumes:
   pgdata:
+  qdrant_storage:
