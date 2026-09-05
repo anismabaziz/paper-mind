@@ -38,11 +38,20 @@ EMBEDDING_MODEL = "gemini-embedding-001"
 CHAT_MODEL = "gemini-2.0-flash"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
+# Local embedding model (free, CPU-capable). BGE-M3 supports dense+sparse, 8192
+# context, and Matryoshka truncation to 1024d.
+LOCAL_EMBEDDING_MODEL = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-m3")
+LOCAL_EMBED_DIM = int(os.getenv("LOCAL_EMBED_DIM", "1024"))
+
 PROVIDER_API_KEYS = {"google": "GOOGLE_API_KEY", "groq": "GROQ_API_KEY"}
 
 
 def _vector_backend():
     return os.getenv("VECTOR_BACKEND", "qdrant").lower()
+
+
+def _embed_backend():
+    return os.getenv("EMBED_BACKEND", "local").lower()
 
 
 def missing_required_vars():
@@ -72,6 +81,13 @@ def missing_required_vars():
         missing.append(f"MODE (got {mode!r}, expected 'google' or 'groq')")
     elif not os.getenv(provider_key):
         missing.append(provider_key)
+
+    embed_backend = _embed_backend()
+    if embed_backend not in ("local", "gemini"):
+        missing.append(f"EMBED_BACKEND (got {embed_backend!r}, expected 'local' or 'gemini')")
+    elif embed_backend == "gemini" and not os.getenv("GOOGLE_API_KEY"):
+        if "GOOGLE_API_KEY" not in missing:
+            missing.append("GOOGLE_API_KEY")
 
     return missing
 

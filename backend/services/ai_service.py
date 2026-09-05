@@ -6,6 +6,7 @@ from google.genai import types
 from services.concurrency import map_batches_concurrently
 from services.google_service import GoogleService
 from services.groq_service import GroqService
+from services.local_embeddings import LocalEmbeddingService
 
 class AIService:
     # Gemini BatchEmbedContents is capped at 100 contents per request
@@ -39,6 +40,10 @@ class AIService:
         raise last_exc  # pragma: no cover
 
     @staticmethod
+    def _local_embed_batch(batch):
+        return LocalEmbeddingService._embed_batch(batch)
+
+    @staticmethod
     def get_embeddings(texts):
         if isinstance(texts, str):
             texts = [texts]
@@ -46,12 +51,24 @@ class AIService:
         if not texts:
             return []
 
+        embed_backend = config._embed_backend()
         batches = [texts[i : i + AIService.EMBED_BATCH_SIZE] for i in range(0, len(texts), AIService.EMBED_BATCH_SIZE)]
+
+        if embed_backend == "local":
+            results = map_batches_concurrently(
+                batches,
+                AIService._local_embed_batch,
+                label=f"AIService.get_embeddings[local]: {len(texts)} texts",
+            )
+            all_values: list = []
+            for batch_vectors in results:
+                all_values.extend(batch_vectors)
+            return all_values
 
         results = map_batches_concurrently(
             batches,
             AIService._embed_batch_with_retry,
-            label=f"AIService.get_embeddings: {len(texts)} texts",
+            label=f"AIService.get_embeddings[gemini]: {len(texts)} texts",
         )
 
         all_values: list = []

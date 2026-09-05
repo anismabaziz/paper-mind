@@ -27,6 +27,35 @@ services:
       # Exposed on localhost:6333 for host runs and on qdrant:6333 inside compose.
       QDRANT__SERVICE__GRPC_PORT: 6334
 
+  backend:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://papermind:papermind@db:5432/papermind
+      VECTOR_BACKEND: ${VECTOR_BACKEND:-qdrant}
+      EMBED_BACKEND: ${EMBED_BACKEND:-local}
+      QDRANT_URL: http://qdrant:6333
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
+      MODE: ${MODE:-google}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      # Hugging Face cache: keep BGE-M3 (~2GB) on a persistent volume
+      # so the download only happens on first run. Host cache is also
+      # respected when running outside Docker via HF_HOME.
+      HF_HOME: /app/.cache/huggingface
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/app/data/storage
+      - hf_cache:/app/.cache/huggingface
+    depends_on:
+      db:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
 volumes:
   pgdata:
   qdrant_storage:
+  uploads:
+  hf_cache:
