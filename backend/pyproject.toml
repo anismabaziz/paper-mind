@@ -22,6 +22,7 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "tiktoken>=0.14.0",
     "cryptography>=46.0.6",
+    "pydantic-settings>=2.15.0",
 ]
 
 [project.optional-dependencies]
