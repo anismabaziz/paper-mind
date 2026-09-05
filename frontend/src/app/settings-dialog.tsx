@@ -16,12 +16,12 @@ type Feedback = { kind: "success" | "error"; text: string } | null;
 
 export default function SettingsDialog() {
   const { isOpen, close } = useSettingsUi();
-  // Demo mode serves settings with no token, so we try the load first and
-  // only fall back to the login form when the backend answers 401.
-  const [loginRequired, setLoginRequired] = useState(!getToken());
+  // Demo mode serves settings with no token, so we always attempt the load
+  // first and only fall back to the login form when the backend answers 401.
+  const [loginRequired, setLoginRequired] = useState(false);
 
   useEffect(() => {
-    if (isOpen) setLoginRequired(!getToken());
+    if (isOpen) setLoginRequired(false);
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -45,7 +45,12 @@ export default function SettingsDialog() {
         {loginRequired ? (
           <LoginForm onLoggedIn={() => setLoginRequired(false)} />
         ) : (
-          <SettingsForm onUnauthorized={() => setLoginRequired(true)} />
+          <SettingsForm
+            onUnauthorized={() => {
+              clearToken();
+              setLoginRequired(true);
+            }}
+          />
         )}
       </div>
     </div>
@@ -118,9 +123,9 @@ function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
   });
 
   useEffect(() => {
-    const status = axiosStatus(settingsQuery.error);
-    if (status === 401) onUnauthorized();
-  }, [settingsQuery.error, onUnauthorized]);
+    if (axiosStatus(settingsQuery.error) === 401) onUnauthorized();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react only to the query error, not the callback identity
+  }, [settingsQuery.error]);
 
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
@@ -272,12 +277,14 @@ function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
               Test connection
             </Button>
           </div>
-          <button
-            onClick={handleLogout}
-            className="text-[10px] font-medium text-slate-400 hover:text-slate-600 uppercase tracking-wider cursor-pointer"
-          >
-            Sign out
-          </button>
+          {getToken() && (
+            <button
+              onClick={handleLogout}
+              className="text-[10px] font-medium text-slate-400 hover:text-slate-600 uppercase tracking-wider cursor-pointer"
+            >
+              Sign out
+            </button>
+          )}
         </>
       )}
     </div>
