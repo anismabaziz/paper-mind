@@ -6,7 +6,6 @@ are monkeypatched; the repository runs against an in-memory sqlite. No test
 touches a vector store, an LLM provider, a real Postgres, or the real upload dir.
 """
 
-import config
 import importlib
 import io
 import json

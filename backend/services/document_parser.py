@@ -15,6 +15,7 @@ import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from services.pdf_service import PDFParser
+from settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -28,25 +29,12 @@ class Chunk:
 
 
 def _chunk_size() -> int:
-    try:
-        import config as _cfg  # lazy so tests can monkeypatch env before import
-
-        return int(getattr(_cfg, "CHUNK_SIZE_TOKENS", 512))
-    except Exception:
-        return int(os.getenv("CHUNK_SIZE_TOKENS", "512"))
+    return get_settings().chunking.chunk_size_tokens
 
 
 def _chunk_overlap() -> int:
-    try:
-        import config as _cfg
+    return get_settings().chunking.chunk_overlap_tokens
 
-        return int(getattr(_cfg, "CHUNK_OVERLAP_TOKENS", 50))
-    except Exception:
-        return int(os.getenv("CHUNK_OVERLAP_TOKENS", "50"))
-
-
-CHUNK_SIZE = _chunk_size()
-CHUNK_OVERLAP = _chunk_overlap()
 
 # cl100k_base is the tokenizer for gpt-4 / embeddings; stable, no download.
 _ENCODING = tiktoken.get_encoding("cl100k_base")

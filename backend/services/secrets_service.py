@@ -9,9 +9,10 @@ configured. The derivation is lazy: importing this module without
 
 import base64
 import hashlib
-import os
 
 from cryptography.fernet import Fernet, InvalidToken
+
+from settings import get_settings
 
 
 class SecretsError(Exception):
@@ -21,7 +22,7 @@ class SecretsError(Exception):
 
 
 def _fernet() -> Fernet:
-    secret = os.getenv("JWT_SECRET")
+    secret = get_settings().auth.jwt_secret
     if not secret:
         raise SecretsError(
             "JWT_SECRET is required to encrypt stored API keys; set it in backend/.env"

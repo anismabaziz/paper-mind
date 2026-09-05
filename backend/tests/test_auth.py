@@ -10,7 +10,6 @@ import datetime
 import jwt as pyjwt
 import pytest
 
-import app as app_module
 from services import auth_service
 from services.auth_service import (
     AuthError,
@@ -19,6 +18,14 @@ from services.auth_service import (
     verify_password,
     verify_token,
 )
+
+
+@pytest.fixture
+def app_module():
+    """Import the app once Settings are installed for the test."""
+    import app
+
+    return app
 
 
 class FakeUserRepository:
@@ -45,7 +52,7 @@ class FakeUserRepository:
 
 
 @pytest.fixture
-def fake_repo(monkeypatch):
+def fake_repo(app_module, monkeypatch):
     """Do fake repo."""
     repo = FakeUserRepository()
     monkeypatch.setattr(app_module, "repository", repo)
@@ -53,7 +60,7 @@ def fake_repo(monkeypatch):
 
 
 @pytest.fixture
-def client(fake_repo, monkeypatch):
+def client(fake_repo, app_module, monkeypatch):
     # Endpoints behind the auth tests must not touch real dependencies.
     """Do client."""
 
@@ -98,29 +105,29 @@ def test_hashes_are_salted():
 # -- tokens -----------------------------------------------------------------
 
 
-def test_token_roundtrip():
+def test_token_roundtrip(settings_obj):
     """Do test token roundtrip."""
     token = issue_token("a@b.com")
     assert verify_token(token) == "a@b.com"
 
 
-def test_garbage_token_rejected():
+def test_garbage_token_rejected(settings_obj):
     """Do test garbage token rejected."""
     with pytest.raises(AuthError):
         verify_token("not-a-jwt")
 
 
-def test_wrong_key_rejected(monkeypatch):
+def test_wrong_key_rejected(monkeypatch, settings_obj):
     """Do test wrong key rejected."""
     token = issue_token("a@b.com")
-    monkeypatch.setenv("JWT_SECRET", "a-different-secret")
+    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "a-different-secret")
     with pytest.raises(AuthError):
         verify_token(token)
 
 
-def test_expired_token_rejected(monkeypatch):
+def test_expired_token_rejected(monkeypatch, settings_obj):
     """Do test expired token rejected."""
-    monkeypatch.setenv("JWT_SECRET", "fixed-secret")
+    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "fixed-secret")
     now = datetime.datetime.now(datetime.timezone.utc)
     expired = pyjwt.encode(
         {"sub": "a@b.com", "exp": now - datetime.timedelta(minutes=1)},
@@ -191,48 +198,48 @@ def test_login_rejects_bad_credentials(client, fake_repo):
 # -- endpoint enforcement ---------------------------------------------------
 
 
-def test_demo_mode_allows_protected_endpoints_without_token(client, monkeypatch):
+def test_demo_mode_allows_protected_endpoints_without_token(client, monkeypatch, settings_obj):
     """Do test demo mode allows protected endpoints without token."""
-    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
     assert client.get("/files").status_code == 200
 
 
-def test_demo_off_rejects_missing_token(client, monkeypatch):
+def test_demo_off_rejects_missing_token(client, monkeypatch, settings_obj):
     """Do test demo off rejects missing token."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     response = client.get("/files")
     assert response.status_code == 401
     assert "token" in response.get_json()["error"].lower()
 
 
-def test_demo_off_rejects_invalid_token(client, monkeypatch):
+def test_demo_off_rejects_invalid_token(client, monkeypatch, settings_obj):
     """Do test demo off rejects invalid token."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     response = client.get("/files", headers={"Authorization": "Bearer garbage"})
     assert response.status_code == 401
 
 
-def test_demo_off_accepts_valid_token(client, monkeypatch):
+def test_demo_off_accepts_valid_token(client, monkeypatch, settings_obj):
     """Do test demo off accepts valid token."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     assert client.get("/files", headers=auth_headers()).status_code == 200
 
 
-def test_wipe_requires_post_and_auth(client, monkeypatch):
+def test_wipe_requires_post_and_auth(client, monkeypatch, settings_obj):
     """Do test wipe requires post and auth."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     assert client.get("/delete-embeddings").status_code == 405
     assert client.post("/delete-embeddings").status_code == 401
 
-    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
     assert client.post("/delete-embeddings").status_code == 200
 
 
-def test_storage_download_is_gated(client, monkeypatch):
+def test_storage_download_is_gated(client, monkeypatch, settings_obj):
     """Do test storage download is gated."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     assert client.get("/storage/doc.pdf").status_code == 401
 
-    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
     # 404 (not 401): demo on lets the request through to the storage layer.
     assert client.get("/storage/doc.pdf").status_code == 404

@@ -45,9 +45,9 @@ def repo_with_user():
 
 
 @pytest.fixture
-def jwt_secret(monkeypatch):
-    """Set a deterministic JWT_SECRET for crypto calls."""
-    monkeypatch.setenv("JWT_SECRET", "test-secret")
+def jwt_secret(settings_obj, monkeypatch):
+    """Set a deterministic JWT secret for crypto calls."""
+    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "test-secret")
     return "test-secret"
 
 
@@ -59,17 +59,17 @@ def test_round_trip(jwt_secret):
     assert decrypt_api_key(ciphertext) == plaintext
 
 
-def test_missing_jwt_secret_fails_at_use(monkeypatch):
+def test_missing_jwt_secret_fails_at_use(settings_obj, monkeypatch):
     """Do test missing jwt secret fails at use."""
-    monkeypatch.delenv("JWT_SECRET", raising=False)
+    monkeypatch.setattr(settings_obj.auth, "jwt_secret", None)
     with pytest.raises(SecretsError, match="JWT_SECRET"):
         encrypt_api_key("sk-test")
 
 
-def test_wrong_secret_cannot_decrypt(jwt_secret, monkeypatch):
+def test_wrong_secret_cannot_decrypt(jwt_secret, settings_obj, monkeypatch):
     """Do test wrong secret cannot decrypt."""
     ciphertext = encrypt_api_key("sk-test")
-    monkeypatch.setenv("JWT_SECRET", "a-different-secret")
+    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "a-different-secret")
     with pytest.raises(SecretsError, match="decrypted"):
         decrypt_api_key(ciphertext)
 

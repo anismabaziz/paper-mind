@@ -25,7 +25,7 @@ from sqlalchemy.orm import (
 )
 from sqlalchemy.pool import StaticPool
 
-import config
+from settings import get_settings
 
 
 def _new_id():
@@ -140,12 +140,11 @@ SessionLocal = None
 
 
 def get_session_factory():
-    """Build the engine and session factory on first use, from the live env."""
+    """Build the engine and session factory on first use, from Settings."""
     global _engine, SessionLocal
     if _engine is None:
-        _engine = create_engine(
-            config.DATABASE_URL, **_engine_kwargs(config.DATABASE_URL)
-        )
+        database_url = get_settings().database.database_url
+        _engine = create_engine(database_url, **_engine_kwargs(database_url))
         SessionLocal = sessionmaker(bind=_engine)
     return SessionLocal
 

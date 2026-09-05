@@ -2,23 +2,27 @@
 Typed, validated application settings.
 
 A single pydantic-settings object reads every environment variable the
-backend consumes, grouped by concern. Importing this module never builds a
+backend consumes, grouped by concern. This is the only module allowed to
+read the environment for application configuration; everything else
+consumes a ``Settings`` instance. Importing this module never builds a
 client or touches an external service — clients live in ``providers`` and
 are built lazily on first use.
 
-Field names mirror their environment variable (``chunk_size_tokens`` ←
-``CHUNK_SIZE_TOKENS``) so validation failures name the variable to set.
-
-This module sits beside the legacy ``config`` module until every call site
-is migrated; the old module stays authoritative in the meantime.
+Field names generally mirror their environment variable
+(``chunk_size_tokens`` ← ``CHUNK_SIZE_TOKENS``) so validation failures
+name the variable to set.
 """
 
 import sys
-from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AliasChoices, Field, ValidationError, field_validator
+from dotenv import load_dotenv
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Local dev boots via `python app.py` with values in backend/.env; existing
+# process env vars keep precedence (dotenv never overrides them).
+load_dotenv()
 
 # Backend directory (storage paths are rooted here)
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -34,24 +38,23 @@ def _parse_bool(value):
 
 
 class DatabaseSettings(BaseSettings):
-    """Relational database (Postgres in dev via compose; required)."""
+    """
+    Relational database (Postgres in dev via compose; required at boot).
 
-    model_config = SettingsConfigDict(extra="ignore")
+    The URL defaults to empty so building a Settings never raises — imports
+    stay side-effect free (as under the legacy config module) and
+    :func:`validate` reports the missing variable with a readable error.
+    """
 
-    database_url: str = Field(validation_alias="DATABASE_URL")
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
-    @field_validator("database_url", mode="before")
-    @classmethod
-    def _non_empty(cls, value):
-        if value is None or not str(value).strip():
-            raise ValueError("must be set (see backend/.env.example)")
-        return value
+    database_url: str = Field(default="", validation_alias="DATABASE_URL")
 
 
 class StorageSettings(BaseSettings):
     """Where uploaded PDFs live on disk."""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     storage_dir: Path = Field(
         default=BACKEND_DIR / "data" / "storage", validation_alias="STORAGE_DIR"
@@ -61,7 +64,7 @@ class StorageSettings(BaseSettings):
 class VectorSettings(BaseSettings):
     """Qdrant connection and collection."""
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     qdrant_url: str = Field(
         default="http://localhost:6333", validation_alias="QDRANT_URL"
@@ -76,7 +79,7 @@ class EmbeddingSettings(BaseSettings):
     BGE-M3 supports dense+sparse, 8192 context, and Matryoshka truncation to 1024d.
     """
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     embedding_model: str = Field(
         default="BAAI/bge-m3", validation_alias="LOCAL_EMBEDDING_MODEL"
@@ -90,7 +93,7 @@ class ChunkingSettings(BaseSettings):
     512 tokens ~2000 chars, 10% overlap ~50.
     """
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     chunk_size_tokens: int = Field(default=512, validation_alias="CHUNK_SIZE_TOKENS")
     chunk_overlap_tokens: int = Field(
@@ -106,7 +109,7 @@ class RerankSettings(BaseSettings):
     (~80ms/50 docs vs ~10ms/50 for MiniLM).
     """
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     rerank_model: str = Field(
         default="cross-encoder/ms-marco-MiniLM-L-6-v2",
@@ -128,18 +131,13 @@ class ParsingSettings(BaseSettings):
       2-col PDFs to Docling; others stay on pymupdf fast path.
     - true: force Docling for all PDFs (requires the `docling` extra).
     - false: never use Docling, always pymupdf.
+
+    Any other spelling falls through to the heuristic, as before.
     """
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     use_docling: str = Field(default="auto", validation_alias="USE_DOCLING")
-
-    @field_validator("use_docling")
-    @classmethod
-    def _known_mode(cls, value):
-        if str(value).lower() not in ("auto", "true", "false"):
-            raise ValueError("USE_DOCLING must be one of: auto, true, false")
-        return str(value).lower()
 
 
 class AuthSettings(BaseSettings):
@@ -150,7 +148,7 @@ class AuthSettings(BaseSettings):
     API keys, so changing it invalidates those keys.
     """
 
-    model_config = SettingsConfigDict(extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     jwt_secret: str | None = Field(default=None, validation_alias="JWT_SECRET")
     demo_mode: bool = Field(default=False, validation_alias="DEMO_MODE")
@@ -180,10 +178,21 @@ class Settings(BaseSettings):
     auth: AuthSettings = Field(default_factory=AuthSettings)
 
 
-@lru_cache(maxsize=1)
+_settings: Settings | None = None
+
+
 def get_settings() -> Settings:
-    """Build the process-wide settings instance once."""
-    return Settings()
+    """Return the process-wide settings instance, building it once."""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+def set_settings(settings: Settings | None) -> None:
+    """Install or clear the process-wide instance (app boot and tests)."""
+    global _settings
+    _settings = settings
 
 
 def jwt_secret_warning(settings: Settings) -> str | None:
@@ -198,13 +207,14 @@ def jwt_secret_warning(settings: Settings) -> str | None:
 
 def validate(settings: Settings | None = None) -> None:
     """Exit with a readable error if required configuration is missing."""
-    try:
-        settings = settings or get_settings()
-    except ValidationError as e:
+    settings = settings or get_settings()
+    missing = []
+    if not settings.database.database_url.strip():
+        missing.append("DATABASE_URL")
+    if missing:
         print("PaperMind backend is missing required configuration:", file=sys.stderr)
-        for error in e.errors():
-            env_var = str(error["loc"][-1]).upper()
-            print(f"  - {env_var}: {error['msg']}", file=sys.stderr)
+        for var in missing:
+            print(f"  - {var}: must be set (see backend/.env.example)", file=sys.stderr)
         print(
             "\nFix: copy backend/.env.example to backend/.env and fill in the "
             "values above, then start the app again.",

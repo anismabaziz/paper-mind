@@ -3,7 +3,7 @@
 import hashlib
 import uuid
 
-import config
+from providers import get_vector_index
 from services.concurrency import map_batches_concurrently
 from services.hybrid import build_sparse_vector, build_sparse_vectors
 
@@ -137,7 +137,7 @@ class VectorService:
             vectors = VectorService._build_vectors_from_chunks(
                 embeddings, chunks, filename, 0
             )
-            return config.vector_index.upsert(vectors)
+            return get_vector_index().upsert(vectors)
         batches: list[list[dict]] = []
         for start in range(0, len(embeddings), VectorService.UPSERT_BATCH_SIZE):
             batch_embeddings = embeddings[
@@ -149,7 +149,7 @@ class VectorService:
             batches.append(vectors)
         ordered_responses = map_batches_concurrently(
             batches,
-            config.vector_index.upsert,
+            get_vector_index().upsert,
             label=f"VectorService.upsert_vectors: {len(embeddings)} vectors",
         )
         return ordered_responses[-1] if ordered_responses else None
@@ -205,7 +205,7 @@ class VectorService:
             try:
                 # Single Qdrant hybrid query: dense + BM25 sparse via
                 # rank-bm25 on the ``sparse`` field, fused with RRF(k=60)
-                search_results = config.vector_index.query(
+                search_results = get_vector_index().query(
                     vector=embedding,
                     top_k=top_k,
                     include_metadata=True,
@@ -218,14 +218,14 @@ class VectorService:
                 print(
                     f"VectorService hybrid query degraded to dense (TypeError): {exc}"
                 )
-                search_results = config.vector_index.query(
+                search_results = get_vector_index().query(
                     vector=embedding,
                     top_k=top_k,
                     include_metadata=True,
                     filter={"pdf_name": filename},
                 )
         else:
-            search_results = config.vector_index.query(
+            search_results = get_vector_index().query(
                 vector=embedding,
                 top_k=top_k,
                 include_metadata=True,
@@ -252,9 +252,9 @@ class VectorService:
     @staticmethod
     def delete_by_filename(filename):
         """Do delete by filename."""
-        return config.vector_index.delete(filter={"pdf_name": filename})
+        return get_vector_index().delete(filter={"pdf_name": filename})
 
     @staticmethod
     def delete_all():
         """Do delete all."""
-        return config.vector_index.delete(delete_all=True)
+        return get_vector_index().delete(delete_all=True)

@@ -11,7 +11,6 @@ from :class:`services.docling_parser.DoclingParser`; others stay on the
 from __future__ import annotations
 
 import io
-import os
 import re
 
 
@@ -102,7 +101,9 @@ def should_use_docling(filename: str, file_bytes: bytes | None) -> bool:
       disables it, ``auto`` (default) uses the lightweight heuristic.
     - When docling is not installed, always return False (graceful fallback).
     """
-    use = os.getenv("USE_DOCLING", "auto").lower()
+    from settings import get_settings
+
+    use = get_settings().parsing.use_docling.lower()
     if use in ("0", "false", "no", "off", "disable", "disabled"):
         return False
     try:

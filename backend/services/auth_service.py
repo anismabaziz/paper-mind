@@ -7,13 +7,14 @@ itself stays in place either way.
 """
 
 import datetime
-import os
 import secrets
 from functools import wraps
 
 import bcrypt
 import jwt
 from flask import g, jsonify, request
+
+from settings import get_settings
 
 TOKEN_TTL = datetime.timedelta(hours=24)
 
@@ -25,7 +26,7 @@ def _secret():
     # JWT_SECRET is optional so a demo run boots without one; a per-process
     # random fallback is fine there since tokens need not survive restarts.
     global _random_secret
-    env_secret = os.getenv("JWT_SECRET")
+    env_secret = get_settings().auth.jwt_secret
     if env_secret:
         return env_secret
     if _random_secret is None:
@@ -35,7 +36,7 @@ def _secret():
 
 def is_demo_mode() -> bool:
     """Do is demo mode."""
-    return os.getenv("DEMO_MODE", "false").lower() in ("1", "true", "yes")
+    return get_settings().auth.demo_mode
 
 
 def hash_password(password: str) -> str:

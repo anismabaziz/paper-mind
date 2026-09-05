@@ -16,8 +16,7 @@ from flask import (
 )
 from flask_cors import CORS
 
-import config
-from config import INDEX_NAME
+import settings
 from db import repository
 from storage import storage
 from services.document_parser import DocumentParser
@@ -40,7 +39,7 @@ from services.chat_settings_service import (
 )
 from services.secrets_service import decrypt_api_key, encrypt_api_key
 
-config.validate()
+settings.validate()
 
 app = Flask(__name__)
 CORS(app)
@@ -100,7 +99,7 @@ def login():
 @require_auth
 def download_file(filename):
     """Do download file."""
-    return send_from_directory(config.STORAGE_DIR, filename)
+    return send_from_directory(settings.get_settings().storage.storage_dir, filename)
 
 
 @app.route("/upload", methods=["POST"])

@@ -20,7 +20,9 @@ import argparse
 import json
 import sys
 
-import config
+import settings
+from providers import get_vector_index
+
 from evaluation.evaluator import (
     DEFAULT_K,
     evaluate,
@@ -86,24 +88,12 @@ def run(
             "LLM generation and judging need an API key. Pass --api-key with "
             "the key for the chosen --provider, or run with --no-judge."
         )
-    missing = config.missing_required_vars()
-    if missing:
-        print(
-            "PaperMind backend is missing required configuration:", file=sys.stderr
-        )
-        for var in missing:
-            print(f"  - {var}", file=sys.stderr)
-        print(
-            "\nFix: copy backend/.env.example to backend/.env and fill in the "
-            "values above, then start the app again.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    settings.validate()
     embed_fn, generate_fn, judge_fn = make_live_components(provider, model, api_key)
     if not judge:
         judge_fn = None
 
-    index = config.vector_index
+    index = get_vector_index()
     try:
         ingest_times: list[float] = []
         for doc in fixture["documents"]:
@@ -132,12 +122,7 @@ def run(
             # Return the reranked report for the JSON output, but keep both
             return result["on"] if isinstance(result.get("on"), dict) else result
 
-        # rerank=None respects RERANK env; True/False forces it
-        if rerank is not None:
-            import os
-
-            os.environ["RERANK"] = "true" if rerank else "false"
-
+        # rerank=None respects Settings; True/False forces it
         report = evaluate(
             fixture,
             index,

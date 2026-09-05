@@ -16,20 +16,17 @@ when reranking is actually requested, and the model is cached after first load
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 
-import config
-
-_DEFAULT_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+from settings import get_settings
 
 _reranker = None
 _reranker_lock = threading.Lock()
 
 
 def _get_model_name() -> str:
-    return os.getenv("RERANK_MODEL", getattr(config, "RERANK_MODEL", _DEFAULT_MODEL))
+    return get_settings().rerank.rerank_model
 
 
 def _get_reranker():
@@ -60,10 +57,7 @@ def _get_reranker():
 def _is_enabled(explicit: bool | None = None) -> bool:
     if explicit is not None:
         return bool(explicit)
-    try:
-        return config.is_rerank_enabled()
-    except Exception:
-        return os.getenv("RERANK", "false").lower() in ("1", "true", "yes")
+    return get_settings().rerank.enabled
 
 
 def rerank(

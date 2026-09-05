@@ -4,7 +4,7 @@ Qdrant backend adapter.
 Provides ``upsert``/``query``/``delete`` so ``VectorService`` and
 ``evaluation/evaluator.py`` share one store interface.
 
-Collection ``pdf-index`` (``config.INDEX_NAME``) is created lazily with:
+Collection ``pdf-index`` (the Settings vector index name) is created lazily with:
 
 * dense vector ``size 1024`` ``distance Cosine``
 * ``sparse_vectors`` with ``modifier IDF`` (BM25 sparse via ``rank-bm25``)

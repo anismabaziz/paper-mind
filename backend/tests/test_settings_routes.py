@@ -49,9 +49,9 @@ def demo_user(repo):
 
 
 @pytest.fixture
-def jwt_secret(monkeypatch):
-    """Set a deterministic JWT_SECRET for crypto calls."""
-    monkeypatch.setenv("JWT_SECRET", "test-secret")
+def jwt_secret(settings_obj, monkeypatch):
+    """Set a deterministic JWT secret for crypto calls."""
+    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "test-secret")
     return "test-secret"
 
 
@@ -63,10 +63,10 @@ def client(app_module, repo, demo_user, monkeypatch, jwt_secret):
         yield client, app_module
 
 
-def test_settings_require_auth(app_module, repo, monkeypatch, demo_user):
+def test_settings_require_auth(app_module, repo, monkeypatch, demo_user, settings_obj):
     """Do test settings require auth."""
     monkeypatch.setattr(app_module, "repository", repo)
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     with app_module.app.test_client() as client:
         for method, path in [
             (client.get, "/settings"),
@@ -142,10 +142,10 @@ def test_put_saves_encrypted_and_get_masks(client, demo_user, jwt_secret):
     assert decrypt_api_key(stored["encrypted_api_key"]) == plaintext
 
 
-def test_put_requires_auth_resolved_user_not_found(app_module, repo, monkeypatch):
+def test_put_requires_auth_resolved_user_not_found(app_module, repo, monkeypatch, settings_obj):
     """A valid token whose user no longer exists yields 401, not a crash."""
     monkeypatch.setattr(app_module, "repository", repo)
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     token = app_module.issue_token("ghost@papermind.local")
     with app_module.app.test_client() as client:
         response = client.get(
@@ -219,10 +219,10 @@ def test_verify_error_never_contains_the_key(client, monkeypatch):
     assert secret not in body["error"]
 
 
-def test_token_user_gets_their_own_record(app_module, repo, monkeypatch, jwt_secret):
+def test_token_user_gets_their_own_record(app_module, repo, monkeypatch, jwt_secret, settings_obj):
     """Outside demo mode, settings follow the token's user, not the demo user."""
     monkeypatch.setattr(app_module, "repository", repo)
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     with repo._session_factory() as session, session.begin():
         user = User(email="real@papermind.local", password_hash="x")
         session.add(user)

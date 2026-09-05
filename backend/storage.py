@@ -7,7 +7,7 @@ service means implementing the same five methods.
 
 from pathlib import Path
 
-import config
+from settings import get_settings
 
 
 class LocalStorage:
@@ -55,4 +55,21 @@ class LocalStorage:
         return path
 
 
-storage = LocalStorage(config.STORAGE_DIR)
+_storage = None
+
+
+def get_storage() -> LocalStorage:
+    """Build the process-wide store once, from Settings."""
+    global _storage
+    if _storage is None:
+        _storage = LocalStorage(get_settings().storage.storage_dir)
+    return _storage
+
+
+def __getattr__(name):
+    # `from storage import storage` resolves through here, so importing
+    # this module never builds Settings or touches the filesystem directly;
+    # the store (and its root mkdir) appears on first attribute access.
+    if name == "storage":
+        return get_storage()
+    raise AttributeError(f"module 'storage' has no attribute {name!r}")

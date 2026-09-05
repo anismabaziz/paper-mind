@@ -9,7 +9,7 @@ All branches use fakes: the cross-encoder is stubbed via _reranker, never
 importing weights, so pytest stays fast and offline.
 """
 
-import config
+import providers
 from services import reranker
 from services.vector_service import VectorService
 from evaluation import evaluator
@@ -75,11 +75,9 @@ class TestRerankerGate:
 
     def test_flag_off_preserves_legacy_order(self, monkeypatch):
         """Do test flag off preserves legacy order."""
-        monkeypatch.setenv("RERANK", "false")
         reranker._reset_for_tests()
         idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_qdrant_index", idx)
-        monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
+        monkeypatch.setattr(providers, "_qdrant_index", idx)
 
         sources = VectorService.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="test query"
@@ -87,16 +85,15 @@ class TestRerankerGate:
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
 
     def test_flag_on_reranked_order_differs_deduped_and_score_ordered(
-        self, monkeypatch
+        self, monkeypatch, settings_obj
     ):
         """Do test flag on reranked order differs deduped and score ordered."""
-        monkeypatch.setenv("RERANK", "true")
+        monkeypatch.setattr(settings_obj.rerank, "enabled", True)
         reranker._reset_for_tests()
         reranker._reranker = InvertingModel()
 
         idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_qdrant_index", idx)
-        monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
+        monkeypatch.setattr(providers, "_qdrant_index", idx)
 
         sources_on = VectorService.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="test query"
@@ -145,7 +142,7 @@ class TestRerankerGate:
                 return [0.1, 0.9, 0.5]
 
         reranker._reranker = DupModel()
-        monkeypatch.setattr(config, "_qdrant_index", dup_idx)
+        monkeypatch.setattr(providers, "_qdrant_index", dup_idx)
         before = VectorService.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
         )
@@ -157,14 +154,14 @@ class TestRerankerGate:
         assert deduped[0]["content"] == "dup"
         assert deduped[0]["score"] == 0.9
 
-    def test_explicit_rerank_param_overrides_env(self, monkeypatch):
+    def test_explicit_rerank_param_overrides_env(self, monkeypatch, settings_obj):
         # Env says true but explicit False preserves legacy
         """Do test explicit rerank param overrides env."""
-        monkeypatch.setenv("RERANK", "true")
+        monkeypatch.setattr(settings_obj.rerank, "enabled", True)
         reranker._reset_for_tests()
         reranker._reranker = InvertingModel()
         idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_qdrant_index", idx)
+        monkeypatch.setattr(providers, "_qdrant_index", idx)
 
         legacy = VectorService.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
@@ -176,9 +173,9 @@ class TestRerankerGate:
         )
         assert [s["content"] for s in reranked] != [s["content"] for s in legacy]
 
-    def test_no_query_text_never_reranks(self, monkeypatch):
+    def test_no_query_text_never_reranks(self, monkeypatch, settings_obj):
         """Do test no query text never reranks."""
-        monkeypatch.setenv("RERANK", "true")
+        monkeypatch.setattr(settings_obj.rerank, "enabled", True)
         calls = []
 
         class CountingModel:
@@ -192,17 +189,17 @@ class TestRerankerGate:
         reranker._reset_for_tests()
         reranker._reranker = CountingModel()
         idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_qdrant_index", idx)
+        monkeypatch.setattr(providers, "_qdrant_index", idx)
 
         # No query_text -> no rerank
         VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text=None)
         assert calls == []
 
-    def test_entirely_local_cpu_no_api(self, monkeypatch):
+    def test_entirely_local_cpu_no_api(self, monkeypatch, settings_obj):
         # Ensure rerank path does not hit network: stub _get_reranker and
         # assert it is the only provider touched
         """Do test entirely local cpu no api."""
-        monkeypatch.setenv("RERANK", "true")
+        monkeypatch.setattr(settings_obj.rerank, "enabled", True)
         reranker._reset_for_tests()
 
         invoked = {}
@@ -217,15 +214,15 @@ class TestRerankerGate:
 
         reranker._reranker = LocalOnly()
         idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_qdrant_index", idx)
+        monkeypatch.setattr(providers, "_qdrant_index", idx)
 
         VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text="hello")
         assert invoked, "local model should have been invoked"
         # No external call recorded — entirely local
 
-    def test_model_load_failure_degrades_to_legacy(self, monkeypatch, capsys):
+    def test_model_load_failure_degrades_to_legacy(self, monkeypatch, capsys, settings_obj):
         """Do test model load failure degrades to legacy."""
-        monkeypatch.setenv("RERANK", "true")
+        monkeypatch.setattr(settings_obj.rerank, "enabled", True)
         reranker._reset_for_tests()
         monkeypatch.setattr(
             reranker,
@@ -234,7 +231,7 @@ class TestRerankerGate:
         )
 
         idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_qdrant_index", idx)
+        monkeypatch.setattr(providers, "_qdrant_index", idx)
 
         sources = VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text="q")
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
@@ -260,7 +257,6 @@ class TestEvaluatorReranker:
             """Do embed."""
             return [[0.1] * 4 for _ in texts]
 
-        monkeypatch.setenv("RERANK", "false")
         reranker._reset_for_tests()
         reranker._reranker = InvertingModel()
         off = evaluator.retrieve(

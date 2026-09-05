@@ -33,14 +33,9 @@ from services.vector_service import matches_to_sources, shape_sources
 
 
 def _is_rerank_enabled() -> bool:
-    try:
-        import config as _cfg
+    from settings import get_settings
 
-        return _cfg.is_rerank_enabled()
-    except Exception:
-        import os
-
-        return os.getenv("RERANK", "false").lower() in ("1", "true", "yes")
+    return get_settings().rerank.enabled
 
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent

@@ -18,7 +18,6 @@ or a network call. When the package is not installed, a clear error is raised
 only when embeddings are actually generated.
 """
 
-import os
 import threading
 
 _model = None
@@ -40,7 +39,9 @@ def _get_model():
                 "Install it with `uv sync` or `pip install sentence-transformers`."
             ) from exc
 
-        model_name = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-m3")
+        from settings import get_settings
+
+        model_name = get_settings().embedding.embedding_model
         # ``device="cpu"`` keeps the free path CPU-only; no CUDA needed.
         # ``trust_remote_code=True`` is required for BGE-M3's custom code.
         _model = SentenceTransformer(model_name, trust_remote_code=True, device="cpu")

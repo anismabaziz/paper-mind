@@ -6,7 +6,6 @@ import pytest
 
 import providers
 import settings as settings_module
-from pydantic import ValidationError
 from settings import (
     Settings,
     get_settings,
@@ -18,9 +17,9 @@ from settings import (
 @pytest.fixture(autouse=True)
 def fresh_settings_cache():
     """Each test builds its own Settings instead of reusing a memoized one."""
-    get_settings.cache_clear()
+    settings_module.set_settings(None)
     yield
-    get_settings.cache_clear()
+    settings_module.set_settings(None)
 
 
 @pytest.fixture(autouse=True)
@@ -90,24 +89,19 @@ def test_env_overrides_bind_to_groups(monkeypatch):
     assert s.auth.demo_mode is True
 
 
-def test_missing_database_url_is_named(monkeypatch):
-    """Do test missing database url is named."""
+def test_building_settings_never_raises_without_env(monkeypatch):
+    """Imports stay side-effect free: an empty env yields an empty URL."""
     _clear("DATABASE_URL", monkeypatch=monkeypatch)
 
-    with pytest.raises(ValidationError) as excinfo:
-        Settings()
-
-    message = str(excinfo.value)
-    assert "DATABASE_URL" in message
-    assert "Field required" in message
+    assert Settings().database.database_url == ""
 
 
 def test_empty_database_url_is_treated_as_missing(monkeypatch):
     """Do test empty database url is treated as missing."""
     monkeypatch.setenv("DATABASE_URL", "")
 
-    with pytest.raises(ValidationError):
-        Settings()
+    with pytest.raises(SystemExit):
+        validate()
 
 
 def test_validate_exits_with_named_variable_in_message(capsys, monkeypatch):
@@ -179,8 +173,34 @@ def test_accessor_cache_clear_builds_fresh_settings(monkeypatch):
     assert get_settings().database.database_url == "postgresql://one"
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://two")
-    get_settings.cache_clear()
+    settings_module.set_settings(None)
     assert get_settings().database.database_url == "postgresql://two"
+
+
+def test_booting_without_env_exits_readably(capsys, monkeypatch):
+    """
+    End to end: starting the app with an empty env exits with the named.
+
+        variable on stderr, not a library traceback.
+    """
+    import pathlib
+    import subprocess
+    import sys
+
+    backend_dir = pathlib.Path(__file__).resolve().parent.parent
+    # Empty-string values shadow any local .env (dotenv does not override
+    # existing vars) and count as missing to the validator.
+    # Provider keys are per-user settings now; only DATABASE_URL is required.
+    result = subprocess.run(
+        [sys.executable, "-c", "import app"],
+        capture_output=True,
+        text=True,
+        cwd=backend_dir,
+        env={"DATABASE_URL": ""},
+    )
+    assert result.returncode == 1
+    assert "DATABASE_URL" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 def test_providers_stay_lazy_until_first_use(monkeypatch):

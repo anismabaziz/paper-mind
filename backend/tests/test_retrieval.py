@@ -9,7 +9,7 @@ in-memory data only.
 
 import pytest
 
-import config
+import providers
 from services import document_parser
 from services.document_parser import DocumentParser
 from services.vector_service import MAX_RETRIEVED_SOURCES, VectorService
@@ -135,7 +135,7 @@ class FakeVectorIndex:
 
 @pytest.fixture
 def fake_index(monkeypatch):
-    """Install a fake vector index behind config.vector_index."""
+    """Install a fake vector index behind providers.get_vector_index."""
     installed = {}
 
     def install(matches):
@@ -143,7 +143,7 @@ def fake_index(monkeypatch):
         index = FakeVectorIndex(matches)
         # Patch the memo slot, not `vector_index` itself: setattr would read
         # the current value first, which triggers the lazy Qdrant builder.
-        monkeypatch.setattr(config, "_qdrant_index", index)
+        monkeypatch.setattr(providers, "_qdrant_index", index)
         installed["index"] = index
         return index
 
@@ -232,7 +232,7 @@ class TestChunkMetadata:
         """Do test upsert includes page no and content hash."""
         import hashlib
 
-        import config
+        import providers
 
         captured = {}
 
@@ -242,7 +242,7 @@ class TestChunkMetadata:
             return {"upserted": len(vectors)}
 
         fake_index = type("Idx", (), {"upsert": fake_upsert})()
-        monkeypatch.setattr(config, "_qdrant_index", fake_index)
+        monkeypatch.setattr(providers, "_qdrant_index", fake_index)
 
         chunks = ["hello world", "second chunk"]
         embeddings = [[0.1, 0.2], [0.3, 0.4]]
@@ -266,7 +266,7 @@ class TestChunkMetadata:
         """Do test upsert without page numbers still hashes."""
         import hashlib
 
-        import config
+        import providers
 
         captured = {}
 
@@ -276,7 +276,7 @@ class TestChunkMetadata:
             return {}
 
         fake_index = type("Idx", (), {"upsert": fake_upsert})()
-        monkeypatch.setattr(config, "_qdrant_index", fake_index)
+        monkeypatch.setattr(providers, "_qdrant_index", fake_index)
 
         chunks = ["hello"]
         VectorService.upsert_vectors([[0.1]], chunks, "doc.pdf")
