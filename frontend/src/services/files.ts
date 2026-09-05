@@ -1,4 +1,5 @@
 import client from "./client";
+import { getToken } from "./auth";
 import { File as FileType } from "@/types/db";
 
 interface IGetFiles {
@@ -76,12 +77,12 @@ interface IStreamHandlers {
 export async function chatStream(
   query: string,
   filename: string,
-  handlers: IStreamHandlers,
-  token?: string
+  handlers: IStreamHandlers
 ) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
+  const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(`${client.defaults.baseURL}/response`, {
