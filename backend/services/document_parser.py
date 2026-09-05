@@ -1,10 +1,10 @@
 """
-    Document parser seam: per-format extraction, shared chunking.
+Document parser: per-format extraction, shared chunking.
 
-    Extraction lives behind :class:`DocumentParser` so a new format becomes a
-    new parser rather than a rewrite. Chunking is intentionally owned by the
-    seam itself, not by any parser, so swapping parsers cannot silently change
-    chunk sizes or overlap.
+Extraction lives behind :class:`DocumentParser` so a new format becomes a
+new parser rather than a rewrite. Chunking is intentionally owned by the
+parser itself, not by any individual parser, so swapping parsers cannot
+silently change chunk sizes or overlap.
 """
 
 import hashlib
@@ -25,6 +25,7 @@ class Chunk:
     page_no: int | None
     chunk_index: int
     content_hash: str
+
 
 def _chunk_size() -> int:
     try:
@@ -54,6 +55,7 @@ _ENCODING = tiktoken.get_encoding("cl100k_base")
 def _token_len(text: str) -> int:
     return len(_ENCODING.encode(text))
 
+
 _PARSERS = {".pdf": PDFParser}
 
 # Re-export for callers that probe the registry (spec pins _PARSERS shape)
@@ -66,7 +68,7 @@ except Exception:
 
 
 def _should_use_docling(filename: str, file_bytes: bytes | None) -> bool:
-    """Delegate to :mod:`services.pdf_heuristics` to keep this seam focused."""
+    """Delegate to :mod:`services.pdf_heuristics` to keep this module focused."""
     from services.pdf_heuristics import should_use_docling
 
     return should_use_docling(filename, file_bytes)
@@ -88,10 +90,14 @@ except Exception:  # pragma: no cover
 
 
 class UnknownDocumentFormat(ValueError):
+    """UnknownDocumentFormat."""
+
     pass
 
 
 class DocumentParser:
+    """DocumentParser."""
+
     @classmethod
     def for_filename(cls, filename: str, file_bytes: bytes | None = None):
         """
@@ -125,6 +131,7 @@ class DocumentParser:
 
     @staticmethod
     def split_text(text, chunk_size=None, chunk_overlap=None):
+        """Do split text."""
         if chunk_size is None:
             chunk_size = _chunk_size()
         if chunk_overlap is None:
@@ -141,17 +148,19 @@ class DocumentParser:
     @staticmethod
     def split_pages(page_texts: list[str], chunk_size=None, chunk_overlap=None):
         """
-            Split per-page texts while preserving page numbers.
+        Split per-page texts while preserving page numbers.
 
-            Returns a list of (chunk_text, page_no) tuples. Page numbers are
-            1-indexed. Each page is chunked independently so a chunk never
-            straddles two pages and its page_no is unambiguous.
+        Returns a list of (chunk_text, page_no) tuples. Page numbers are
+        1-indexed. Each page is chunked independently so a chunk never
+        straddles two pages and its page_no is unambiguous.
         """
         chunks_with_page: list[tuple[str, int]] = []
         for page_no, page_text in enumerate(page_texts, start=1):
             if not page_text or not page_text.strip():
                 continue
-            page_chunks = DocumentParser.split_text(page_text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+            page_chunks = DocumentParser.split_text(
+                page_text, chunk_size=chunk_size, chunk_overlap=chunk_overlap
+            )
             for chunk in page_chunks:
                 chunks_with_page.append((chunk, page_no))
         return chunks_with_page
@@ -173,18 +182,18 @@ class DocumentParser:
     @classmethod
     def get_chunks(cls, filename: str, file_bytes: bytes):
         """
-            Parse and chunk a file, returning (chunks, page_numbers).
+        Parse and chunk a file, returning (chunks, page_numbers).
 
-            Page-aware when the parser exposes extract_pages; otherwise falls
-            back to flat text. Single seam so app and evaluator share the
-            same logic. Prefer :meth:`get_chunk_objects` for new code — the
-            parallel lists are a data clump.
+        Page-aware when the parser exposes extract_pages; otherwise falls
+        back to flat text. Shared logic so app and evaluator use the
+        same path. Prefer :meth:`get_chunk_objects` for new code — the
+        parallel lists are a data clump.
 
-            Routing: when ``file_bytes`` looks image-only / 2-col / borderless-
-            table and Docling is installed, the Docling branch is tried first
-            (Markdown with hierarchy + tables as ``| col |``, header/footer
-            dedup >70%, page_no preserved). On any Docling failure the pymupdf
-            fast path is used so ingestion never breaks.
+        Routing: when ``file_bytes`` looks image-only / 2-col / borderless-
+        table and Docling is installed, the Docling branch is tried first
+        (Markdown with hierarchy + tables as ``| col |``, header/footer
+        dedup >70%, page_no preserved). On any Docling failure the pymupdf
+        fast path is used so ingestion never breaks.
         """
         # Try heuristic Docling branch first when warranted, before the plain
         # extension lookup. This keeps two-column / table PDFs correct without

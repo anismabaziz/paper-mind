@@ -17,12 +17,14 @@ _QDRANT_DENSE_SIZE = 1024
 
 class QdrantIndexAdapter:
     """
-    Thin wrapper around a ``qdrant_client.QdrantClient`` that speaks the
+    Thin wrapper around a ``qdrant_client.QdrantClient`` that speaks the.
+
     subset of the Pinecone ``Index`` API used in this repo, plus hybrid
     sparse support for ``VectorService``.
     """
 
     def __init__(self, client, collection_name: str):
+        """Initialize."""
         self._client = client
         self._collection = collection_name
         self._ensured = False
@@ -44,12 +46,19 @@ class QdrantIndexAdapter:
             self._ensured = True
             return
 
-        from qdrant_client.models import Distance, SparseIndexParams, SparseVectorParams, VectorParams
+        from qdrant_client.models import (
+            Distance,
+            SparseIndexParams,
+            SparseVectorParams,
+            VectorParams,
+        )
 
         try:
             self._client.create_collection(
                 collection_name=self._collection,
-                vectors_config=VectorParams(size=_QDRANT_DENSE_SIZE, distance=Distance.COSINE),
+                vectors_config=VectorParams(
+                    size=_QDRANT_DENSE_SIZE, distance=Distance.COSINE
+                ),
                 sparse_vectors_config={
                     "sparse": SparseVectorParams(
                         index=SparseIndexParams(on_disk=False),
@@ -78,14 +87,16 @@ class QdrantIndexAdapter:
                 must.append(FieldCondition(key=key, match=MatchValue(value=value)))
             return Filter(must=must)
         except Exception:
-            # Offline / no qdrant_client: return dict as filter shim
+            # Offline / no qdrant_client: return dict as fallback filter
             return filter_dict
 
     @staticmethod
     def _sparse_dot(query_sparse: dict, doc_sparse: dict) -> float:
         if not query_sparse or not doc_sparse:
             return 0.0
-        q_map = dict(zip(query_sparse.get("indices", []), query_sparse.get("values", [])))
+        q_map = dict(
+            zip(query_sparse.get("indices", []), query_sparse.get("values", []))
+        )
         d_map = dict(zip(doc_sparse.get("indices", []), doc_sparse.get("values", [])))
         # Qdrant's sparse modifier IDF is applied server-side; for the
         # Python brute fallback we approximate BM25 via dot product. When
@@ -93,9 +104,12 @@ class QdrantIndexAdapter:
         # _brute_sparse_query via bm25_scores, so this dot is only the TF proxy.
         return sum(q_map[i] * d_map.get(i, 0.0) for i in q_map)
 
-    def _brute_sparse_query(self, sparse_vector: dict, top_k: int, q_filter) -> list[dict]:
+    def _brute_sparse_query(
+        self, sparse_vector: dict, top_k: int, q_filter
+    ) -> list[dict]:
         """
         Fallback sparse scoring over the locally cached sparse map.
+
         Only used when the server cannot execute a sparse query.
         """
         # Filter by pdf_name if present
@@ -108,7 +122,9 @@ class QdrantIndexAdapter:
                 else:
                     for cond in getattr(q_filter, "must", []) or []:
                         if getattr(cond, "key", None) == "pdf_name":
-                            pdf_filter = getattr(getattr(cond, "match", None), "value", None)
+                            pdf_filter = getattr(
+                                getattr(cond, "match", None), "value", None
+                            )
             except Exception:
                 pass
 
@@ -127,9 +143,7 @@ class QdrantIndexAdapter:
     # ------------------------------------------------------------------ Pinecone-compatible API
 
     def upsert(self, vectors):
-        """
-        ``vectors``: list of ``{"id": str, "values": list[float], "metadata": dict, "sparse_values": {"indices": [], "values": []}}``
-        """
+        """``vectors``: list of ``{"id": str, "values": list[float], "metadata": dict, "sparse_values": {"indices": [], "values": []}}``."""
         if not vectors:
             return {"upserted": 0}
         self._ensure_collection()
@@ -154,7 +168,10 @@ class QdrantIndexAdapter:
             if sparse:
                 # normalise to dict shape
                 if hasattr(sparse, "indices"):
-                    sparse = {"indices": list(sparse.indices), "values": list(sparse.values)}
+                    sparse = {
+                        "indices": list(sparse.indices),
+                        "values": list(sparse.values),
+                    }
                 self._sparse_by_id[vid] = dict(sparse)
             else:
                 self._sparse_by_id.pop(vid, None)
@@ -166,17 +183,36 @@ class QdrantIndexAdapter:
 
             # Try to include sparse_vector if the model supports it
             try:
-                if sparse and SparseVector is not None and hasattr(PointStruct, "__init__"):
-                    sparse_obj = SparseVector(indices=sparse["indices"], values=sparse["values"])
+                if (
+                    sparse
+                    and SparseVector is not None
+                    and hasattr(PointStruct, "__init__")
+                ):
+                    sparse_obj = SparseVector(
+                        indices=sparse["indices"], values=sparse["values"]
+                    )
                     # Prefer explicit sparse_vector field if supported
                     try:
-                        points.append(PointStruct(id=vid, vector=values, payload=payload, sparse_vector=sparse_obj))
+                        points.append(
+                            PointStruct(
+                                id=vid,
+                                vector=values,
+                                payload=payload,
+                                sparse_vector=sparse_obj,
+                            )
+                        )
                         continue
                     except TypeError:
                         pass
                     # Fallback: named vector dict
                     try:
-                        points.append(PointStruct(id=vid, vector={"dense": values, "sparse": sparse_obj}, payload=payload))
+                        points.append(
+                            PointStruct(
+                                id=vid,
+                                vector={"dense": values, "sparse": sparse_obj},
+                                payload=payload,
+                            )
+                        )
                         continue
                     except Exception:
                         pass
@@ -189,12 +225,23 @@ class QdrantIndexAdapter:
             # Handle size mismatch for backwards compat: if collection was created
             # with 1024 but vectors are different size, recreate with correct size.
             try:
-                self._client.upsert(collection_name=self._collection, points=points, wait=True)
+                self._client.upsert(
+                    collection_name=self._collection, points=points, wait=True
+                )
             except Exception as exc:
                 msg = str(exc).lower()
-                if "vector size" in msg or "dimension" in msg or "wrong vector size" in msg:
+                if (
+                    "vector size" in msg
+                    or "dimension" in msg
+                    or "wrong vector size" in msg
+                ):
                     # Recreate with the incoming size; preserve sparse config
-                    from qdrant_client.models import Distance, SparseIndexParams, SparseVectorParams, VectorParams
+                    from qdrant_client.models import (
+                        Distance,
+                        SparseIndexParams,
+                        SparseVectorParams,
+                        VectorParams,
+                    )
 
                     try:
                         self._client.delete_collection(collection_name=self._collection)
@@ -215,7 +262,9 @@ class QdrantIndexAdapter:
                         inferred = _QDRANT_DENSE_SIZE
                     self._client.create_collection(
                         collection_name=self._collection,
-                        vectors_config=VectorParams(size=inferred, distance=Distance.COSINE),
+                        vectors_config=VectorParams(
+                            size=inferred, distance=Distance.COSINE
+                        ),
                         sparse_vectors_config={
                             "sparse": SparseVectorParams(
                                 index=SparseIndexParams(on_disk=False),
@@ -227,8 +276,12 @@ class QdrantIndexAdapter:
                     self._sparse_by_id.clear()
                     self._payload_by_id.clear()
                     for p in points:
-                        self._sparse_by_id[getattr(p, "id", str(uuid.uuid4()))] = self._sparse_by_id.get(getattr(p, "id", ""), {})
-                    self._client.upsert(collection_name=self._collection, points=points, wait=True)
+                        self._sparse_by_id[getattr(p, "id", str(uuid.uuid4()))] = (
+                            self._sparse_by_id.get(getattr(p, "id", ""), {})
+                        )
+                    self._client.upsert(
+                        collection_name=self._collection, points=points, wait=True
+                    )
                 else:
                     raise
         return {"upserted": len(vectors)}
@@ -270,7 +323,13 @@ class QdrantIndexAdapter:
                 payload = getattr(p, "payload", {}) or {}
                 score = getattr(p, "score", 0.0) or 0.0
                 pid = getattr(p, "id", None)
-            matches.append({"id": str(pid) if pid is not None else "", "score": float(score), "metadata": dict(payload)})
+            matches.append(
+                {
+                    "id": str(pid) if pid is not None else "",
+                    "score": float(score),
+                    "metadata": dict(payload),
+                }
+            )
         return matches
 
     def _sparse_search(self, sparse_vector: dict, top_k: int, q_filter):
@@ -282,7 +341,10 @@ class QdrantIndexAdapter:
 
         if SparseVector is not None:
             try:
-                sparse_q = SparseVector(indices=sparse_vector.get("indices", []), values=sparse_vector.get("values", []))
+                sparse_q = SparseVector(
+                    indices=sparse_vector.get("indices", []),
+                    values=sparse_vector.get("values", []),
+                )
                 # New API: query_points with using="sparse"
                 result = self._client.query_points(
                     collection_name=self._collection,
@@ -303,7 +365,13 @@ class QdrantIndexAdapter:
                         payload = getattr(p, "payload", {}) or {}
                         score = getattr(p, "score", 0.0) or 0.0
                         pid = getattr(p, "id", None)
-                    matches.append({"id": str(pid) if pid is not None else "", "score": float(score), "metadata": dict(payload)})
+                    matches.append(
+                        {
+                            "id": str(pid) if pid is not None else "",
+                            "score": float(score),
+                            "metadata": dict(payload),
+                        }
+                    )
                 if matches:
                     return matches
             except Exception:
@@ -323,7 +391,13 @@ class QdrantIndexAdapter:
                     payload = getattr(p, "payload", {}) or {}
                     score = getattr(p, "score", 0.0) or 0.0
                     pid = getattr(p, "id", None)
-                    matches.append({"id": str(pid) if pid is not None else "", "score": float(score), "metadata": dict(payload)})
+                    matches.append(
+                        {
+                            "id": str(pid) if pid is not None else "",
+                            "score": float(score),
+                            "metadata": dict(payload),
+                        }
+                    )
                 if matches:
                     return matches
             except Exception:
@@ -332,14 +406,22 @@ class QdrantIndexAdapter:
         # Pure python fallback over cached sparse map
         return self._brute_sparse_query(sparse_vector, top_k, q_filter)
 
-    def query(self, vector, top_k, include_metadata=True, filter=None, **kwargs):  # noqa: A002
+    def query(self, vector, top_k, include_metadata=True, filter=None, **kwargs):
+        """Do query."""
         self._ensure_collection()
         q_filter = self._to_filter(filter)
 
-        sparse_vector = kwargs.get("sparse_vector") or kwargs.get("sparse_values") or kwargs.get("sparse")
+        sparse_vector = (
+            kwargs.get("sparse_vector")
+            or kwargs.get("sparse_values")
+            or kwargs.get("sparse")
+        )
         # Normalise sparse_vector from object to dict if needed
         if sparse_vector is not None and hasattr(sparse_vector, "indices"):
-            sparse_vector = {"indices": list(sparse_vector.indices), "values": list(sparse_vector.values)}
+            sparse_vector = {
+                "indices": list(sparse_vector.indices),
+                "values": list(sparse_vector.values),
+            }
 
         # No hybrid requested -> dense only (backwards compat)
         if not sparse_vector:
@@ -378,7 +460,10 @@ class QdrantIndexAdapter:
         except Exception:
             return None
         try:
-            sparse_q = SparseVector(indices=sparse_vector.get("indices", []), values=sparse_vector.get("values", []))
+            sparse_q = SparseVector(
+                indices=sparse_vector.get("indices", []),
+                values=sparse_vector.get("values", []),
+            )
             prefetch = [
                 Prefetch(query=vector, limit=top_k),
                 Prefetch(query=sparse_q, using="sparse", limit=top_k),
@@ -401,14 +486,21 @@ class QdrantIndexAdapter:
                     payload = getattr(p, "payload", {}) or {}
                     score = getattr(p, "score", 0.0) or 0.0
                     pid = getattr(p, "id", None)
-                matches.append({"id": str(pid) if pid is not None else "", "score": float(score), "metadata": dict(payload)})
+                matches.append(
+                    {
+                        "id": str(pid) if pid is not None else "",
+                        "score": float(score),
+                        "metadata": dict(payload),
+                    }
+                )
             if matches:
                 return matches[:top_k]
         except Exception:
             return None
         return None
 
-    def delete(self, filter=None, delete_all=False):  # noqa: A002
+    def delete(self, filter=None, delete_all=False):
+        """Do delete."""
         self._ensure_collection()
         if delete_all:
             # Fast path: delete collection and recreate empty one
@@ -433,19 +525,24 @@ class QdrantIndexAdapter:
         # Also prune local cache for filtered deletes by pdf_name
         if filter and "pdf_name" in filter:
             target = filter["pdf_name"]
-            to_remove = [vid for vid, payload in self._payload_by_id.items() if payload.get("pdf_name") == target]
+            to_remove = [
+                vid
+                for vid, payload in self._payload_by_id.items()
+                if payload.get("pdf_name") == target
+            ]
             for vid in to_remove:
                 self._sparse_by_id.pop(vid, None)
                 self._payload_by_id.pop(vid, None)
         try:
-            self._client.delete(collection_name=self._collection, points_selector=q_filter, wait=True)
+            self._client.delete(
+                collection_name=self._collection, points_selector=q_filter, wait=True
+            )
         except Exception:
-            # Fallback: try scroll + delete by ids if filter delete not supported
+            # Fallback: try delete with filter keyword variant
             try:
-                from qdrant_client.models import Filter as QFilter  # noqa: F401
-
-                # Try delete with filter keyword variant
-                self._client.delete(collection_name=self._collection, filter=q_filter, wait=True)
+                self._client.delete(
+                    collection_name=self._collection, filter=q_filter, wait=True
+                )
             except Exception:
                 pass
         return {"deleted": "filtered"}

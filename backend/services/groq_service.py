@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import os
 
 import config
@@ -5,11 +7,17 @@ from services.prompts import SYSTEM_INSTRUCTION
 
 GROQ_MODEL = config.GROQ_MODEL
 
+
 class GroqService:
+    """GroqService."""
+
     @staticmethod
     def generate_response(query: str, context: str) -> str:
+        """Do generate response."""
         if not os.getenv("GROQ_API_KEY"):
-            raise ValueError("Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file.")
+            raise ValueError(
+                "Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file."
+            )
 
         chat_completion = config.groq_client.chat.completions.create(
             messages=[
@@ -20,7 +28,7 @@ class GroqService:
                 {
                     "role": "user",
                     "content": f"Context: {context}\n\nQuery: {query}",
-                }
+                },
             ],
             model=GROQ_MODEL,
         )
@@ -30,8 +38,11 @@ class GroqService:
 
     @staticmethod
     def stream_response(query: str, context: str):
+        """Do stream response."""
         if not os.getenv("GROQ_API_KEY"):
-            raise ValueError("Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file.")
+            raise ValueError(
+                "Groq client is not initialized. Please ensure GROQ_API_KEY is configured in your .env file."
+            )
 
         stream = config.groq_client.chat.completions.create(
             messages=[
@@ -42,7 +53,7 @@ class GroqService:
                 {
                     "role": "user",
                     "content": f"Context: {context}\n\nQuery: {query}",
-                }
+                },
             ],
             model=GROQ_MODEL,
             stream=True,

@@ -86,7 +86,11 @@ class LocalEmbeddingService:
                 convert_to_numpy=True,
             )
             # embeddings is numpy array of shape (n, dim)
-            if hasattr(embeddings, "shape") and len(embeddings.shape) == 2 and embeddings.shape[1] > 1024:
+            if (
+                hasattr(embeddings, "shape")
+                and len(embeddings.shape) == 2
+                and embeddings.shape[1] > 1024
+            ):
                 embeddings = embeddings[:, :1024]
 
         # Convert numpy -> python lists for the vector index contract.

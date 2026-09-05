@@ -27,48 +27,6 @@ services:
       # Exposed on localhost:6333 for host runs and on qdrant:6333 inside compose.
       QDRANT__SERVICE__GRPC_PORT: 6334
 
-  backend:
-    build: .
-    environment:
-      # VECTOR_BACKEND: qdrant (default, free local on http://qdrant:6333) or pinecone (PINECONE_API_KEY)
-      VECTOR_BACKEND: ${VECTOR_BACKEND:-qdrant}
-      # EMBED_BACKEND: local (default, BAAI/bge-m3 free) or gemini (GOOGLE_API_KEY)
-      EMBED_BACKEND: ${EMBED_BACKEND:-local}
-      QDRANT_URL: http://qdrant:6333
-      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-BAAI/bge-m3}
-      MODE: ${MODE:-google}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      DEMO_MODE: ${DEMO_MODE:-false}
-      # RERANK: true|false — gated local cross-encoder over 50 hybrid candidates to 5
-      RERANK: ${RERANK:-false}
-      RERANK_MODEL: ${RERANK_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
-      # CHUNK_SIZE_TOKENS: tokens per chunk via tiktoken cl100k_base (default 512, overlap 50 ~10%)
-      CHUNK_SIZE_TOKENS: ${CHUNK_SIZE_TOKENS:-512}
-      CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-50}
-      # Opt-in layout parser: USE_DOCLING=true forces Docling, auto (default) uses
-      # lightweight heuristic (image-only / 2-col / borderless-table) to route
-      # only those PDFs to Docling; others stay on pymupdf fast path.
-      USE_DOCLING: ${USE_DOCLING:-auto}
-      # Hugging Face cache: keep BGE-M3 (~2GB) and granite-docling-258M (~1.1GB)
-      # on a persistent volume so downloads only happen on first run. Host cache
-      # is also respected when running outside Docker via HF_HOME.
-      HF_HOME: /app/.cache/huggingface
-      HF_HUB_CACHE: /app/.cache/huggingface/hub
-      DATABASE_URL: postgresql+psycopg://papermind:papermind@db:5432/papermind
-    ports:
-      - "3000:3000"
-    volumes:
-      - uploads:/app/data/storage
-      - hf_cache:/app/.cache/huggingface
-    depends_on:
-      db:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
-
 volumes:
   pgdata:
   qdrant_storage:
-  uploads:
-  hf_cache:

@@ -5,7 +5,7 @@ questions and get answers streamed in from an LLM, each grounded in the
 retrieved chunks of your document with the sources shown inline.
 
 This is a portfolio project built to run locally. It is PDF-only by design:
-the parser seam currently registers exactly one parser, for `.pdf`. There is
+the parser currently registers exactly one parser, for `.pdf`. There is
 no hosted deployment and no multi-tenant story. What it does, it does on your
 machine.
 
@@ -23,13 +23,16 @@ machine.
 Free local path (no keys) — default:
 
 ```bash
-export DEMO_MODE=true              # skip login, good for a first look
-docker compose up --build          # uses Qdrant + BGE-M3 locally, no API keys
+# Start infra (Postgres + Qdrant) — backend is not a compose service
+docker compose -f backend/compose.yaml up -d
+# Run backend locally
+cd backend
+uv sync
+uv run alembic upgrade head
+DEMO_MODE=true uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
 ```
 
-That boots Postgres + Qdrant, runs the migrations, and serves the API on
-`http://127.0.0.1:3000` (`GET /health` to check). The frontend is a Vite app
-and runs separately:
+The frontend is a Vite app and runs separately:
 
 ```bash
 cd frontend
@@ -47,7 +50,8 @@ Keys path — flip an env var and keep using paid providers:
 export VECTOR_BACKEND=pinecone PINECONE_API_KEY=...
 export EMBED_BACKEND=gemini GOOGLE_API_KEY=...   # or keep local embeddings
 export MODE=google        # or groq with GROQ_API_KEY
-docker compose up --build
+docker compose -f backend/compose.yaml up -d
+cd backend && uv run python app.py
 ```
 
 ## Free local vs keys
@@ -62,12 +66,12 @@ docker compose up --build
 | Chat LLM | Still needs `MODE=google` (`GOOGLE_API_KEY`) or `MODE=groq` (`GROQ_API_KEY`) for answers | Same |
 | Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no Pinecone/Google) — see `backend/README.md` | `--live` with judge needs the chat key |
 
-All free-path knobs live in `backend/.env.example` and `backend/compose.yaml`:
+All free-path knobs live in `backend/.env.example`:
 `VECTOR_BACKEND`, `EMBED_BACKEND`, `RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
 `USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`, `HYBRID_ALPHA`/`FETCH_K`.
 
-If you'd rather run the backend without Docker, the manual path (uv, local
-Postgres, Alembic) is in [backend/README.md](backend/README.md).
+The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only).
+Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backend/README.md).
 
 ## Screenshots
 
@@ -75,8 +79,8 @@ Postgres, Alembic) is in [backend/README.md](backend/README.md).
 
 ## How it works
 
-1. A PDF is uploaded, parsed into text, and split into chunks owned by the
-   parser seam (so the chunking policy can't drift per format).
+1. A PDF is uploaded, parsed into text, and split into chunks by the parser
+   (so the chunking policy can't drift per format).
 2. Chunks are embedded and stored in Pinecone; document metadata lives in
    Postgres.
 3. A question is embedded, the nearest chunks are retrieved, and the LLM's
@@ -94,8 +98,8 @@ Postgres, Alembic) is in [backend/README.md](backend/README.md).
                              │  chat ── SSE stream, answers + sources│
                              │  eval ── retrieval/answer evaluator   │
                              │                                       │
-                             │  parser seam (pymupdf fast / Docling) │
-                             │  storage seam (LocalStorage impl)     │
+                              │  parser (pymupdf fast / Docling)      │
+                              │  storage (LocalStorage impl)          │
                              └──────┬──────────────┬───────────┬─────┘
                                     │              │           │
                              ┌──────▼─────┐ ┌──────▼────┐ ┌────▼─────┐
@@ -107,15 +111,15 @@ Postgres, Alembic) is in [backend/README.md](backend/README.md).
 
 ## Design decisions
 
-**Portability seams.** Two boundaries exist so no single vendor is load-bearing.
-The storage seam (`backend/storage.py`) abstracts where uploaded files live;
+**Portable boundaries.** Two modules isolate vendor code so no single vendor is load-bearing.
+The storage module (`backend/storage.py`) abstracts where uploaded files live;
 the app currently ships the `LocalStorage` implementation, and anything that
 can save, open, and serve a file can be substituted without touching route
-code. The parser seam (`backend/services/document_parser.py`) maps file
-extensions to parsers; chunking is owned by the seam (token-based
+code. The document parser (`backend/services/document_parser.py`) maps file
+extensions to parsers; chunking is owned by the parser (token-based
 `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken
 cl100k_base`) so swapping parsers cannot silently change chunk sizes.
-Honest note: PDF has two branches behind the same seam — `pymupdf` fast path
+Honest note: PDF has two branches behind the same parser — `pymupdf` fast path
 default for born-digital single-column PDFs, and an opt-in Docling branch
 (`USE_DOCLING=auto|true`, `.[docling]` extra, `granite-docling-258M` ~1.1GB)
 that preserves tables as Markdown and reading order for two-column / scanned

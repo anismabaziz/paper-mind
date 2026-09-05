@@ -1,6 +1,4 @@
-"""
-    PDF parser: the first implementation behind the document parser seam.
-"""
+"""PDF parser: the first implementation behind the document parser."""
 
 import io
 import re
@@ -9,8 +7,11 @@ import pymupdf
 
 
 class PDFParser:
+    """PDFParser."""
+
     @staticmethod
     def extract_text(pdf_content):
+        """Do extract text."""
         # Flat text for backward compatibility: join pages with space and
         # normalize newlines to spaces so legacy callers see a single line.
         # Page-aware callers should use extract_pages which keeps row breaks.
@@ -23,11 +24,11 @@ class PDFParser:
     @staticmethod
     def extract_pages(pdf_content) -> list[str]:
         """
-            Extract one string per page.
+        Extract one string per page.
 
-            Table rows are kept as separate lines (newlines preserved) so a
-            chunker can keep row boundaries. Repeating headers/footers are not
-            stripped here; that is the Docling layer's job when opted in.
+        Table rows are kept as separate lines (newlines preserved) so a
+        chunker can keep row boundaries. Repeating headers/footers are not
+        stripped here; that is the Docling layer's job when opted in.
         """
         pdf_stream = io.BytesIO(pdf_content)
         pages: list[str] = []
@@ -45,7 +46,9 @@ class PDFParser:
                 # Remove leading/trailing empty lines, collapse runs of empties
                 normalized_lines: list[str] = []
                 for line in lines:
-                    if line == "" and (not normalized_lines or normalized_lines[-1] == ""):
+                    if line == "" and (
+                        not normalized_lines or normalized_lines[-1] == ""
+                    ):
                         continue
                     normalized_lines.append(line)
                 # Strip trailing empty

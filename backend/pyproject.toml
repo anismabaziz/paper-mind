@@ -34,8 +34,20 @@ docling = [
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
+    "ruff>=0.8.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["D"]
+ignore = ["D212"]
+
+[tool.ruff.lint.flake8-builtins]
+ignorelist = ["filter"]

@@ -11,16 +11,21 @@ Same table as the top-level README (kept here so env docs stay local):
 - `EMBED_BACKEND=local` (default, `BAAI/bge-m3` 1024d, no key) vs `gemini` (`gemini-embedding-001` + `GOOGLE_API_KEY`)
 - `RERANK=false` (default) / `true` — local cross-encoder over 50→5 (`cross-encoder/ms-marco-MiniLM-L-6-v2` 22M fast default, or `BAAI/bge-reranker-v2-m3`)
 - `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken cl100k_base`, per-page, with `page_no` + `content_hash`
-- Parser seam: `pymupdf` fast path default; `USE_DOCLING=auto` (default) routes only image-only / borderless-table / 2-col PDFs to Docling (`.[docling]` extra, `granite-docling-258M`); `true` forces all, `false` never.
-- All four knobs are documented in `.env.example` and wired in `compose.yaml`.
+- Parser: `pymupdf` fast path default; `USE_DOCLING=auto` (default) routes only image-only / borderless-table / 2-col PDFs to Docling (`.[docling]` extra, `granite-docling-258M`); `true` forces all, `false` never.
+- All knobs are documented in `.env.example`.
 
 ## Setup (one command, from a clean clone)
 
 Free local (no keys):
 
 ```bash
-# from the repo root; DEMO_MODE skips login for a first look
-DEMO_MODE=true docker compose up --build
+# from the repo root — start infra
+docker compose -f backend/compose.yaml up -d
+# then run backend locally
+cd backend
+uv sync
+uv run alembic upgrade head
+DEMO_MODE=true uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
 ```
 
 Keys path (opt-in):
@@ -29,12 +34,13 @@ Keys path (opt-in):
 export VECTOR_BACKEND=pinecone PINECONE_API_KEY=...
 export EMBED_BACKEND=gemini GOOGLE_API_KEY=...   # or keep local
 # MODE=google needs GOOGLE_API_KEY, MODE=groq needs GROQ_API_KEY
-docker compose up --build
+docker compose -f backend/compose.yaml up -d
+cd backend && uv run python app.py
 ```
 
-Either path boots Postgres (+ Qdrant when `VECTOR_BACKEND=qdrant`), runs the
-Alembic migrations, and serves the API on `http://127.0.0.1:3000`
-(`GET /health` to check).
+Either path boots Postgres (+ Qdrant when `VECTOR_BACKEND=qdrant`). The backend
+runs locally via `uv run python app.py` and serves the API on `http://127.0.0.1:3000`
+(`GET /health` to check) after `uv run alembic upgrade head`.
 
 ## Setup (manual, without Docker)
 
@@ -99,7 +105,7 @@ judge costs LLM calls):
 ```bash
 cd backend
 # Free local path: Qdrant on http://localhost:6333, no Pinecone/Google keys needed
-# (requires: docker compose up qdrant, or QDRANT_URL=http://localhost:6333,
+# (requires: docker compose -f compose.yaml up -d qdrant, or QDRANT_URL=http://localhost:6333,
 #  VECTOR_BACKEND=qdrant + EMBED_BACKEND=local — both are the defaults)
 uv run python -m evaluation.cli --live --no-judge          # retrieval only, no LLM key
 uv run python -m evaluation.cli --live                     # + LLM-as-judge faithfulness (needs MODE key)
@@ -114,7 +120,7 @@ VECTOR_BACKEND=pinecone PINECONE_API_KEY=... EMBED_BACKEND=gemini GOOGLE_API_KEY
 A live run indexes the sample docs under an `eval-` prefix in the vector
 index and deletes them afterwards. When `VECTOR_BACKEND=qdrant` (default)
 the index lives at `http://localhost:6333` (compose exposes 6333→6333 and
-6334→6334, app uses `QDRANT_URL=http://qdrant:6333` inside compose);
+6334→6334);
 no Pinecone or Google key is required for retrieval-only (`--no-judge`)
 when `EMBED_BACKEND=local`.
 

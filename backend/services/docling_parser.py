@@ -1,20 +1,21 @@
 """
-    Docling layout-aware parser (opt-in).
+Docling layout-aware parser (opt-in).
 
-    Keeps tables as Markdown tables and preserves two-column reading order without
-    requiring a paid OCR API. Heavy deps (``docling`` + ``granite-docling-258M``
-    ~1.1GB) are optional — install with ``pip install ".[docling]"`` or
-    ``uv sync --extra docling``. The model weights are cached via ``HF_HOME``
-    (Docker volume ``hf_cache`` in compose.yaml) so the download only happens
-    once.
+Keeps tables as Markdown tables and preserves two-column reading order without
+requiring a paid OCR API. Heavy deps (``docling`` + ``granite-docling-258M``
+~1.1GB) are optional — install with ``pip install ".[docling]"`` or
+``uv sync --extra docling``. The model weights are cached via ``HF_HOME``
+(Docker volume ``hf_cache`` in compose.yaml) so the download only happens
+once.
 
-    The parser is reached through :class:`services.document_parser.DocumentParser`
-    (same seam as :class:`services.pdf_service.PDFParser`) so swapping parsers
-    cannot silently change chunk sizes. Tests mock this parser and never download.
+The parser is reached through :class:`services.document_parser.DocumentParser`
+(same interface as :class:`services.pdf_service.PDFParser`) so swapping parsers
+cannot silently change chunk sizes. Tests mock this parser and never download.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import re
 from collections import Counter
@@ -25,7 +26,9 @@ from typing import List
 # ---------------------------------------------------------------------------
 
 
-def _strip_repeating_headers_footers(pages: List[str], threshold: float = 0.7) -> List[str]:
+def _strip_repeating_headers_footers(
+    pages: List[str], threshold: float = 0.7
+) -> List[str]:
     """
     Strip repeating headers/footers via dedup (>70% same position across pages).
 
@@ -94,24 +97,18 @@ def _strip_repeating_headers_footers(pages: List[str], threshold: float = 0.7) -
 
 def _try_import_docling() -> None:
     """Raise a helpful ImportError if docling is not installed."""
-    try:
-        import docling  # noqa: F401
-    except ImportError as exc:
+    if importlib.util.find_spec("docling") is None:
         raise ImportError(
             "Docling is not installed. Install the optional extra with "
-            "`uv sync --extra docling` or `pip install \".[docling]\"` "
+            '`uv sync --extra docling` or `pip install ".[docling]"` '
             "(pulls `docling` + `granite-docling-258M` ~1.1GB, cached to "
             "HF_HOME / Docker volume `hf_cache`). "
             "Tests mock this parser so `uv run pytest` never downloads."
-        ) from exc
+        )
 
 
 def _is_docling_available() -> bool:
-    try:
-        import docling  # noqa: F401
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("docling") is not None
 
 
 def _ensure_docling_available() -> None:
@@ -119,7 +116,7 @@ def _ensure_docling_available() -> None:
 
 
 class DoclingParser:
-    """
+    r"""
     Layout-aware PDF parser via Docling (MIT).
 
     - Outputs Markdown with hierarchy (headings) and tables as Markdown tables
@@ -132,6 +129,7 @@ class DoclingParser:
 
     @staticmethod
     def is_available() -> bool:
+        """Do is available."""
         return _is_docling_available()
 
     @staticmethod
@@ -177,7 +175,9 @@ class DoclingParser:
                 if prov:
                     # prov is list of ProvenanceItem with page_no
                     try:
-                        page_no = prov[0].page_no if isinstance(prov, list) else prov.page_no
+                        page_no = (
+                            prov[0].page_no if isinstance(prov, list) else prov.page_no
+                        )
                         has_prov = True
                     except Exception:
                         page_no = 1
@@ -211,14 +211,20 @@ class DoclingParser:
                 prov = getattr(tbl, "prov", None)
                 if prov:
                     try:
-                        page_no = prov[0].page_no if isinstance(prov, list) else prov.page_no
+                        page_no = (
+                            prov[0].page_no if isinstance(prov, list) else prov.page_no
+                        )
                         has_prov = True
                     except Exception:
                         page_no = 1
                 else:
                     page_no = 1
                 try:
-                    md_table = tbl.export_to_markdown(doc) if hasattr(tbl, "export_to_markdown") else str(tbl)
+                    md_table = (
+                        tbl.export_to_markdown(doc)
+                        if hasattr(tbl, "export_to_markdown")
+                        else str(tbl)
+                    )
                 except Exception:
                     # Fallback: try doc export of table
                     try:

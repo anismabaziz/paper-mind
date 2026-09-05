@@ -1,10 +1,10 @@
 """
-    Application configuration.
+Application configuration.
 
-    Environment variables are validated lazily: importing this module never
-    builds a client or touches an external service. Clients are created on
-    first access through module-level ``__getattr__`` so routes only pay for
-    what they actually use.
+Environment variables are validated lazily: importing this module never
+builds a client or touches an external service. Clients are created on
+first access through module-level ``__getattr__`` so routes only pay for
+what they actually use.
 """
 
 import os
@@ -58,7 +58,9 @@ RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 
 def is_rerank_enabled() -> bool:
+    """Do is rerank enabled."""
     return os.getenv("RERANK", "false").lower() in ("1", "true", "yes")
+
 
 PROVIDER_API_KEYS = {"google": "GOOGLE_API_KEY", "groq": "GROQ_API_KEY"}
 
@@ -66,16 +68,22 @@ from enum import Enum
 
 
 class VectorBackend(str, Enum):
+    """VectorBackend."""
+
     QDRANT = "qdrant"
     PINECONE = "pinecone"
 
 
 class EmbedBackend(str, Enum):
+    """EmbedBackend."""
+
     LOCAL = "local"
     GEMINI = "gemini"
 
 
 class ChatProvider(str, Enum):
+    """ChatProvider."""
+
     GOOGLE = "google"
     GROQ = "groq"
 
@@ -99,10 +107,10 @@ def _chat_provider() -> str:
 
 def missing_required_vars():
     """
-        Return the list of required environment variables that are unset or invalid.
+    Return the list of required environment variables that are unset or invalid.
 
-        Validation is driven by the three backend enums above so adding a new
-        backend only touches the enum definition, not a cascade of if/else.
+    Validation is driven by the three backend enums above so adding a new
+    backend only touches the enum definition, not a cascade of if/else.
     """
     mode = _chat_provider()
     vector_backend = _vector_backend()
@@ -118,7 +126,9 @@ def missing_required_vars():
     missing = [var for var in required if not os.getenv(var)]
 
     if vector_backend not in _VALID_VECTOR_BACKENDS:
-        missing.append(f"VECTOR_BACKEND (got {vector_backend!r}, expected 'qdrant' or 'pinecone')")
+        missing.append(
+            f"VECTOR_BACKEND (got {vector_backend!r}, expected 'qdrant' or 'pinecone')"
+        )
 
     provider_key = PROVIDER_API_KEYS.get(mode)
     if mode not in _VALID_PROVIDERS:
@@ -127,7 +137,9 @@ def missing_required_vars():
         missing.append(provider_key)
 
     if embed_backend not in _VALID_EMBED_BACKENDS:
-        missing.append(f"EMBED_BACKEND (got {embed_backend!r}, expected 'local' or 'gemini')")
+        missing.append(
+            f"EMBED_BACKEND (got {embed_backend!r}, expected 'local' or 'gemini')"
+        )
     elif embed_backend == EmbedBackend.GEMINI.value and not os.getenv("GOOGLE_API_KEY"):
         if "GOOGLE_API_KEY" not in missing:
             missing.append("GOOGLE_API_KEY")
@@ -136,9 +148,7 @@ def missing_required_vars():
 
 
 def validate():
-    """
-        Exit with a readable error if any required variable is missing.
-    """
+    """Exit with a readable error if any required variable is missing."""
     missing = missing_required_vars()
     if missing:
         print("PaperMind backend is missing required configuration:", file=sys.stderr)
@@ -198,7 +208,9 @@ def _get_pinecone_index():
     if _pinecone_index is None:
         from pinecone import Pinecone
 
-        _pinecone_index = Pinecone(api_key=os.getenv("PINECONE_API_KEY")).Index(INDEX_NAME)
+        _pinecone_index = Pinecone(api_key=os.getenv("PINECONE_API_KEY")).Index(
+            INDEX_NAME
+        )
     return _pinecone_index
 
 
@@ -212,6 +224,7 @@ def get_vector_index():
     # Tests monkeypatch ``_pinecone_index`` directly with a fake. Honor that
     # fake regardless of VECTOR_BACKEND so existing tests keep working when
     # the default flips to qdrant (dispatch map keeps the cascade in one place).
+    """Do get vector index."""
     vector_backend = _vector_backend()
     if vector_backend == VectorBackend.QDRANT.value:
         if _qdrant_index is not None:
@@ -228,6 +241,7 @@ def get_vector_index():
 
 
 def get_genai_client():
+    """Do get genai client."""
     global _genai_client
     if _genai_client is None:
         from google import genai
@@ -237,6 +251,7 @@ def get_genai_client():
 
 
 def get_groq_client():
+    """Do get groq client."""
     global _groq_client
     if _groq_client is None:
         from groq import Groq

@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import re
 import time
 
@@ -8,8 +10,11 @@ from services.google_service import GoogleService
 from services.groq_service import GroqService
 from services.local_embeddings import LocalEmbeddingService
 
+
 class AIService:
     # Gemini BatchEmbedContents is capped at 100 contents per request
+    """AIService."""
+
     EMBED_BATCH_SIZE = 100
 
     @staticmethod
@@ -27,13 +32,19 @@ class AIService:
                 last_exc = exc
                 msg = str(exc)
                 # 429 quota – respect RetryInfo if present, else exponential backoff
-                is_rate_limit = "429" in msg or "RESOURCE_EXHAUSTED" in msg or "Quota exceeded" in msg
+                is_rate_limit = (
+                    "429" in msg
+                    or "RESOURCE_EXHAUSTED" in msg
+                    or "Quota exceeded" in msg
+                )
                 if is_rate_limit and attempt < max_retries - 1:
                     m = re.search(r"retry in ([\d.]+)s", msg)
-                    delay = float(m.group(1)) + 1 if m else (2 ** attempt) * 2
+                    delay = float(m.group(1)) + 1 if m else (2**attempt) * 2
                     # cap so a single batch never blocks longer than ~60s
                     delay = min(delay, 60)
-                    print(f"Embedding rate-limited, retry {attempt + 1}/{max_retries} after {delay:.1f}s: {exc}")
+                    print(
+                        f"Embedding rate-limited, retry {attempt + 1}/{max_retries} after {delay:.1f}s: {exc}"
+                    )
                     time.sleep(delay)
                     continue
                 raise
@@ -41,6 +52,7 @@ class AIService:
 
     @staticmethod
     def get_embeddings(texts):
+        """Do get embeddings."""
         if isinstance(texts, str):
             texts = [texts]
 
@@ -48,19 +60,28 @@ class AIService:
             return []
 
         embed_backend = config._embed_backend()
-        batches = [texts[i : i + AIService.EMBED_BATCH_SIZE] for i in range(0, len(texts), AIService.EMBED_BATCH_SIZE)]
+        batches = [
+            texts[i : i + AIService.EMBED_BATCH_SIZE]
+            for i in range(0, len(texts), AIService.EMBED_BATCH_SIZE)
+        ]
 
         # Single dispatch map eliminates the repeated if/else cascade and the
         # middle-man _local_embed_batch (callers invoke the real target directly).
         dispatch = {
-            config.EmbedBackend.LOCAL.value: (LocalEmbeddingService._embed_batch, "local", lambda r: r),
+            config.EmbedBackend.LOCAL.value: (
+                LocalEmbeddingService._embed_batch,
+                "local",
+                lambda r: r,
+            ),
             config.EmbedBackend.GEMINI.value: (
                 AIService._embed_batch_with_retry,
                 "gemini",
                 lambda r: (embedding.values for embedding in r.embeddings),
             ),
         }
-        func, label_suffix, unpack = dispatch.get(embed_backend, dispatch[config.EmbedBackend.LOCAL.value])
+        func, label_suffix, unpack = dispatch.get(
+            embed_backend, dispatch[config.EmbedBackend.LOCAL.value]
+        )
         results = map_batches_concurrently(
             batches,
             func,
@@ -91,11 +112,11 @@ class AIService:
     @staticmethod
     def stream_response(query: str, context: str):
         """
-            Yield answer fragments from the primary provider.
+        Yield answer fragments from the primary provider.
 
-                    If the primary provider fails before producing any output, the
-                    fallback provider answers instead. A failure that happens
-                    mid-stream is re-raised so the caller can surface it.
+                If the primary provider fails before producing any output, the
+                fallback provider answers instead. A failure that happens
+                mid-stream is re-raised so the caller can surface it.
         """
         primary, fallback = AIService._providers()
         emitted = False
@@ -120,6 +141,7 @@ class AIService:
 
     @staticmethod
     def generate_response(query: str, context: str) -> str:
+        """Do generate response."""
         try:
             provider = config.MODE if config.MODE in ("groq", "google") else "google"
             if provider == "groq":

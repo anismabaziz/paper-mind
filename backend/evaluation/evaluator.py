@@ -1,23 +1,23 @@
 """
-    End-to-end evaluation of the RAG pipeline against the ground-truth fixture.
+End-to-end evaluation of the RAG pipeline against the ground-truth fixture.
 
-    Every external capability is injected:
+Every external capability is injected:
 
-    - ``embed_fn``: texts -> list of embedding vectors
-    - ``index``: Pinecone/Qdrant-compatible store with ``upsert``, ``query``, ``delete``
-    - ``generate_fn``: (query, context) -> answer text
-    - ``judge_fn``: judge prompt -> verdict reply (see evaluation.judge)
+- ``embed_fn``: texts -> list of embedding vectors
+- ``index``: Pinecone/Qdrant-compatible store with ``upsert``, ``query``, ``delete``
+- ``generate_fn``: (query, context) -> answer text
+- ``judge_fn``: judge prompt -> verdict reply (see evaluation.judge)
 
-    Tests wire deterministic fakes into all four; the CLI wires the real
-    providers, and only behind ``--live``. ``uv run pytest`` stays headless
-    (no Qdrant/Pinecone/LLM; heavy models mocked or skipped).
+Tests wire deterministic fakes into all four; the CLI wires the real
+providers, and only behind ``--live``. ``uv run pytest`` stays headless
+(no Qdrant/Pinecone/LLM; heavy models mocked or skipped).
 
-    Gates per phase (recorded on ``sample_docs`` via this module):
-    ``hit@5``/``recall@5`` + per-question breakdown and ingest ``sec/PDF``
-    (see :func:`index_document_timed`; ``POST /process-file`` also logs
-    parse/embed/upsert wall time). Free local path uses
-    ``VECTOR_BACKEND=qdrant`` on ``http://localhost:6333`` and
-    ``EMBED_BACKEND=local`` with no API keys (retrieval-only ``--no-judge``).
+Gates per phase (recorded on ``sample_docs`` via this module):
+``hit@5``/``recall@5`` + per-question breakdown and ingest ``sec/PDF``
+(see :func:`index_document_timed`; ``POST /process-file`` also logs
+parse/embed/upsert wall time). Free local path uses
+``VECTOR_BACKEND=qdrant`` on ``http://localhost:6333`` and
+``EMBED_BACKEND=local`` with no API keys (retrieval-only ``--no-judge``).
 """
 
 import hashlib
@@ -42,6 +42,7 @@ def _is_rerank_enabled() -> bool:
 
         return os.getenv("RERANK", "false").lower() in ("1", "true", "yes")
 
+
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 FIXTURE_PATH = Path(__file__).parent / "fixture.json"
 SAMPLE_DOCS_DIR = Path(__file__).parent / "sample_docs"
@@ -54,11 +55,14 @@ DEFAULT_K = 5
 
 @dataclass
 class EvaluationReport:
+    """EvaluationReport."""
+
     retrieval: RetrievalReport
     faithfulness: dict
     per_question: list = field(default_factory=list)
 
     def as_dict(self):
+        """Do as dict."""
         return {
             "retrieval": asdict(self.retrieval),
             "faithfulness": self.faithfulness,
@@ -67,10 +71,12 @@ class EvaluationReport:
 
 
 def load_fixture(path=FIXTURE_PATH) -> dict:
+    """Do load fixture."""
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def read_document(filename: str, docs_dir=SAMPLE_DOCS_DIR) -> bytes:
+    """Do read document."""
     return (Path(docs_dir) / filename).read_bytes()
 
 
@@ -78,15 +84,15 @@ def index_document(
     filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR, pdf_name=None
 ):
     """
-        Parse, chunk, embed, and upsert one sample document.
+    Parse, chunk, embed, and upsert one sample document.
 
-            ``pdf_name`` names the stored vectors (defaults to ``filename``), so a
-            live run can namespace them under an eval- prefix without changing
-            which file is read. Uses the same parser seam and vector shape as the
-            /process-file route, so the evaluator exercises the real ingestion
-            path. Sparse BM25 vectors are stored alongside dense for hybrid retrieval.
-            Returns chunk count; timing is logged via :func:`index_document_timed`
-            for gate reports (sec/PDF).
+        ``pdf_name`` names the stored vectors (defaults to ``filename``), so a
+        live run can namespace them under an eval- prefix without changing
+        which file is read. Uses the same parser and vector shape as the
+        /process-file route, so the evaluator exercises the real ingestion
+        path. Sparse BM25 vectors are stored alongside dense for hybrid retrieval.
+        Returns chunk count; timing is logged via :func:`index_document_timed`
+        for gate reports (sec/PDF).
     """
     raw = read_document(filename, docs_dir)
     chunks, page_numbers = DocumentParser.get_chunks(filename, raw)
@@ -120,33 +126,47 @@ def index_document(
     return len(chunks)
 
 
-def index_document_timed(filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR, pdf_name=None):
+def index_document_timed(
+    filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR, pdf_name=None
+):
     """
-        Like :func:`index_document` but returns ``(chunks, elapsed_seconds)``
-        for gate reports (ingest sec/PDF). Phase timing mirrors
-        ``POST /process-file`` parse/embed/upsert logging.
+    Like :func:`index_document` but returns ``(chunks, elapsed_seconds)``.
+
+    for gate reports (ingest sec/PDF). Phase timing mirrors
+    ``POST /process-file`` parse/embed/upsert logging.
     """
     import time as _time
 
     t0 = _time.time()
-    chunks = index_document(filename, index, embed_fn, docs_dir=docs_dir, pdf_name=pdf_name)
+    chunks = index_document(
+        filename, index, embed_fn, docs_dir=docs_dir, pdf_name=pdf_name
+    )
     elapsed = _time.time() - t0
     return chunks, elapsed
 
 
 def remove_document(filename: str, index):
+    """Do remove document."""
     index.delete(filter={"pdf_name": filename})
 
 
-def retrieve(query_embedding, filename, index, k=DEFAULT_K, prefix="", query_text=None, rerank=None):
+def retrieve(
+    query_embedding,
+    filename,
+    index,
+    k=DEFAULT_K,
+    prefix="",
+    query_text=None,
+    rerank=None,
+):
     """
-        Fetch candidates and shape them exactly like the /response route.
+    Fetch candidates and shape them exactly like the /response route.
 
-        When ``query_text`` is provided a hybrid dense+BM25 sparse query is
-        issued (single Qdrant hybrid via RRF), mirroring ``VectorService``.
-        When ``RERANK=true`` (or ``rerank=True``) the FETCH_K candidates are
-        reranked with a local cross-encoder before shaping to ``k`` (top 5).
-        Entirely local CPU, no API.
+    When ``query_text`` is provided a hybrid dense+BM25 sparse query is
+    issued (single Qdrant hybrid via RRF), mirroring ``VectorService``.
+    When ``RERANK=true`` (or ``rerank=True``) the FETCH_K candidates are
+    reranked with a local cross-encoder before shaping to ``k`` (top 5).
+    Entirely local CPU, no API.
     """
     sparse = None
     if query_text is not None:
@@ -210,11 +230,11 @@ def evaluate(
     rerank=None,
 ) -> EvaluationReport:
     """
-        Run every fixture question through retrieval and generation.
+    Run every fixture question through retrieval and generation.
 
-            ``judge_fn`` may be None to skip faithfulness scoring (retrieval-only
-            runs and tests that focus on the metrics).
-            ``rerank`` overrides the ``RERANK`` env flag per-run (None = env).
+        ``judge_fn`` may be None to skip faithfulness scoring (retrieval-only
+        runs and tests that focus on the metrics).
+        ``rerank`` overrides the ``RERANK`` env flag per-run (None = env).
     """
     import time
 
@@ -227,7 +247,15 @@ def evaluate(
         filename = item["document"]
         query_embedding = embed_fn([item["question"]])[0]
         t0 = time.time()
-        sources = retrieve(query_embedding, filename, index, k=k, prefix=prefix, query_text=item["question"], rerank=rerank)
+        sources = retrieve(
+            query_embedding,
+            filename,
+            index,
+            k=k,
+            prefix=prefix,
+            query_text=item["question"],
+            rerank=rerank,
+        )
         # Record latency delta proxy: rerank timing is printed inside reranker,
         # but we also capture per-query retrieval time for the report if rerank on
         if rerank is True or (rerank is None and _is_rerank_enabled()):
@@ -263,9 +291,7 @@ def evaluate(
                 else None
             ),
             "judged": len(faithfulness_scores),
-            "faithful": sum(
-                1 for s in faithfulness_scores if s == 1.0
-            ),
+            "faithful": sum(1 for s in faithfulness_scores if s == 1.0),
         },
         per_question=per_question,
     )
@@ -290,7 +316,8 @@ def evaluate_with_rerank_comparison(
     prefix="",
 ) -> dict:
     """
-    Run the fixture twice — without and with reranking — and log hit@k /
+    Run the fixture twice — without and with reranking — and log hit@k /.
+
     faithfulness deltas plus latency for 50 candidates. Returns a dict with
     both reports for the caller to inspect. Used by the live CLI and docs
     to demonstrate the gated reranker gate.
@@ -298,11 +325,31 @@ def evaluate_with_rerank_comparison(
     import time
 
     t0 = time.time()
-    report_off = evaluate(fixture, index, embed_fn, generate_fn, judge_fn, k=k, docs_dir=docs_dir, prefix=prefix, rerank=False)
+    report_off = evaluate(
+        fixture,
+        index,
+        embed_fn,
+        generate_fn,
+        judge_fn,
+        k=k,
+        docs_dir=docs_dir,
+        prefix=prefix,
+        rerank=False,
+    )
     off_ms = (time.time() - t0) / max(len(fixture.get("questions", [])), 1) * 1000
 
     t1 = time.time()
-    report_on = evaluate(fixture, index, embed_fn, generate_fn, judge_fn, k=k, docs_dir=docs_dir, prefix=prefix, rerank=True)
+    report_on = evaluate(
+        fixture,
+        index,
+        embed_fn,
+        generate_fn,
+        judge_fn,
+        k=k,
+        docs_dir=docs_dir,
+        prefix=prefix,
+        rerank=True,
+    )
     on_ms = (time.time() - t1) / max(len(fixture.get("questions", [])), 1) * 1000
 
     delta_ms = on_ms - off_ms
@@ -312,4 +359,8 @@ def evaluate_with_rerank_comparison(
         f"faithfulness {report_off.faithfulness.get('mean')} -> {report_on.faithfulness.get('mean')}, "
         f"latency {off_ms:.1f}ms -> {on_ms:.1f}ms (delta {delta_ms:+.1f}ms for 50 candidates, reranked to 5)"
     )
-    return {"off": report_off.as_dict(), "on": report_on.as_dict(), "latency_delta_ms": delta_ms}
+    return {
+        "off": report_off.as_dict(),
+        "on": report_on.as_dict(),
+        "latency_delta_ms": delta_ms,
+    }

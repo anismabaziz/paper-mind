@@ -35,6 +35,7 @@ def _get_model_name() -> str:
 def _get_reranker():
     """
     Lazy-load the cross-encoder. Thread-safe double-checked locking.
+
     Raises ImportError if ``sentence-transformers`` is missing or model load fails.
     """
     global _reranker
@@ -65,7 +66,9 @@ def _is_enabled(explicit: bool | None = None) -> bool:
         return os.getenv("RERANK", "false").lower() in ("1", "true", "yes")
 
 
-def rerank(query: str, sources: list[dict], *, enabled: bool | None = None) -> list[dict]:
+def rerank(
+    query: str, sources: list[dict], *, enabled: bool | None = None
+) -> list[dict]:
     """
     Rerank ``sources`` for ``query`` using a local cross-encoder.
 
@@ -106,7 +109,9 @@ def rerank(query: str, sources: list[dict], *, enabled: bool | None = None) -> l
     try:
         pairs = [[query, s.get("content", "")] for s in sources]
         # CrossEncoder.predict returns numpy array or list
-        scores = model.predict(pairs, batch_size=32, show_progress_bar=False, convert_to_tensor=False)
+        scores = model.predict(
+            pairs, batch_size=32, show_progress_bar=False, convert_to_tensor=False
+        )
         if hasattr(scores, "tolist"):
             scores = scores.tolist()
         scores = [float(v) for v in scores]
@@ -117,14 +122,18 @@ def rerank(query: str, sources: list[dict], *, enabled: bool | None = None) -> l
 
         reranked.sort(key=lambda s: s["score"], reverse=True)
         elapsed = time.time() - start
-        print(f"Reranker: reranked {len(sources)} candidates in {elapsed:.3f}s (model {_get_model_name()})")
+        print(
+            f"Reranker: reranked {len(sources)} candidates in {elapsed:.3f}s (model {_get_model_name()})"
+        )
         return reranked
     except Exception as exc:
         print(f"Reranker degraded to legacy order (scoring failed): {exc}")
         return sources
 
 
-def maybe_rerank(query: str | None, sources: list[dict], enabled: bool | None = None) -> list[dict]:
+def maybe_rerank(
+    query: str | None, sources: list[dict], enabled: bool | None = None
+) -> list[dict]:
     """
     Apply the gated reranker only when it should run.
 
@@ -141,7 +150,9 @@ def maybe_rerank(query: str | None, sources: list[dict], enabled: bool | None = 
         return sources
     try:
         return rerank(query, sources, enabled=enabled)
-    except Exception as exc:  # pragma: no cover - defensive, rerank already handles its own errors
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - defensive, rerank already handles its own errors
         print(f"Reranker skipped (maybe_rerank failed): {exc}")
         return sources
 

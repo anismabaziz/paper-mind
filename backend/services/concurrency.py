@@ -18,8 +18,6 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
-
-
 def map_batches_concurrently(
     batches: list[T],
     func: Callable[[T], R],
@@ -72,5 +70,7 @@ def map_batches_concurrently(
         ordered[idx] = future.result()
 
     elapsed = time.time() - start
-    print(f"{label} in {len(batches)} batches concurrently in {elapsed:.2f}s ({max_workers} workers)")
+    print(
+        f"{label} in {len(batches)} batches concurrently in {elapsed:.2f}s ({max_workers} workers)"
+    )
     return ordered  # type: ignore[return-value]

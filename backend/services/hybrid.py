@@ -77,6 +77,7 @@ DEFAULT_ALPHA = 0.7
 
 
 def tokenize(text: str) -> list[str]:
+    """Do tokenize."""
     tokens = _TOKEN_RE.findall(text.lower())
     return [t for t in tokens if t not in STOPWORDS and len(t) > 1]
 
@@ -137,12 +138,14 @@ def bm25_scores(query_tokens: list[str], corpus_tokens: list[list[str]]) -> list
 
 
 def build_sparse_vectors(texts: list[str]) -> list[dict]:
+    """Do build sparse vectors."""
     return [build_sparse_vector(t) for t in texts]
 
 
 def to_qdrant_sparse(sparse: dict):
     """
-    Convert a ``{"indices": [], "values": []}`` dict to a Qdrant
+    Convert a ``{"indices": [], "values": []}`` dict to a Qdrant.
+
     ``SparseVector``. Falls back to a plain dict if ``qdrant_client`` is
     unavailable (tests never import it).
     """
@@ -218,7 +221,10 @@ def alpha_blend(
         vals = [r.get("score", 0.0) for r in results]
         lo, hi = min(vals), max(vals)
         spread = hi - lo if hi != lo else 1.0
-        return {str(r.get("id", i)): (r.get("score", 0.0) - lo) / spread for i, r in enumerate(results)}
+        return {
+            str(r.get("id", i)): (r.get("score", 0.0) - lo) / spread
+            for i, r in enumerate(results)
+        }
 
     d_norm = _norm(dense_results)
     s_norm = _norm(sparse_results)
@@ -250,6 +256,7 @@ def fuse_via_rrf_or_alpha(
     k: int = RRF_K,
     limit: int | None = DEFAULT_FETCH_K,
 ) -> list[dict]:
+    """Do fuse via rrf or alpha."""
     if method == "alpha":
         return alpha_blend(dense_results, sparse_results, alpha=alpha, limit=limit)
     return rrf_fusion([dense_results, sparse_results], k=k, limit=limit)

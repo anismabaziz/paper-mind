@@ -1,8 +1,8 @@
 """
-    Database engine, ORM models, and the repository seam.
+Database engine, ORM models, and the repository.
 
-    All relational access goes through :class:`Repository`; routes and services
-    never touch a Session directly.
+All relational access goes through :class:`Repository`; routes and services
+never touch a Session directly.
 """
 
 import uuid
@@ -25,10 +25,14 @@ def _new_id():
 
 
 class Base(DeclarativeBase):
+    """Base."""
+
     pass
 
 
 class FileRecord(Base):
+    """FileRecord."""
+
     __tablename__ = "files"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
@@ -40,6 +44,8 @@ class FileRecord(Base):
 
 
 class Conversation(Base):
+    """Conversation."""
+
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
@@ -50,6 +56,8 @@ class Conversation(Base):
 
 
 class Message(Base):
+    """Message."""
+
     __tablename__ = "messages"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
@@ -64,6 +72,8 @@ class Message(Base):
 
 
 class Source(Base):
+    """Source."""
+
     __tablename__ = "sources"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
@@ -77,6 +87,8 @@ class Source(Base):
 
 
 class User(Base):
+    """User."""
+
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
@@ -104,12 +116,12 @@ SessionLocal = None
 
 
 def get_session_factory():
-    """
-        Build the engine and session factory on first use, from the live env.
-    """
+    """Build the engine and session factory on first use, from the live env."""
     global _engine, SessionLocal
     if _engine is None:
-        _engine = create_engine(config.DATABASE_URL, **_engine_kwargs(config.DATABASE_URL))
+        _engine = create_engine(
+            config.DATABASE_URL, **_engine_kwargs(config.DATABASE_URL)
+        )
         SessionLocal = sessionmaker(bind=_engine)
     return SessionLocal
 
@@ -122,12 +134,11 @@ def _to_dict(record, **extra):
 
 
 class Repository:
-    """
-        Repository seam: the only relational access point for the app.
-    """
+    """Repository: the only relational access point for the app."""
 
     def __init__(self, session_factory=None):
         # Resolved lazily so importing this module never requires env vars.
+        """Initialize."""
         self._factory_override = session_factory
         self._resolved = None
 
@@ -142,6 +153,7 @@ class Repository:
     # -- files ----------------------------------------------------------
 
     def create_file(self, filename: str) -> dict:
+        """Do create file."""
         with self._session_factory() as session, session.begin():
             record = FileRecord(filename=filename)
             session.add(record)
@@ -149,6 +161,7 @@ class Repository:
             return self._file_dict(record)
 
     def get_file(self, filename: str) -> dict | None:
+        """Do get file."""
         with self._session_factory() as session:
             record = session.scalars(
                 select(FileRecord).where(FileRecord.filename == filename)
@@ -156,6 +169,7 @@ class Repository:
             return self._file_dict(record) if record else None
 
     def list_files(self) -> list[dict]:
+        """Do list files."""
         with self._session_factory() as session:
             records = session.scalars(
                 select(FileRecord).order_by(FileRecord.created_at)
@@ -163,6 +177,7 @@ class Repository:
             return [self._file_dict(r) for r in records]
 
     def set_processed(self, filename: str, status: bool = True) -> None:
+        """Do set processed."""
         with self._session_factory() as session, session.begin():
             record = session.scalars(
                 select(FileRecord).where(FileRecord.filename == filename)
@@ -171,6 +186,7 @@ class Repository:
                 record.is_processed = status
 
     def delete_file(self, file_id: str) -> None:
+        """Do delete file."""
         with self._session_factory() as session, session.begin():
             record = session.get(FileRecord, file_id)
             if record:
@@ -178,11 +194,14 @@ class Repository:
 
     @staticmethod
     def _file_dict(record):
-        return _to_dict(record, filename=record.filename, is_processed=record.is_processed)
+        return _to_dict(
+            record, filename=record.filename, is_processed=record.is_processed
+        )
 
     # -- users ------------------------------------------------------------
 
     def create_user(self, email: str, password_hash: str) -> dict:
+        """Do create user."""
         with self._session_factory() as session, session.begin():
             user = User(email=email, password_hash=password_hash)
             session.add(user)
@@ -190,17 +209,21 @@ class Repository:
             return {"id": user.id, "email": user.email}
 
     def get_user_by_email(self, email: str) -> dict | None:
+        """Do get user by email."""
         with self._session_factory() as session:
-            user = session.scalars(
-                select(User).where(User.email == email)
-            ).first()
+            user = session.scalars(select(User).where(User.email == email)).first()
             if not user:
                 return None
-            return {"id": user.id, "email": user.email, "password_hash": user.password_hash}
+            return {
+                "id": user.id,
+                "email": user.email,
+                "password_hash": user.password_hash,
+            }
 
     # -- conversations ----------------------------------------------------
 
     def create_conversation(self, file_id: str) -> str:
+        """Do create conversation."""
         with self._session_factory() as session, session.begin():
             conversation = Conversation(file_id=file_id)
             session.add(conversation)
@@ -208,12 +231,14 @@ class Repository:
             return conversation.id
 
     def get_conversation_id(self, file_id: str) -> str | None:
+        """Do get conversation id."""
         with self._session_factory() as session:
             return session.scalars(
                 select(Conversation.id).where(Conversation.file_id == file_id)
             ).first()
 
     def delete_conversation(self, conversation_id: str) -> None:
+        """Do delete conversation."""
         with self._session_factory() as session, session.begin():
             conversation = session.get(Conversation, conversation_id)
             if conversation:
@@ -224,10 +249,9 @@ class Repository:
     def add_message(
         self, conversation_id: str, sender: str, text: str, sources=None
     ) -> str:
+        """Do add message."""
         with self._session_factory() as session, session.begin():
-            message = Message(
-                conversation_id=conversation_id, sender=sender, text=text
-            )
+            message = Message(conversation_id=conversation_id, sender=sender, text=text)
             session.add(message)
             session.flush()
             for source in sources or []:
@@ -243,6 +267,7 @@ class Repository:
             return message.id
 
     def get_messages(self, conversation_id: str) -> list[dict]:
+        """Do get messages."""
         with self._session_factory() as session:
             rows = session.scalars(
                 select(Message)
@@ -284,6 +309,7 @@ class Repository:
         }
 
     def delete_messages(self, conversation_id: str) -> None:
+        """Do delete messages."""
         with self._session_factory() as session, session.begin():
             session.query(Message).where(
                 Message.conversation_id == conversation_id

@@ -1,11 +1,11 @@
 """
-    Lightweight PDF heuristics for layout-aware routing.
+Lightweight PDF heuristics for layout-aware routing.
 
-    All checks use ``pymupdf`` only and stay under 50ms for a 30-page PDF,
-    versus seconds for a Docling layout pass. The heuristics decide whether
-    a PDF is image-only / two-column / borderless-table and therefore benefits
-    from :class:`services.docling_parser.DoclingParser`; others stay on the
-    :class:`services.pdf_service.PDFParser` fast path.
+All checks use ``pymupdf`` only and stay under 50ms for a 30-page PDF,
+versus seconds for a Docling layout pass. The heuristics decide whether
+a PDF is image-only / two-column / borderless-table and therefore benefits
+from :class:`services.docling_parser.DoclingParser`; others stay on the
+:class:`services.pdf_service.PDFParser` fast path.
 """
 
 from __future__ import annotations
@@ -82,7 +82,10 @@ def has_borderless_table(file_bytes: bytes) -> bool:
                     parts = re.split(r"\s{2,}", line.strip())
                     if len(parts) >= 3 and all(p.strip() for p in parts):
                         table_like += 1
-                    elif "\t" in line and len([p for p in line.split("\t") if p.strip()]) >= 3:
+                    elif (
+                        "\t" in line
+                        and len([p for p in line.split("\t") if p.strip()]) >= 3
+                    ):
                         table_like += 1
                 if table_like >= 3:
                     return True
