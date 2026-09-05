@@ -24,6 +24,13 @@ dependencies = [
     "tiktoken>=0.14.0",
 ]
 
+[project.optional-dependencies]
+docling = [
+    "docling>=2.40.0",
+    # granite-docling-258M weights (~1.1GB) are downloaded via HF_HOME cache,
+    # not a pip package; docling pulls transformers + huggingface-hub.
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",

@@ -39,10 +39,15 @@ services:
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       DEMO_MODE: ${DEMO_MODE:-false}
-      # Hugging Face cache: keep BGE-M3 (~2GB) on a persistent volume
-      # so the download only happens on first run. Host cache is also
-      # respected when running outside Docker via HF_HOME.
+      # Opt-in layout parser: USE_DOCLING=true forces Docling, auto (default) uses
+      # lightweight heuristic (image-only / 2-col / borderless-table) to route
+      # only those PDFs to Docling; others stay on pymupdf fast path.
+      USE_DOCLING: ${USE_DOCLING:-auto}
+      # Hugging Face cache: keep BGE-M3 (~2GB) and granite-docling-258M (~1.1GB)
+      # on a persistent volume so downloads only happen on first run. Host cache
+      # is also respected when running outside Docker via HF_HOME.
       HF_HOME: /app/.cache/huggingface
+      HF_HUB_CACHE: /app/.cache/huggingface/hub
     ports:
       - "3000:3000"
     volumes:

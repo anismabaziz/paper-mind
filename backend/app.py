@@ -138,20 +138,7 @@ def process_file():
             return jsonify({"error": "Failed to fetch file"}), 400
         file_content = storage.open(filename)
 
-        (chunks, page_numbers), parse_elapsed = _timed_call(lambda: DocumentParser.get_chunks(filename, file_content))
-        # Bundle into Chunk objects so page_no travels with text (fixes data clump)
-        from services.document_parser import Chunk
-        import hashlib as _hashlib
-
-        chunk_objs = [
-            Chunk(
-                text=chunks[i],
-                page_no=page_numbers[i],
-                chunk_index=i,
-                content_hash=_hashlib.sha256(chunks[i].encode("utf-8")).hexdigest(),
-            )
-            for i in range(len(chunks))
-        ]
+        chunk_objs, parse_elapsed = _timed_call(DocumentParser.get_chunk_objects, filename, file_content)
 
         # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
         if not chunk_objs:

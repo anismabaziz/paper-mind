@@ -1,9 +1,9 @@
 """
 Gated local cross-encoder reranker tests — headless, no model download.
 
-Spec ticket 06: RERANK=true|false gates rerank of 50 hybrid candidates
-before shape_sources keeps top 5. Flag off preserves legacy order; flag on
-yields reranked, deduped, score-ordered results, entirely local CPU.
+RERANK=true|false gates rerank of 50 hybrid candidates before shape_sources
+keeps top 5. Flag off preserves legacy order; flag on yields reranked,
+deduped, score-ordered results, entirely local CPU.
 
 All branches use fakes: the cross-encoder is stubbed via _reranker, never
 importing weights, so pytest stays fast and offline.

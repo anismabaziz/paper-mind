@@ -38,6 +38,36 @@ def _token_len(text: str) -> int:
 
 _PARSERS = {".pdf": PDFParser}
 
+# Re-export for callers that probe the registry (spec pins _PARSERS shape)
+try:
+    from services.docling_parser import DoclingParser as _DoclingParser
+
+    _PARSERS[".pdf:docling"] = _DoclingParser  # optional layout-aware branch
+except Exception:
+    pass
+
+
+def _should_use_docling(filename: str, file_bytes: bytes | None) -> bool:
+    """Delegate to :mod:`services.pdf_heuristics` to keep this seam focused."""
+    from services.pdf_heuristics import should_use_docling
+
+    return should_use_docling(filename, file_bytes)
+
+
+# Backward-compat re-exports so existing probes/tests keep working
+try:
+    from services.pdf_heuristics import (
+        has_borderless_table as _has_borderless_table,
+    )
+    from services.pdf_heuristics import (
+        is_image_only_pdf as _is_image_only_pdf,
+    )
+    from services.pdf_heuristics import (
+        is_two_column_pdf as _is_two_column_pdf,
+    )
+except Exception:  # pragma: no cover
+    pass
+
 
 class UnknownDocumentFormat(ValueError):
     pass
@@ -45,15 +75,35 @@ class UnknownDocumentFormat(ValueError):
 
 class DocumentParser:
     @classmethod
-    def for_filename(cls, filename: str):
+    def for_filename(cls, filename: str, file_bytes: bytes | None = None):
+        """
+        Resolve a parser for ``filename``.
+
+        When ``file_bytes`` is provided and the lightweight heuristic detects an
+        image-only / borderless-table / 2-col PDF, returns :class:`DoclingParser`
+        (if installed); otherwise returns :class:`PDFParser` (pymupdf fast path).
+        The ``file_bytes`` argument is optional so existing callers
+        (``for_filename("paper.pdf")``) keep working.
+        """
         ext = os.path.splitext(filename)[1].lower()
-        parser = _PARSERS.get(ext)
-        if parser is None:
-            supported = ", ".join(sorted(_PARSERS))
-            raise UnknownDocumentFormat(
-                f"No parser for {ext!r}; supported formats: {supported}"
-            )
-        return parser
+        if ext != ".pdf":
+            parser = _PARSERS.get(ext)
+            if parser is None:
+                supported = ", ".join(sorted(_PARSERS))
+                raise UnknownDocumentFormat(
+                    f"No parser for {ext!r}; supported formats: {supported}"
+                )
+            return parser
+
+        # PDF: may route to Docling via heuristic
+        if file_bytes is not None and _should_use_docling(filename, file_bytes):
+            try:
+                from services.docling_parser import DoclingParser
+
+                return DoclingParser
+            except Exception:
+                pass
+        return _PARSERS[".pdf"]
 
     @staticmethod
     def split_text(text, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
@@ -107,8 +157,30 @@ class DocumentParser:
             back to flat text. Single seam so app and evaluator share the
             same logic. Prefer :meth:`get_chunk_objects` for new code — the
             parallel lists are a data clump.
+
+            Routing: when ``file_bytes`` looks image-only / 2-col / borderless-
+            table and Docling is installed, the Docling branch is tried first
+            (Markdown with hierarchy + tables as ``| col |``, header/footer
+            dedup >70%, page_no preserved). On any Docling failure the pymupdf
+            fast path is used so ingestion never breaks.
         """
-        parser = cls.for_filename(filename)
+        # Try heuristic Docling branch first when warranted, before the plain
+        # extension lookup. This keeps two-column / table PDFs correct without
+        # paying Docling cost for single-column born-digital PDFs.
+        if file_bytes is not None and _should_use_docling(filename, file_bytes):
+            try:
+                from services.docling_parser import DoclingParser
+
+                page_texts = DoclingParser.extract_pages(file_bytes)
+                chunks_with_page = cls.split_pages(page_texts)
+                chunks = [c for c, _ in chunks_with_page]
+                page_numbers = [p for _, p in chunks_with_page]
+                if chunks:
+                    return chunks, page_numbers
+            except Exception:
+                pass
+
+        parser = cls.for_filename(filename, file_bytes)
         if hasattr(parser, "extract_pages"):
             try:
                 page_texts = parser.extract_pages(file_bytes)
