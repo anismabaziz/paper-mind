@@ -26,6 +26,13 @@ app = Flask(__name__)
 CORS(app)
 
 
+def _timed_call(func, *args, **kwargs):
+    """Run ``func`` and return (result, elapsed_seconds) for phase timing."""
+    start = time.time()
+    result = func(*args, **kwargs)
+    return result, time.time() - start
+
+
 def file_url(filename):
     # Absolute, like the old hosted storage URLs, so the frontend can use
     # the value directly in an iframe pointed at the API host.
@@ -131,24 +138,32 @@ def process_file():
             return jsonify({"error": "Failed to fetch file"}), 400
         file_content = storage.open(filename)
 
-        parse_start = time.time()
-        chunks, page_numbers = DocumentParser.get_chunks(filename, file_content)
-        parse_elapsed = time.time() - parse_start
+        (chunks, _), parse_elapsed = _timed_call(lambda: DocumentParser.get_chunks(filename, file_content))
+        # Bundle into Chunk objects so page_no travels with text (fixes data clump)
+        from services.document_parser import Chunk
+        import hashlib as _hashlib
+
+        chunk_objs = [
+            Chunk(
+                text=chunks[i],
+                page_no=_[i],
+                chunk_index=i,
+                content_hash=_hashlib.sha256(chunks[i].encode("utf-8")).hexdigest(),
+            )
+            for i in range(len(chunks))
+        ]
 
         # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
-        if not chunks:
+        if not chunk_objs:
             return jsonify({"error": "No text extracted from document"}), 400
         # Remove any vectors left from a previous failed attempt
         try:
             VectorService.delete_by_filename(filename)
         except Exception as e:
             print(f"/process-file vector cleanup warning for {filename}: {e}")
-        embed_start = time.time()
-        embeddings = AIService.get_embeddings(chunks)
-        embed_elapsed = time.time() - embed_start
-        upsert_start = time.time()
-        VectorService.upsert_vectors(embeddings, chunks, filename, page_numbers=page_numbers)
-        upsert_elapsed = time.time() - upsert_start
+        texts = [c.text for c in chunk_objs]
+        embeddings, embed_elapsed = _timed_call(AIService.get_embeddings, texts)
+        _, upsert_elapsed = _timed_call(VectorService.upsert_chunks, embeddings, chunk_objs, filename)
 
         # 3. Create Conversation (reuse one if the file is re-processed)
         file_record = repository.get_file(filename)
@@ -160,7 +175,7 @@ def process_file():
 
         wall_elapsed = time.time() - wall_start
         print(
-            f"/process-file {filename}: {len(chunks)} chunks | "
+            f"/process-file {filename}: {len(chunk_objs)} chunks | "
             f"parse {parse_elapsed:.2f}s embed {embed_elapsed:.2f}s "
             f"upsert {upsert_elapsed:.2f}s total {wall_elapsed:.2f}s"
         )
@@ -197,7 +212,7 @@ def get_response():
     try:
         repository.add_message(conversation_id, "user", query)
         query_embedding = AIService.get_embeddings(query)[0]
-        sources = VectorService.query_vectors(query_embedding, filename)
+        sources = VectorService.query_vectors(query_embedding, filename, query_text=query)
         context = "\n\n".join(source["content"] for source in sources)
     except Exception as e:
         print(f"/response retrieval error: {e}")

@@ -92,10 +92,10 @@ class FakeVectorService:
             }
         ]
 
-    def upsert_vectors(self, embeddings, texts, filename, page_numbers=None):
+    def upsert_vectors(self, embeddings, texts, filename, page_numbers=None, **kwargs):
         self.upserts.append((embeddings, texts, filename))
 
-    def query_vectors(self, embedding, filename, top_k=TOP_K):
+    def query_vectors(self, embedding, filename, top_k=TOP_K, query_text=None, alpha=None, **kwargs):
         # Route through the real shaping so flow tests see the same
         # dedupe/bound/order behavior as production retrieval.
         return shape_sources(self.matches)
@@ -111,6 +111,7 @@ class FakeVectorService:
 def fake_vectors(monkeypatch, app_module):
     fake = FakeVectorService()
     monkeypatch.setattr(app_module.VectorService, "upsert_vectors", fake.upsert_vectors)
+    monkeypatch.setattr(app_module.VectorService, "upsert_chunks", fake.upsert_vectors)
     monkeypatch.setattr(app_module.VectorService, "query_vectors", fake.query_vectors)
     monkeypatch.setattr(app_module.VectorService, "delete_by_filename", fake.delete_by_filename)
     monkeypatch.setattr(app_module.VectorService, "delete_all", fake.delete_all)

@@ -7,12 +7,24 @@
     chunk sizes or overlap.
 """
 
+import hashlib
 import os
+from dataclasses import dataclass
 
 import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from services.pdf_service import PDFParser
+
+
+@dataclass(frozen=True)
+class Chunk:
+    """Bundled chunk payload traveling together through ingestion."""
+
+    text: str
+    page_no: int | None
+    chunk_index: int
+    content_hash: str
 
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 50
@@ -73,13 +85,28 @@ class DocumentParser:
         return chunks_with_page
 
     @classmethod
+    def get_chunk_objects(cls, filename: str, file_bytes: bytes) -> list[Chunk]:
+        """Parse and chunk, returning bundled :class:`Chunk` objects."""
+        chunks, page_numbers = cls.get_chunks(filename, file_bytes)
+        return [
+            Chunk(
+                text=chunk,
+                page_no=page_numbers[i],
+                chunk_index=i,
+                content_hash=hashlib.sha256(chunk.encode("utf-8")).hexdigest(),
+            )
+            for i, chunk in enumerate(chunks)
+        ]
+
+    @classmethod
     def get_chunks(cls, filename: str, file_bytes: bytes):
         """
             Parse and chunk a file, returning (chunks, page_numbers).
 
             Page-aware when the parser exposes extract_pages; otherwise falls
             back to flat text. Single seam so app and evaluator share the
-            same logic.
+            same logic. Prefer :meth:`get_chunk_objects` for new code — the
+            parallel lists are a data clump.
         """
         parser = cls.for_filename(filename)
         if hasattr(parser, "extract_pages"):

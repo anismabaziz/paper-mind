@@ -43,49 +43,80 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 LOCAL_EMBEDDING_MODEL = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-m3")
 LOCAL_EMBED_DIM = int(os.getenv("LOCAL_EMBED_DIM", "1024"))
 
+# Hybrid retrieval: dense + BM25 sparse fusion
+HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.7"))
+FETCH_K = int(os.getenv("FETCH_K", "50"))
+RRF_K = int(os.getenv("RRF_K", "60"))
+
 PROVIDER_API_KEYS = {"google": "GOOGLE_API_KEY", "groq": "GROQ_API_KEY"}
 
-
-def _vector_backend():
-    return os.getenv("VECTOR_BACKEND", "qdrant").lower()
+from enum import Enum
 
 
-def _embed_backend():
-    return os.getenv("EMBED_BACKEND", "local").lower()
+class VectorBackend(str, Enum):
+    QDRANT = "qdrant"
+    PINECONE = "pinecone"
+
+
+class EmbedBackend(str, Enum):
+    LOCAL = "local"
+    GEMINI = "gemini"
+
+
+class ChatProvider(str, Enum):
+    GOOGLE = "google"
+    GROQ = "groq"
+
+
+_VALID_VECTOR_BACKENDS = {b.value for b in VectorBackend}
+_VALID_EMBED_BACKENDS = {b.value for b in EmbedBackend}
+_VALID_PROVIDERS = {p.value for p in ChatProvider}
+
+
+def _vector_backend() -> str:
+    return os.getenv("VECTOR_BACKEND", VectorBackend.QDRANT.value).lower()
+
+
+def _embed_backend() -> str:
+    return os.getenv("EMBED_BACKEND", EmbedBackend.LOCAL.value).lower()
+
+
+def _chat_provider() -> str:
+    return os.getenv("MODE", ChatProvider.GOOGLE.value).lower()
 
 
 def missing_required_vars():
     """
         Return the list of required environment variables that are unset or invalid.
+
+        Validation is driven by the three backend enums above so adding a new
+        backend only touches the enum definition, not a cascade of if/else.
     """
-    # Read MODE fresh from the environment so validation reflects the
-    # process's current state, not whatever was set at import time.
-    mode = os.getenv("MODE", "google").lower()
+    mode = _chat_provider()
     vector_backend = _vector_backend()
+    embed_backend = _embed_backend()
+
     required = ["DATABASE_URL"]
-    if vector_backend == "pinecone":
+    # Vector backend requirement is a single map lookup, not a cascade
+    if vector_backend == VectorBackend.PINECONE.value:
         required.append("PINECONE_API_KEY")
-    elif vector_backend == "qdrant":
-        pass
-    else:
-        # Invalid backend will be reported below; don't also demand Pinecone
+    elif vector_backend not in _VALID_VECTOR_BACKENDS:
         required.append("VECTOR_BACKEND")
 
     missing = [var for var in required if not os.getenv(var)]
 
-    if vector_backend not in ("qdrant", "pinecone"):
+    if vector_backend not in _VALID_VECTOR_BACKENDS:
         missing.append(f"VECTOR_BACKEND (got {vector_backend!r}, expected 'qdrant' or 'pinecone')")
 
     provider_key = PROVIDER_API_KEYS.get(mode)
-    if provider_key is None:
+    if mode not in _VALID_PROVIDERS:
         missing.append(f"MODE (got {mode!r}, expected 'google' or 'groq')")
-    elif not os.getenv(provider_key):
+    elif provider_key and not os.getenv(provider_key):
         missing.append(provider_key)
 
-    embed_backend = _embed_backend()
-    if embed_backend not in ("local", "gemini"):
+    if embed_backend not in _VALID_EMBED_BACKENDS:
         missing.append(f"EMBED_BACKEND (got {embed_backend!r}, expected 'local' or 'gemini')")
-    elif embed_backend == "gemini" and not os.getenv("GOOGLE_API_KEY"):
+    elif embed_backend == EmbedBackend.GEMINI.value and not os.getenv("GOOGLE_API_KEY"):
         if "GOOGLE_API_KEY" not in missing:
             missing.append("GOOGLE_API_KEY")
 
@@ -150,29 +181,38 @@ def _get_qdrant_index():
     return _qdrant_index
 
 
-def get_vector_index():
+def _get_pinecone_index():
     global _pinecone_index
-    # Tests monkeypatch ``_pinecone_index`` directly with a fake. Honor that
-    # fake regardless of VECTOR_BACKEND so existing tests keep working when
-    # the default flips to qdrant.
-    vector_backend = _vector_backend()
-    if vector_backend == "qdrant":
-        if _qdrant_index is not None:
-            return _qdrant_index
-        if _pinecone_index is not None:
-            # Legacy fake installed via ``_pinecone_index`` – keep using it
-            # for older tests that only patch the Pinecone seam.
-            return _pinecone_index
-        return _get_qdrant_index()
-
-    # pinecone path
     if _pinecone_index is None:
         from pinecone import Pinecone
 
-        _pinecone_index = Pinecone(api_key=os.getenv("PINECONE_API_KEY")).Index(
-            INDEX_NAME
-        )
+        _pinecone_index = Pinecone(api_key=os.getenv("PINECONE_API_KEY")).Index(INDEX_NAME)
     return _pinecone_index
+
+
+_VECTOR_FACTORIES = {
+    VectorBackend.QDRANT.value: _get_qdrant_index,
+    VectorBackend.PINECONE.value: _get_pinecone_index,
+}
+
+
+def get_vector_index():
+    # Tests monkeypatch ``_pinecone_index`` directly with a fake. Honor that
+    # fake regardless of VECTOR_BACKEND so existing tests keep working when
+    # the default flips to qdrant (dispatch map keeps the cascade in one place).
+    vector_backend = _vector_backend()
+    if vector_backend == VectorBackend.QDRANT.value:
+        if _qdrant_index is not None:
+            return _qdrant_index
+        if _pinecone_index is not None:
+            return _pinecone_index
+        return _get_qdrant_index()
+
+    factory = _VECTOR_FACTORIES.get(vector_backend)
+    if factory is not None:
+        return factory()
+    # Invalid backend – let missing_required_vars report it; fall back to qdrant for boot
+    return _get_qdrant_index()
 
 
 def get_genai_client():

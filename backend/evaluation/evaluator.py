@@ -65,15 +65,26 @@ def index_document(
             live run can namespace them under an eval- prefix without changing
             which file is read. Uses the same parser seam and vector shape as the
             /process-file route, so the evaluator exercises the real ingestion
-            path.
+            path. Sparse BM25 vectors are stored alongside dense for hybrid retrieval.
     """
     raw = read_document(filename, docs_dir)
     chunks, page_numbers = DocumentParser.get_chunks(filename, raw)
     embeddings = embed_fn(chunks)
+    # Build BM25 sparse vectors (hash-based TF) for hybrid indexing
+    try:
+        from services.hybrid import build_sparse_vectors
+    except Exception:
+        build_sparse_vectors = None  # type: ignore
+    if build_sparse_vectors is not None:
+        sparse_vectors = build_sparse_vectors(chunks)
+    else:
+        sparse_vectors = [{"indices": [], "values": []} for _ in chunks]
     vectors = [
         {
             "id": str(uuid.uuid4()),
             "values": embeddings[i],
+            "sparse_values": sparse_vectors[i],
+            "sparse_vector": sparse_vectors[i],
             "metadata": {
                 "content": chunks[i],
                 "pdf_name": pdf_name or filename,
@@ -92,16 +103,48 @@ def remove_document(filename: str, index):
     index.delete(filter={"pdf_name": filename})
 
 
-def retrieve(query_embedding, filename, index, k=DEFAULT_K, prefix=""):
+def retrieve(query_embedding, filename, index, k=DEFAULT_K, prefix="", query_text=None):
     """
         Fetch candidates and shape them exactly like the /response route.
+
+        When ``query_text`` is provided a hybrid dense+BM25 sparse query is
+        issued (single Qdrant hybrid via RRF), mirroring ``VectorService``.
     """
-    results = index.query(
-        vector=query_embedding,
-        top_k=FETCH_K,
-        include_metadata=True,
-        filter={"pdf_name": f"{prefix}{filename}"},
-    )
+    sparse = None
+    if query_text is not None:
+        try:
+            from services.hybrid import build_sparse_vector
+
+            sparse = build_sparse_vector(query_text)
+            if not sparse["indices"]:
+                sparse = None
+        except Exception:
+            sparse = None
+
+    if sparse is not None:
+        try:
+            results = index.query(
+                vector=query_embedding,
+                top_k=FETCH_K,
+                include_metadata=True,
+                filter={"pdf_name": f"{prefix}{filename}"},
+                sparse_vector=sparse,
+                sparse_values=sparse,
+            )
+        except TypeError:
+            results = index.query(
+                vector=query_embedding,
+                top_k=FETCH_K,
+                include_metadata=True,
+                filter={"pdf_name": f"{prefix}{filename}"},
+            )
+    else:
+        results = index.query(
+            vector=query_embedding,
+            top_k=FETCH_K,
+            include_metadata=True,
+            filter={"pdf_name": f"{prefix}{filename}"},
+        )
     matches = (
         results.get("matches", [])
         if isinstance(results, dict)
@@ -133,7 +176,7 @@ def evaluate(
     for item in fixture["questions"]:
         filename = item["document"]
         query_embedding = embed_fn([item["question"]])[0]
-        sources = retrieve(query_embedding, filename, index, k=k, prefix=prefix)
+        sources = retrieve(query_embedding, filename, index, k=k, prefix=prefix, query_text=item["question"])
         retrieved_texts = [s["content"] for s in sources]
 
         result = {
