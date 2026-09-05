@@ -10,6 +10,7 @@ from services.local_embeddings import LocalEmbeddingService
 class AIService:
     """AIService."""
 
+    # Local BGE-M3 has no provider-side cap; 100 keeps CPU peak memory sane.
     EMBED_BATCH_SIZE = 100
 
     @staticmethod
