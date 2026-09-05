@@ -3,7 +3,7 @@ Service-layer flow tests.
 
 Every external edge is a fake: vector index, embeddings, LLM, and storage
 are monkeypatched; the repository runs against an in-memory sqlite. No test
-touches Pinecone, an LLM provider, a real Postgres, or the real upload dir.
+touches a vector store, an LLM provider, a real Postgres, or the real upload dir.
 """
 
 import config
@@ -111,7 +111,7 @@ class FakeVectorService:
         self.upserts.append((embeddings, texts, filename))
 
     def query_vectors(
-        self, embedding, filename, top_k=TOP_K, query_text=None, alpha=None, **kwargs
+        self, embedding, filename, top_k=TOP_K, query_text=None, **kwargs
     ):
         # Route through the real shaping so flow tests see the same
         # dedupe/bound/order behavior as production retrieval.

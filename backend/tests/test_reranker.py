@@ -78,8 +78,7 @@ class TestRerankerGate:
         monkeypatch.setenv("RERANK", "false")
         reranker._reset_for_tests()
         idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+        monkeypatch.setattr(config, "_qdrant_index", idx)
         monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
 
         sources = VectorService.query_vectors(
@@ -96,8 +95,7 @@ class TestRerankerGate:
         reranker._reranker = InvertingModel()
 
         idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+        monkeypatch.setattr(config, "_qdrant_index", idx)
         monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
 
         sources_on = VectorService.query_vectors(
@@ -147,7 +145,7 @@ class TestRerankerGate:
                 return [0.1, 0.9, 0.5]
 
         reranker._reranker = DupModel()
-        monkeypatch.setattr(config, "_pinecone_index", dup_idx)
+        monkeypatch.setattr(config, "_qdrant_index", dup_idx)
         before = VectorService.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
         )
@@ -166,8 +164,7 @@ class TestRerankerGate:
         reranker._reset_for_tests()
         reranker._reranker = InvertingModel()
         idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+        monkeypatch.setattr(config, "_qdrant_index", idx)
 
         legacy = VectorService.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
@@ -195,8 +192,7 @@ class TestRerankerGate:
         reranker._reset_for_tests()
         reranker._reranker = CountingModel()
         idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+        monkeypatch.setattr(config, "_qdrant_index", idx)
 
         # No query_text -> no rerank
         VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text=None)
@@ -221,8 +217,7 @@ class TestRerankerGate:
 
         reranker._reranker = LocalOnly()
         idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+        monkeypatch.setattr(config, "_qdrant_index", idx)
 
         VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text="hello")
         assert invoked, "local model should have been invoked"
@@ -239,8 +234,7 @@ class TestRerankerGate:
         )
 
         idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+        monkeypatch.setattr(config, "_qdrant_index", idx)
 
         sources = VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text="q")
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]

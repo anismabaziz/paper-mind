@@ -65,7 +65,7 @@ def matches_to_sources(matches, filename):
 
 
 class VectorService:
-    # Pinecone recommends batches well under the 4 MB / 1000-vector limit.
+    # Keep batches well under Qdrant's upsert limits.
     # Keep in sync with AIService.EMBED_BATCH_SIZE so one embedding batch maps
     # to one upsert batch without re-chunking.
     """VectorService."""
@@ -97,7 +97,6 @@ class VectorService:
                 {
                     "id": str(uuid.uuid4()),
                     "values": embedding,
-                    "sparse_values": sparse,
                     "sparse_vector": sparse,
                     "metadata": metadata,
                 }
@@ -178,14 +177,14 @@ class VectorService:
 
     @staticmethod
     def query_vectors(
-        embedding, filename, top_k=FETCH_K, query_text=None, alpha=None, rerank=None
+        embedding, filename, top_k=FETCH_K, query_text=None, rerank=None
     ):
         """
         Return shaped sources: deduped, score-ordered, bounded.
 
         When ``query_text`` is provided the method issues a hybrid query:
         dense embedding + BM25 sparse (``sparse_vectors`` via ``rank-bm25``)
-        fused with ``RRF(k=60)`` for Qdrant or ``alpha`` blend for Pinecone.
+        fused with ``RRF(k=60)`` by Qdrant.
         ``FETCH_K=50`` candidates are fetched before shaping to ``5``.
 
         When ``RERANK=true`` (or ``rerank=True`` explicitly) and
@@ -203,90 +202,16 @@ class VectorService:
             sparse = None
 
         if sparse is not None:
-            # Resolve alpha: explicit arg > config > default blend
-            if alpha is None:
-                alpha = getattr(config, "HYBRID_ALPHA", 0.7)
-            vector_backend = config._vector_backend()
             try:
-                if vector_backend == "qdrant":
-                    # Single Qdrant hybrid query: dense + BM25 sparse via
-                    # rank-bm25 on the ``sparse`` field, fused with RRF(k=60)
-                    search_results = config.vector_index.query(
-                        vector=embedding,
-                        top_k=top_k,
-                        include_metadata=True,
-                        filter={"pdf_name": filename},
-                        sparse_vector=sparse,
-                        sparse_values=sparse,
-                    )
-                else:
-                    # Pinecone hybrid path: sparse_values + alpha-scaled query
-                    # so both backends behave the same. Pinecone expects the
-                    # dense vector scaled by ``alpha`` and sparse values scaled
-                    # by ``1-alpha``.
-                    scaled_dense = (
-                        [v * alpha for v in embedding]
-                        if isinstance(embedding, list)
-                        else embedding
-                    )
-                    scaled_sparse = {
-                        "indices": sparse["indices"],
-                        "values": [v * (1.0 - alpha) for v in sparse["values"]],
-                    }
-                    search_results = config.vector_index.query(
-                        vector=scaled_dense,
-                        top_k=top_k,
-                        include_metadata=True,
-                        filter={"pdf_name": filename},
-                        sparse_values=scaled_sparse,
-                        sparse_vector=scaled_sparse,
-                        alpha=alpha,
-                    )
-                    # If the Pinecone index did not fuse (e.g., fake that
-                    # ignores sparse), do client-side alpha blend for parity.
-                    # Detect by checking if result looks dense-only: we fetch
-                    # both sides separately and blend.
-                    try:
-                        from services.hybrid import alpha_blend
-
-                        # Heuristic: if search_results came from a fake that
-                        # just returned dense, sparse was ignored. We can
-                        # verify by issuing a dense-only query and seeing if
-                        # results are identical – if so, blend manually.
-                        dense_only = config.vector_index.query(
-                            vector=embedding,
-                            top_k=top_k,
-                            include_metadata=True,
-                            filter={"pdf_name": filename},
-                        )
-                        # Compare ids; if hybrid == dense_only, blend needed
-                        hybrid_ids = [
-                            m.get("id") for m in search_results.get("matches", [])
-                        ]
-                        dense_ids = [m.get("id") for m in dense_only.get("matches", [])]
-                        if hybrid_ids == dense_ids and hybrid_ids:
-                            # Try sparse-only fetch for blending
-                            try:
-                                sparse_only = config.vector_index.query(
-                                    vector=[0.0] * len(embedding)
-                                    if isinstance(embedding, list)
-                                    else embedding,
-                                    top_k=top_k,
-                                    include_metadata=True,
-                                    filter={"pdf_name": filename},
-                                    sparse_vector=sparse,
-                                    sparse_values=sparse,
-                                )
-                                sparse_matches = sparse_only.get("matches", [])
-                            except Exception:
-                                sparse_matches = []
-                            dense_matches = dense_only.get("matches", [])
-                            blended = alpha_blend(
-                                dense_matches, sparse_matches, alpha=alpha, limit=top_k
-                            )
-                            search_results = {"matches": blended}
-                    except Exception:
-                        pass
+                # Single Qdrant hybrid query: dense + BM25 sparse via
+                # rank-bm25 on the ``sparse`` field, fused with RRF(k=60)
+                search_results = config.vector_index.query(
+                    vector=embedding,
+                    top_k=top_k,
+                    include_metadata=True,
+                    filter={"pdf_name": filename},
+                    sparse_vector=sparse,
+                )
             except TypeError as exc:
                 # Explicit warning instead of silent fallback – hybrid is
                 # degraded, helps surface mis-wired fakes in tests.

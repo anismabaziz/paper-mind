@@ -13,12 +13,9 @@ def reload_config():
 
 
 def test_all_required_vars_missing_are_named(monkeypatch):
-    # Pinecone key is only required when VECTOR_BACKEND=pinecone; default is qdrant
     """Do test all required vars missing are named."""
-    monkeypatch.setenv("VECTOR_BACKEND", "pinecone")
     for var in (
         "DATABASE_URL",
-        "PINECONE_API_KEY",
         "MODE",
         "GOOGLE_API_KEY",
         "GROQ_API_KEY",
@@ -29,17 +26,8 @@ def test_all_required_vars_missing_are_named(monkeypatch):
     missing = cfg.missing_required_vars()
 
     assert "DATABASE_URL" in missing
-    assert "PINECONE_API_KEY" in missing
     # MODE defaults to "google", so the Google key is the one required
     assert "GOOGLE_API_KEY" in missing
-
-    # With qdrant (default), Pinecone key is not required
-    monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
-    # Keep PINECONE missing
-    cfg = reload_config()
-    missing = cfg.missing_required_vars()
-    assert "PINECONE_API_KEY" not in missing
-    assert "DATABASE_URL" in missing
 
 
 def test_provider_key_follows_mode(monkeypatch):
@@ -68,8 +56,7 @@ def test_complete_env_validates_clean():
 
 def test_validate_exits_with_named_variable_in_message(capsys, monkeypatch):
     """Do test validate exits with named variable in message."""
-    monkeypatch.setenv("VECTOR_BACKEND", "pinecone")
-    monkeypatch.delenv("PINECONE_API_KEY", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     cfg = reload_config()
     try:
@@ -80,7 +67,7 @@ def test_validate_exits_with_named_variable_in_message(capsys, monkeypatch):
         raise AssertionError("validate() should exit when variables are missing")
 
     stderr = capsys.readouterr().err
-    assert "PINECONE_API_KEY" in stderr
+    assert "DATABASE_URL" in stderr
     assert ".env.example" in stderr
 
 
@@ -93,7 +80,6 @@ def test_validate_passes_with_complete_env(capsys):
 def test_import_does_not_build_clients(monkeypatch):
     """Do test import does not build clients."""
     cfg = reload_config()
-    assert cfg._pinecone_index is None
     assert cfg._qdrant_index is None
     assert cfg._qdrant_client is None
     assert cfg._genai_client is None
@@ -103,19 +89,8 @@ def test_import_does_not_build_clients(monkeypatch):
 def test_vector_backend_defaults_to_qdrant(monkeypatch):
     """Do test vector backend defaults to qdrant."""
     monkeypatch.delenv("VECTOR_BACKEND", raising=False)
-    monkeypatch.delenv("PINECONE_API_KEY", raising=False)
     cfg = reload_config()
     assert cfg._vector_backend() == "qdrant"
-    # qdrant default does not require Pinecone key
-    assert "PINECONE_API_KEY" not in cfg.missing_required_vars()
-
-
-def test_qdrant_backend_does_not_require_pinecone(monkeypatch):
-    """Do test qdrant backend does not require pinecone."""
-    monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
-    monkeypatch.delenv("PINECONE_API_KEY", raising=False)
-    cfg = reload_config()
-    assert "PINECONE_API_KEY" not in cfg.missing_required_vars()
 
 
 def test_invalid_vector_backend_is_reported(monkeypatch):
@@ -126,22 +101,7 @@ def test_invalid_vector_backend_is_reported(monkeypatch):
 
 
 def test_vector_backend_switch_uses_correct_index(monkeypatch):
-    """Both backends are exercised through fakes so the switch never hits the network."""
-
-    class FakePinecone:
-        """FakePinecone."""
-
-        def upsert(self, vectors):
-            """Do upsert."""
-            return {"upserted": len(vectors)}
-
-        def query(self, **kwargs):
-            """Do query."""
-            return {"matches": []}
-
-        def delete(self, **kwargs):
-            """Do delete."""
-            return {}
+    """The Qdrant backend is exercised through a fake so the seam never hits the network."""
 
     class FakeQdrant:
         """FakeQdrant."""
@@ -158,23 +118,11 @@ def test_vector_backend_switch_uses_correct_index(monkeypatch):
             """Do delete."""
             return {}
 
-    fake_pinecone = FakePinecone()
     fake_qdrant = FakeQdrant()
 
-    monkeypatch.setenv("VECTOR_BACKEND", "pinecone")
-    monkeypatch.setattr(config, "_pinecone_index", fake_pinecone)
-    monkeypatch.setattr(config, "_qdrant_index", None)
-    cfg = reload_config()
-    # Re-apply fake after reload (reload clears the module globals)
-    monkeypatch.setattr(cfg, "_pinecone_index", fake_pinecone)
-    monkeypatch.setattr(cfg, "_qdrant_index", None)
-    assert cfg.get_vector_index() is fake_pinecone
-
     monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
-    monkeypatch.setattr(cfg, "_qdrant_index", fake_qdrant)
-    # Legacy Pinecone fake should not shadow the Qdrant fake when Qdrant is selected
-    monkeypatch.setattr(cfg, "_pinecone_index", fake_pinecone)
-    assert cfg.get_vector_index() is fake_qdrant
+    monkeypatch.setattr(config, "_qdrant_index", fake_qdrant)
+    assert config.get_vector_index() is fake_qdrant
 
 
 def test_booting_without_env_exits_readably():
@@ -192,7 +140,6 @@ def test_booting_without_env_exits_readably():
         var: ""
         for var in (
             "DATABASE_URL",
-            "PINECONE_API_KEY",
             "GOOGLE_API_KEY",
             "GROQ_API_KEY",
         )

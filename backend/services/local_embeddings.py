@@ -94,7 +94,7 @@ class LocalEmbeddingService:
                 embeddings = embeddings[:, :1024]
 
         # Convert numpy -> python lists for the vector index contract.
-        # ``tolist`` keeps dtype float; Qdrant/pinecone accept python floats.
+        # ``tolist`` keeps dtype float; Qdrant accepts python floats.
         if hasattr(embeddings, "tolist"):
             return embeddings.tolist()
         return [list(row) for row in embeddings]

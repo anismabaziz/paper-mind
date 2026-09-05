@@ -8,7 +8,7 @@ only ever happens on purpose.
 Free local (no keys, default):
 docker compose up qdrant                          # or `docker compose up` (exposes http://localhost:6333)
 VECTOR_BACKEND=qdrant EMBED_BACKEND=local \
-          uv run python -m evaluation.cli --live --no-judge  # hit@5/recall@5 only, no Pinecone/Google
+          uv run python -m evaluation.cli --live --no-judge  # hit@5/recall@5 only, no Google
 
 With LLM judge (needs a chat key):
 uv run python -m evaluation.cli --live            # full report (needs GOOGLE_API_KEY or GROQ_API_KEY per MODE)
@@ -72,7 +72,7 @@ def run(
         )
 
     fixture = load_fixture()
-    # Free local retrieval-only (--no-judge) must not require Pinecone/Google keys:
+    # Free local retrieval-only (--no-judge) must not require API keys:
     # VECTOR_BACKEND=qdrant + EMBED_BACKEND=local on http://localhost:6333 should work
     # with no API keys. Full runs (--live) validate the chat provider as usual.
     if not judge:

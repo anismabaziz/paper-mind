@@ -44,7 +44,6 @@ LOCAL_EMBEDDING_MODEL = os.getenv("LOCAL_EMBEDDING_MODEL", "BAAI/bge-m3")
 LOCAL_EMBED_DIM = int(os.getenv("LOCAL_EMBED_DIM", "1024"))
 
 # Hybrid retrieval: dense + BM25 sparse fusion
-HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", "0.7"))
 FETCH_K = int(os.getenv("FETCH_K", "50"))
 RRF_K = int(os.getenv("RRF_K", "60"))
 
@@ -71,7 +70,6 @@ class VectorBackend(str, Enum):
     """VectorBackend."""
 
     QDRANT = "qdrant"
-    PINECONE = "pinecone"
 
 
 class EmbedBackend(str, Enum):
@@ -117,17 +115,14 @@ def missing_required_vars():
     embed_backend = _embed_backend()
 
     required = ["DATABASE_URL"]
-    # Vector backend requirement is a single map lookup, not a cascade
-    if vector_backend == VectorBackend.PINECONE.value:
-        required.append("PINECONE_API_KEY")
-    elif vector_backend not in _VALID_VECTOR_BACKENDS:
+    if vector_backend not in _VALID_VECTOR_BACKENDS:
         required.append("VECTOR_BACKEND")
 
     missing = [var for var in required if not os.getenv(var)]
 
     if vector_backend not in _VALID_VECTOR_BACKENDS:
         missing.append(
-            f"VECTOR_BACKEND (got {vector_backend!r}, expected 'qdrant' or 'pinecone')"
+            f"VECTOR_BACKEND (got {vector_backend!r}, expected 'qdrant')"
         )
 
     provider_key = PROVIDER_API_KEYS.get(mode)
@@ -177,7 +172,6 @@ def validate():
 # first access, so a misconfigured key fails at the moment of use with a
 # clear origin instead of crashing the whole import.
 
-_pinecone_index = None
 _qdrant_client = None
 _qdrant_index = None
 _genai_client = None
@@ -203,40 +197,12 @@ def _get_qdrant_index():
     return _qdrant_index
 
 
-def _get_pinecone_index():
-    global _pinecone_index
-    if _pinecone_index is None:
-        from pinecone import Pinecone
-
-        _pinecone_index = Pinecone(api_key=os.getenv("PINECONE_API_KEY")).Index(
-            INDEX_NAME
-        )
-    return _pinecone_index
-
-
-_VECTOR_FACTORIES = {
-    VectorBackend.QDRANT.value: _get_qdrant_index,
-    VectorBackend.PINECONE.value: _get_pinecone_index,
-}
-
-
 def get_vector_index():
-    # Tests monkeypatch ``_pinecone_index`` directly with a fake. Honor that
-    # fake regardless of VECTOR_BACKEND so existing tests keep working when
-    # the default flips to qdrant (dispatch map keeps the cascade in one place).
+    # Tests install a fake on the ``_qdrant_index`` memo slot directly; honor
+    # it before building a real client.
     """Do get vector index."""
-    vector_backend = _vector_backend()
-    if vector_backend == VectorBackend.QDRANT.value:
-        if _qdrant_index is not None:
-            return _qdrant_index
-        if _pinecone_index is not None:
-            return _pinecone_index
-        return _get_qdrant_index()
-
-    factory = _VECTOR_FACTORIES.get(vector_backend)
-    if factory is not None:
-        return factory()
-    # Invalid backend – let missing_required_vars report it; fall back to qdrant for boot
+    if _qdrant_index is not None:
+        return _qdrant_index
     return _get_qdrant_index()
 
 

@@ -83,7 +83,7 @@ def hash_embed(texts):
 
 
 class InMemoryIndex:
-    """Pinecone-shaped store: upsert, filtered cosine query, delete."""
+    """Qdrant-shaped store: upsert, filtered cosine query, delete."""
 
     def __init__(self):
         """Initialize."""

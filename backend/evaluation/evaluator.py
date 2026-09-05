@@ -4,13 +4,13 @@ End-to-end evaluation of the RAG pipeline against the ground-truth fixture.
 Every external capability is injected:
 
 - ``embed_fn``: texts -> list of embedding vectors
-- ``index``: Pinecone/Qdrant-compatible store with ``upsert``, ``query``, ``delete``
+- ``index``: Qdrant-compatible store with ``upsert``, ``query``, ``delete``
 - ``generate_fn``: (query, context) -> answer text
 - ``judge_fn``: judge prompt -> verdict reply (see evaluation.judge)
 
 Tests wire deterministic fakes into all four; the CLI wires the real
 providers, and only behind ``--live``. ``uv run pytest`` stays headless
-(no Qdrant/Pinecone/LLM; heavy models mocked or skipped).
+(no Qdrant/LLM; heavy models mocked or skipped).
 
 Gates per phase (recorded on ``sample_docs`` via this module):
 ``hit@5``/``recall@5`` + per-question breakdown and ingest ``sec/PDF``
@@ -110,7 +110,6 @@ def index_document(
         {
             "id": str(uuid.uuid4()),
             "values": embeddings[i],
-            "sparse_values": sparse_vectors[i],
             "sparse_vector": sparse_vectors[i],
             "metadata": {
                 "content": chunks[i],
@@ -187,7 +186,6 @@ def retrieve(
                 include_metadata=True,
                 filter={"pdf_name": f"{prefix}{filename}"},
                 sparse_vector=sparse,
-                sparse_values=sparse,
             )
         except TypeError:
             results = index.query(
