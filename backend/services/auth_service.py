@@ -1,9 +1,9 @@
 """
-    Vendor-neutral authentication: bcrypt password hashing and JWT issuing.
+Vendor-neutral authentication: bcrypt password hashing and JWT issuing.
 
-    The ``require_auth`` decorator protects endpoints. When demo mode is on it
-    lets every request through so a local run needs zero clicks; the decorator
-    itself stays in place either way.
+The ``require_auth`` decorator protects endpoints. When demo mode is on it
+lets every request through so a local run needs zero clicks; the decorator
+itself stays in place either way.
 """
 
 import datetime
@@ -34,31 +34,35 @@ def _secret():
 
 
 def is_demo_mode() -> bool:
+    """Do is demo mode."""
     return os.getenv("DEMO_MODE", "false").lower() in ("1", "true", "yes")
 
 
 def hash_password(password: str) -> str:
+    """Do hash password."""
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    """Do verify password."""
     return bcrypt.checkpw(password.encode(), password_hash.encode())
 
 
 def issue_token(email: str) -> str:
+    """Do issue token."""
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {"sub": email, "iat": now, "exp": now + TOKEN_TTL}
     return jwt.encode(payload, _secret(), algorithm="HS256")
 
 
 class AuthError(Exception):
+    """AuthError."""
+
     pass
 
 
 def verify_token(token: str) -> str:
-    """
-        Return the token's subject email, or raise AuthError.
-    """
+    """Return the token's subject email, or raise AuthError."""
     try:
         payload = jwt.decode(token, _secret(), algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
@@ -69,8 +73,11 @@ def verify_token(token: str) -> str:
 
 
 def require_auth(fn):
+    """Do require auth."""
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        """Do wrapper."""
         if is_demo_mode():
             return fn(*args, **kwargs)
 

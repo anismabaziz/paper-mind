@@ -1,12 +1,18 @@
+"""Module docstring."""
+
 from google.genai import types
 import config
 from services.prompts import SYSTEM_INSTRUCTION
 
 CHAT_MODEL = config.CHAT_MODEL
 
+
 class GoogleService:
+    """GoogleService."""
+
     @staticmethod
     def generate_response(query: str, context: str) -> str:
+        """Do generate response."""
         result = config.genai_client.models.generate_content(
             model=CHAT_MODEL,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
@@ -36,6 +42,7 @@ class GoogleService:
 
     @staticmethod
     def stream_response(query: str, context: str):
+        """Do stream response."""
         for chunk in config.genai_client.models.generate_content_stream(
             model=CHAT_MODEL,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),

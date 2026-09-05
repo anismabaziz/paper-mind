@@ -17,14 +17,37 @@ dependencies = [
     "pymupdf>=1.27.2.2",
     "pyjwt>=2.10.0",
     "python-dotenv>=1.2.2",
+    "qdrant-client>=1.15.0",
+    "rank-bm25>=0.2.2",
+    "sentence-transformers>=3.1.0",
     "sqlalchemy>=2.0.0",
+    "tiktoken>=0.14.0",
+]
+
+[project.optional-dependencies]
+docling = [
+    "docling>=2.40.0",
+    # granite-docling-258M weights (~1.1GB) are downloaded via HF_HOME cache,
+    # not a pip package; docling pulls transformers + huggingface-hub.
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
+    "ruff>=0.8.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["D"]
+ignore = ["D212"]
+
+[tool.ruff.lint.flake8-builtins]
+ignorelist = ["filter"]

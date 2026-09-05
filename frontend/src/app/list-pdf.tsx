@@ -25,6 +25,7 @@ import {
 import usePdfStore from "@/store/pdf-state";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef } from "react";
+import type { File as DbFile } from "@/types/db";
 
 export default function ListPDF() {
   const queryClient = useQueryClient();
@@ -45,8 +46,23 @@ export default function ListPDF() {
     mutationFn: uploadFile,
     onSuccess: async (data) => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
-      await processFile(data.file);
-      queryClient.invalidateQueries({ queryKey: ["files"] });
+      try {
+        await processFile(data.file);
+      } catch (err) {
+        console.error("Indexing failed:", err);
+        // Surface the failure – the file will stay is_processed=false,
+        // the Library row keeps the "Index" badge but polling will
+        // stop on the next refetch; show a visible error so the user
+        // knows it didn't just hang.
+        alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        queryClient.invalidateQueries({ queryKey: ["files"] });
+        queryClient.invalidateQueries({ queryKey: [data.file.name, "is-processed"] });
+      }
+    },
+    onError: (err) => {
+      console.error("Upload failed:", err);
+      alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
     },
   });
 
@@ -54,6 +70,17 @@ export default function ListPDF() {
     mutationFn: deleteFile,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
+    },
+  });
+
+  const processFileMutation = useMutation({
+    mutationFn: processFile,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+    },
+    onError: (err) => {
+      console.error("Re-indexing failed:", err);
+      alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`);
     },
   });
 
@@ -109,7 +136,7 @@ export default function ListPDF() {
           onClick={handleButtonClick}
           disabled={uploadFileMutation.isPending}
         >
-          <Plus size={16} strokeWidth={2} />
+          {uploadFileMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Plus size={16} strokeWidth={2} />}
         </Button>
         <Input
           type="file"
@@ -152,6 +179,7 @@ export default function ListPDF() {
         {files && files.map((file) => {
           const isRemoving = deleteFileMutation.isPending && deleteFileMutation.variables?.id === file.id;
           const isProcessing = !file.is_processed;
+          const isRetrying = processFileMutation.isPending && (processFileMutation.variables as DbFile | undefined)?.name === file.name;
 
           return (
             <div
@@ -161,7 +189,7 @@ export default function ListPDF() {
                 selectedFile?.id === file.id 
                   ? "bg-slate-100/80 border-slate-200 text-slate-900 active-glow" 
                   : "bg-white hover:bg-slate-50 border-slate-100 hover:border-slate-200 text-slate-700",
-                isProcessing ? "grayscale pointer-events-none opacity-60" : "cursor-pointer",
+                isProcessing ? "opacity-80" : "cursor-pointer",
                 isRemoving && "opacity-50 pointer-events-none"
               )}
               onClick={() => !isProcessing && setFile(file)}
@@ -170,7 +198,7 @@ export default function ListPDF() {
                 "p-1.5 rounded transition-colors border",
                 selectedFile?.id === file.id ? "bg-primary text-white border-primary" : "bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-slate-100"
               )}>
-                {isRemoving ? <Loader2 size={13} className="animate-spin" /> : <File size={13} />}
+                {isRemoving || isRetrying ? <Loader2 size={13} className="animate-spin" /> : <File size={13} />}
               </div>
               
               <div className="flex-grow min-w-0">
@@ -184,16 +212,29 @@ export default function ListPDF() {
                   {isProcessing && (
                     <div className="flex items-center gap-1 font-semibold text-[8px] uppercase tracking-wider text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                       <Loader2 size={8} className="animate-spin" />
-                      Index
+                      {isRetrying ? "Re-indexing" : "Indexing"}
                     </div>
                   )}
                 </div>
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  {isRemoving ? "Purging storage..." : formatFileSize(file.metadata.size)}
+                  {isRemoving ? "Purging storage..." : isRetrying ? "Retrying embedding..." : formatFileSize(file.metadata.size)}
                 </p>
               </div>
 
-              {!isRemoving && !isProcessing && (
+              {isProcessing ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-[10px] px-2 shrink-0"
+                  disabled={isRetrying}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    processFileMutation.mutate(file);
+                  }}
+                >
+                  {isRetrying ? <Loader2 size={12} className="animate-spin" /> : "Retry"}
+                </Button>
+              ) : !isRemoving && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -226,17 +267,7 @@ export default function ListPDF() {
           );
         })}
         
-        {uploadFileMutation.isPending && (
-          <div className="p-2.5 rounded border border-slate-200 bg-slate-50 animate-pulse flex items-center gap-2.5">
-             <div className="p-1.5 bg-slate-200 rounded text-slate-400">
-                <Loader2 size={13} className="animate-spin" />
-             </div>
-             <div className="flex-grow">
-                <div className="h-2.5 w-24 bg-slate-200 rounded mb-1" />
-                <div className="h-2 w-12 bg-slate-150 rounded" />
-             </div>
-          </div>
-        )}
+
       </div>
     </div>
   );

@@ -26,6 +26,7 @@ __pycache__/
 *$py.class
 .pytest_cache/
 .python-version
+.ruff_cache/
 
 # IDEs
 .vscode/

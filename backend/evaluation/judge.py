@@ -1,10 +1,10 @@
 """
-    LLM-as-judge faithfulness scoring.
+LLM-as-judge faithfulness scoring.
 
-    The judge protocol is deliberately simple so any provider (or a fake) can
-    fill the judge role: given a judge prompt, the model must answer with a
-    single word — faithful, partial, or unfaithful. Parsing that word into a
-    score lives here; calling the model lives behind the injected callable.
+The judge protocol is deliberately simple so any provider (or a fake) can
+fill the judge role: given a judge prompt, the model must answer with a
+single word — faithful, partial, or unfaithful. Parsing that word into a
+score lives here; calling the model lives behind the injected callable.
 """
 
 import re
@@ -27,12 +27,8 @@ SCORES = {"faithful": 1.0, "partial": 0.5, "unfaithful": 0.0}
 
 
 def parse_verdict(judge_output: str) -> tuple[str, float]:
-    """
-        Extract the verdict word and its score from a judge reply.
-    """
-    match = re.search(
-        r"\b(faithful|partial|unfaithful)\b", judge_output.lower()
-    )
+    """Extract the verdict word and its score from a judge reply."""
+    match = re.search(r"\b(faithful|partial|unfaithful)\b", judge_output.lower())
     if match is None:
         return "unparseable", 0.0
     verdict = match.group(1)
@@ -42,9 +38,7 @@ def parse_verdict(judge_output: str) -> tuple[str, float]:
 def judge_faithfulness(
     question: str, answer: str, context: str, judge
 ) -> tuple[str, float]:
-    """
-        Grade one answer. ``judge`` maps the prompt text to a model reply.
-    """
+    """Grade one answer. ``judge`` maps the prompt text to a model reply."""
     return parse_verdict(
         judge(FAITHFUL_PROMPT.format(question=question, context=context, answer=answer))
     )

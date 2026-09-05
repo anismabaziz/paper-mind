@@ -1,12 +1,12 @@
 """
-    Build the in-repo sample PDF from its markdown source.
+Build the in-repo sample PDF from its markdown source.
 
-    Run from backend/ when the primer source changes:
+Run from backend/ when the primer source changes:
 
-        python -m evaluation.build_primer_pdf
+python -m evaluation.build_primer_pdf
 
-    The generated file is committed, so this only needs rerunning after an
-    edit to sample_docs/papermind-rag-primer.md.
+The generated file is committed, so this only needs rerunning after an
+edit to sample_docs/papermind-rag-primer.md.
 """
 
 from pathlib import Path
@@ -18,10 +18,12 @@ OUTPUT = Path(__file__).parent / "sample_docs" / "papermind-rag-primer.pdf"
 
 
 def render_markdown(doc: pymupdf.Document, source_text: str) -> None:
+    """Do render markdown."""
     page = doc[0]
     y = 72.0
 
     def advance(amount):
+        """Do advance."""
         nonlocal page, y
         y += amount
         if y > 740:
@@ -52,6 +54,7 @@ def render_markdown(doc: pymupdf.Document, source_text: str) -> None:
 
 
 def build() -> Path:
+    """Do build."""
     doc = pymupdf.open()
     doc.new_page()
     render_markdown(doc, SOURCE.read_text(encoding="utf-8"))
