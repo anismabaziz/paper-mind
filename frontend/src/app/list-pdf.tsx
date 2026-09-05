@@ -25,6 +25,7 @@ import {
 import usePdfStore from "@/store/pdf-state";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef } from "react";
+import type { File as DbFile } from "@/types/db";
 
 export default function ListPDF() {
   const queryClient = useQueryClient();
@@ -178,7 +179,7 @@ export default function ListPDF() {
         {files && files.map((file) => {
           const isRemoving = deleteFileMutation.isPending && deleteFileMutation.variables?.id === file.id;
           const isProcessing = !file.is_processed;
-          const isRetrying = processFileMutation.isPending && (processFileMutation.variables as any)?.name === file.name;
+          const isRetrying = processFileMutation.isPending && (processFileMutation.variables as DbFile | undefined)?.name === file.name;
 
           return (
             <div
