@@ -154,7 +154,7 @@ class VectorService:
         return VectorService.upsert_chunks(embeddings, chunks, filename)
 
     @staticmethod
-    def query_vectors(embedding, filename, top_k=FETCH_K, query_text=None, alpha=None):
+    def query_vectors(embedding, filename, top_k=FETCH_K, query_text=None, alpha=None, rerank=None):
         """
         Return shaped sources: deduped, score-ordered, bounded.
 
@@ -162,6 +162,13 @@ class VectorService:
         dense embedding + BM25 sparse (``sparse_vectors`` via ``rank-bm25``)
         fused with ``RRF(k=60)`` for Qdrant or ``alpha`` blend for Pinecone.
         ``FETCH_K=50`` candidates are fetched before shaping to ``5``.
+
+        When ``RERANK=true`` (or ``rerank=True`` explicitly) and
+        ``query_text`` is present, the 50 hybrid candidates are reranked
+        with a local cross-encoder (``ms-marco-MiniLM-L-6-v2`` 22M fast or
+        ``bge-reranker-v2-m3`` quality) before ``shape_sources`` keeps top 5.
+        Entirely local CPU, no API. ``rerank=False`` preserves legacy order
+        even when the env flag is on (used by tests/evaluator).
         """
         if query_text is not None:
             sparse = build_sparse_vector(query_text)
@@ -265,7 +272,16 @@ class VectorService:
 
         matches = search_results.get("matches", []) if isinstance(search_results, dict) else getattr(search_results, "matches", [])
 
-        return shape_sources(matches_to_sources(matches, filename))
+        sources = matches_to_sources(matches, filename)
+
+        # Gated local reranker over FETCH_K candidates before shaping to 5.
+        # Centralised in reranker.maybe_rerank so VectorService and evaluator
+        # share one gate; entirely local CPU, no API.
+        from services.reranker import maybe_rerank
+
+        sources = maybe_rerank(query_text, sources, enabled=rerank)
+
+        return shape_sources(sources)
 
     @staticmethod
     def delete_by_filename(filename):

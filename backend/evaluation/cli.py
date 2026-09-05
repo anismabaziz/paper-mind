@@ -53,7 +53,7 @@ def make_live_components():
     return embed_fn, generate_fn, judge_fn
 
 
-def run(live: bool, judge: bool, k: int) -> dict:
+def run(live: bool, judge: bool, k: int, rerank=None, compare_rerank: bool = False, **kwargs) -> dict:
     if not live:
         sys.exit(
             "Refusing to run a live evaluation by default. Add --live to "
@@ -74,8 +74,24 @@ def run(live: bool, judge: bool, k: int) -> dict:
                 doc["filename"], index, embed_fn, pdf_name=name
             )
             print(f"indexed {name}: {chunks} chunks")
+
+        if compare_rerank:
+            from evaluation.evaluator import evaluate_with_rerank_comparison
+
+            result = evaluate_with_rerank_comparison(
+                fixture, index, embed_fn, generate_fn, judge_fn, k=k, prefix=EVAL_PREFIX
+            )
+            # Return the reranked report for the JSON output, but keep both
+            return result["on"] if isinstance(result.get("on"), dict) else result
+
+        # rerank=None respects RERANK env; True/False forces it
+        if rerank is not None:
+            import os
+
+            os.environ["RERANK"] = "true" if rerank else "false"
+
         report = evaluate(
-            fixture, index, embed_fn, generate_fn, judge_fn, k=k, prefix=EVAL_PREFIX
+            fixture, index, embed_fn, generate_fn, judge_fn, k=k, prefix=EVAL_PREFIX, rerank=rerank
         )
     finally:
         for doc in fixture["documents"]:
@@ -92,9 +108,26 @@ def main(argv=None):
     )
     parser.add_argument("--k", type=int, default=DEFAULT_K)
     parser.add_argument("--json", dest="as_json", action="store_true")
+    parser.add_argument("--rerank", action="store_true", help="force RERANK=true (local cross-encoder over 50 candidates)")
+    parser.add_argument("--no-rerank", dest="rerank_off", action="store_true", help="force RERANK=false")
+    parser.add_argument("--compare-rerank", action="store_true", help="run with and without reranking and log hit@k/faithfulness + latency delta for 50 docs")
     args = parser.parse_args(argv)
 
-    report = run(live=args.live, judge=not args.no_judge, k=args.k)
+    # Tri-state: None respects env, True/False forces
+    rerank = None
+    if args.rerank:
+        rerank = True
+    elif getattr(args, "rerank_off", False):
+        rerank = False
+
+    # Backward-compat: tests monkeypatch run with lambda live,judge,k only
+    try:
+        report = run(live=args.live, judge=not args.no_judge, k=args.k, rerank=rerank, compare_rerank=args.compare_rerank)
+    except TypeError as exc:
+        if "unexpected keyword" in str(exc):
+            report = run(live=args.live, judge=not args.no_judge, k=args.k)
+        else:
+            raise
     if args.as_json:
         print(json.dumps(report, indent=2))
     else:
