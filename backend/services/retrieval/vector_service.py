@@ -1,10 +1,10 @@
-"""Module docstring."""
+"""Retrieval over a vector store: upsert, hybrid query, shaping."""
 
 import hashlib
 import uuid
 
-from providers import get_vector_index
 from services.concurrency import map_batches_concurrently
+from services.retrieval.base import VectorStore
 from services.retrieval.hybrid import build_sparse_vector, build_sparse_vectors
 
 # How many candidates the index is asked for vs. how many survive shaping.
@@ -24,7 +24,7 @@ def shape_sources(sources, limit=MAX_RETRIEVED_SOURCES):
     Dedupe by content, order by score, and bound the result.
 
         The returned order is the order the LLM receives as context and the
-        order the Sources panel shows, so both always agree.
+    order the Sources panel shows, so both always agree.
     """
     shaped = {}
     for source in sorted(sources, key=lambda s: s["score"], reverse=True):
@@ -65,12 +65,22 @@ def matches_to_sources(matches, filename):
 
 
 class VectorService:
-    # Keep batches well under Qdrant's upsert limits.
-    # Keep in sync with EMBED_BATCH_SIZE in services/embeddings/local_embeddings.py
-    # so one embedding batch maps to one upsert batch without re-chunking.
-    """VectorService."""
+    """
+    Indexing and retrieval over an injected :class:`VectorStore`.
+
+    The store arrives through the constructor, as does the optional
+    reranker used to re-score hybrid candidates before shaping. Batches are
+    kept well under Qdrant's upsert limits, in sync with EMBED_BATCH_SIZE in
+    services/embeddings/local_embeddings.py so one embedding batch maps to
+    one upsert batch without re-chunking.
+    """
 
     UPSERT_BATCH_SIZE = 100
+
+    def __init__(self, store: VectorStore, reranker=None):
+        """Bind the store to index and query; the reranker is optional."""
+        self._store = store
+        self._reranker = reranker
 
     @staticmethod
     def _build_vectors_from_chunks(batch_embeddings, chunks, filename, offset):
@@ -125,38 +135,32 @@ class VectorService:
             batch_embeddings, chunks, filename, offset
         )
 
-    @staticmethod
-    def upsert_chunks(embeddings, chunks, filename):
+    def upsert_chunks(self, embeddings, chunks, filename):
         """Preferred entry: ``chunks`` is a ``list[Chunk]`` (bundled)."""
         if not embeddings:
             return None
-        num_batches = (
-            len(embeddings) + VectorService.UPSERT_BATCH_SIZE - 1
-        ) // VectorService.UPSERT_BATCH_SIZE
+        num_batches = (len(embeddings) + self.UPSERT_BATCH_SIZE - 1) // (
+            self.UPSERT_BATCH_SIZE
+        )
         if num_batches <= 1:
-            vectors = VectorService._build_vectors_from_chunks(
-                embeddings, chunks, filename, 0
-            )
-            return get_vector_index().upsert(vectors)
+            vectors = self._build_vectors_from_chunks(embeddings, chunks, filename, 0)
+            return self._store.upsert(vectors)
         batches: list[list[dict]] = []
-        for start in range(0, len(embeddings), VectorService.UPSERT_BATCH_SIZE):
-            batch_embeddings = embeddings[
-                start : start + VectorService.UPSERT_BATCH_SIZE
-            ]
-            vectors = VectorService._build_vectors_from_chunks(
+        for start in range(0, len(embeddings), self.UPSERT_BATCH_SIZE):
+            batch_embeddings = embeddings[start : start + self.UPSERT_BATCH_SIZE]
+            vectors = self._build_vectors_from_chunks(
                 batch_embeddings, chunks, filename, start
             )
             batches.append(vectors)
         ordered_responses = map_batches_concurrently(
             batches,
-            get_vector_index().upsert,
+            self._store.upsert,
             label=f"VectorService.upsert_vectors: {len(embeddings)} vectors",
         )
         return ordered_responses[-1] if ordered_responses else None
 
-    @staticmethod
-    def upsert_vectors(embeddings, texts, filename, page_numbers=None):
-        """Do upsert vectors."""
+    def upsert_vectors(self, embeddings, texts, filename, page_numbers=None):
+        """Upsert from parallel lists, bundled into :class:`Chunk` first."""
         if not embeddings:
             return None
         from services.parsing.document_parser import Chunk
@@ -173,11 +177,10 @@ class VectorService:
             )
             for i in range(len(texts))
         ]
-        return VectorService.upsert_chunks(embeddings, chunks, filename)
+        return self.upsert_chunks(embeddings, chunks, filename)
 
-    @staticmethod
     def query_vectors(
-        embedding, filename, top_k=FETCH_K, query_text=None, rerank=None
+        self, embedding, filename, top_k=FETCH_K, query_text=None, rerank=None
     ):
         """
         Return shaped sources: deduped, score-ordered, bounded.
@@ -187,12 +190,12 @@ class VectorService:
         fused with ``RRF(k=60)`` by Qdrant.
         ``FETCH_K=50`` candidates are fetched before shaping to ``5``.
 
-        When ``RERANK=true`` (or ``rerank=True`` explicitly) and
-        ``query_text`` is present, the 50 hybrid candidates are reranked
+        When the injected reranker is enabled (or ``rerank=True`` explicitly)
+        and ``query_text`` is present, the 50 hybrid candidates are reranked
         with a local cross-encoder (``ms-marco-MiniLM-L-6-v2`` 22M fast or
         ``bge-reranker-v2-m3`` quality) before ``shape_sources`` keeps top 5.
         Entirely local CPU, no API. ``rerank=False`` preserves legacy order
-        even when the env flag is on (used by tests/evaluator).
+        even when the reranker is enabled (used by tests/evaluator).
         """
         if query_text is not None:
             sparse = build_sparse_vector(query_text)
@@ -205,7 +208,7 @@ class VectorService:
             try:
                 # Single Qdrant hybrid query: dense + BM25 sparse via
                 # rank-bm25 on the ``sparse`` field, fused with RRF(k=60)
-                search_results = get_vector_index().query(
+                search_results = self._store.query(
                     vector=embedding,
                     top_k=top_k,
                     include_metadata=True,
@@ -215,17 +218,15 @@ class VectorService:
             except TypeError as exc:
                 # Explicit warning instead of silent fallback – hybrid is
                 # degraded, helps surface mis-wired fakes in tests.
-                print(
-                    f"VectorService hybrid query degraded to dense (TypeError): {exc}"
-                )
-                search_results = get_vector_index().query(
+                print(f"VectorService hybrid query degraded to dense (TypeError): {exc}")
+                search_results = self._store.query(
                     vector=embedding,
                     top_k=top_k,
                     include_metadata=True,
                     filter={"pdf_name": filename},
                 )
         else:
-            search_results = get_vector_index().query(
+            search_results = self._store.query(
                 vector=embedding,
                 top_k=top_k,
                 include_metadata=True,
@@ -241,20 +242,17 @@ class VectorService:
         sources = matches_to_sources(matches, filename)
 
         # Gated local reranker over FETCH_K candidates before shaping to 5.
-        # Centralised in reranker.maybe_rerank so VectorService and evaluator
-        # share one gate; entirely local CPU, no API.
-        from services.retrieval.reranker import maybe_rerank
-
-        sources = maybe_rerank(query_text, sources, enabled=rerank)
+        # Centralised in the reranker's maybe_rerank so VectorService and
+        # evaluator share one gate; entirely local CPU, no API.
+        if self._reranker is not None:
+            sources = self._reranker.maybe_rerank(query_text, sources, enabled=rerank)
 
         return shape_sources(sources)
 
-    @staticmethod
-    def delete_by_filename(filename):
-        """Do delete by filename."""
-        return get_vector_index().delete(filter={"pdf_name": filename})
+    def delete_by_filename(self, filename):
+        """Delete every vector stored for one document."""
+        return self._store.delete(filter={"pdf_name": filename})
 
-    @staticmethod
-    def delete_all():
-        """Do delete all."""
-        return get_vector_index().delete(delete_all=True)
+    def delete_all(self):
+        """Delete every vector in the store."""
+        return self._store.delete(delete_all=True)

@@ -20,9 +20,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db import Base, Repository, User, UserSetting
-from services.parsing.document_parser import DocumentParser
-from services.parsing.pdf_service import PDFParser
 from services.accounts.secrets_service import encrypt_api_key
+from services.parsing.document_parser import Chunk
 from services.retrieval.vector_service import TOP_K, shape_sources
 
 
@@ -121,9 +120,9 @@ class FakeVectorService:
             }
         ]
 
-    def upsert_vectors(self, embeddings, texts, filename, page_numbers=None, **kwargs):
-        """Do upsert vectors."""
-        self.upserts.append((embeddings, texts, filename))
+    def upsert_chunks(self, embeddings, chunks, filename, **kwargs):
+        """Do upsert chunks."""
+        self.upserts.append((embeddings, chunks, filename))
 
     def query_vectors(
         self, embedding, filename, top_k=TOP_K, query_text=None, **kwargs
@@ -146,14 +145,44 @@ class FakeVectorService:
 def fake_vectors(monkeypatch, app_module):
     """Do fake vectors."""
     fake = FakeVectorService()
-    monkeypatch.setattr(app_module.VectorService, "upsert_vectors", fake.upsert_vectors)
-    monkeypatch.setattr(app_module.VectorService, "upsert_chunks", fake.upsert_vectors)
-    monkeypatch.setattr(app_module.VectorService, "query_vectors", fake.query_vectors)
-    monkeypatch.setattr(
-        app_module.VectorService, "delete_by_filename", fake.delete_by_filename
-    )
-    monkeypatch.setattr(app_module.VectorService, "delete_all", fake.delete_all)
+    monkeypatch.setattr(app_module, "vector_service", fake)
     return fake
+
+
+class FakeParser:
+    """Fixed-chunk stand-in for the parse-and-chunk pipeline."""
+
+    def get_chunk_objects(self, filename, file_bytes):
+        """Do get chunk objects."""
+        return [
+            Chunk(
+                text="chunk about topic",
+                page_no=1,
+                chunk_index=0,
+                content_hash="hash-0",
+            ),
+            Chunk(
+                text="another chunk",
+                page_no=1,
+                chunk_index=1,
+                content_hash="hash-1",
+            ),
+        ]
+
+
+class FakeEmbeddingService:
+    """FakeEmbeddingService."""
+
+    def __init__(self, calls):
+        """Initialize."""
+        self._calls = calls
+
+    def embed_texts(self, texts):
+        """Do embed texts."""
+        if isinstance(texts, str):
+            texts = [texts]
+        self._calls["embedded"].extend(texts)
+        return [[0.1, 0.2] for _ in texts]
 
 
 @pytest.fixture
@@ -161,25 +190,8 @@ def fake_ai(monkeypatch, app_module):
     """Do fake ai."""
     calls = {"embedded": [], "answered": [], "streamed": []}
 
-    def extract_text(pdf_content):
-        """Do extract text."""
-        return "fake document text"
-
-    def split_text(text, chunk_size=600, chunk_overlap=100):
-        """Do split text."""
-        return ["chunk about topic", "another chunk"]
-
-    monkeypatch.setattr(PDFParser, "extract_text", staticmethod(extract_text))
-    monkeypatch.setattr(DocumentParser, "split_text", staticmethod(split_text))
-
-    def get_embeddings(texts):
-        """Do get embeddings."""
-        if isinstance(texts, str):
-            texts = [texts]
-        calls["embedded"].extend(texts)
-        return [[0.1, 0.2] for _ in texts]
-
-    monkeypatch.setattr(app_module, "embed_texts", get_embeddings)
+    monkeypatch.setattr(app_module, "parser", FakeParser())
+    monkeypatch.setattr(app_module, "embedding_service", FakeEmbeddingService(calls))
 
     class _FakeChatProvider:
         def stream_response(self, query, context):

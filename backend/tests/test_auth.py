@@ -76,7 +76,7 @@ def client(fake_repo, app_module, monkeypatch):
             return f"/storage/{filename}"
 
     monkeypatch.setattr(app_module, "storage", FakeStorage())
-    monkeypatch.setattr(app_module.VectorService, "delete_all", lambda: None)
+    monkeypatch.setattr(app_module.vector_service, "delete_all", lambda: None)
     with app_module.app.test_client() as client:
         yield client
 

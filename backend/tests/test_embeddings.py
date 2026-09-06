@@ -11,7 +11,7 @@ contract of the local service itself.
 import numpy as np
 import pytest
 
-from services.embeddings.local_embeddings import LocalEmbeddingService, embed_texts
+from services.embeddings.local_embeddings import LocalEmbeddingService
 
 
 class _RecordingEmbedder:
@@ -26,17 +26,19 @@ class _RecordingEmbedder:
 
 
 @pytest.fixture
-def recorder(monkeypatch):
-    """Install the recording stub on ``LocalEmbeddingService._embed_batch``."""
+def service(monkeypatch):
+    """Return a service with its per-batch seam replaced by a recording stub."""
+    svc = LocalEmbeddingService(model_name="fake-embedding-model")
     stub = _RecordingEmbedder()
-    monkeypatch.setattr(LocalEmbeddingService, "_embed_batch", stub)
-    return stub
+    monkeypatch.setattr(svc, "_embed_batch", stub)
+    return svc, stub
 
 
-def test_embed_texts_batches_and_preserves_order(recorder):
+def test_embed_texts_batches_and_preserves_order(service):
     """205 texts split into batches of at most 100, order preserved."""
+    svc, recorder = service
     texts = [f"chunk-{i}" for i in range(205)]
-    result = embed_texts(texts)
+    result = svc.embed_texts(texts)
 
     assert recorder.batches == [
         [f"chunk-{i}" for i in range(0, 100)],
@@ -47,21 +49,23 @@ def test_embed_texts_batches_and_preserves_order(recorder):
     assert [v[0] for v in result] == [1.0] * 100 + [2.0] * 100 + [3.0] * 5
 
 
-def test_embed_texts_wraps_a_single_string(recorder):
+def test_embed_texts_wraps_a_single_string(service):
     """Query path passes one string; it must come back as one vector."""
-    result = embed_texts("a single query")
+    svc, recorder = service
+    result = svc.embed_texts("a single query")
 
     assert recorder.batches == [["a single query"]]
     assert len(result) == 1
 
 
-def test_embed_texts_empty_input_returns_empty(recorder):
+def test_embed_texts_empty_input_returns_empty(service):
     """Empty list short-circuits before any batch is dispatched."""
-    assert embed_texts([]) == []
+    svc, recorder = service
+    assert svc.embed_texts([]) == []
     assert recorder.batches == []
 
 
-def test_embed_batch_slices_past_1024_dims_on_old_transformers(monkeypatch):
+def test_embed_batch_slices_past_1024_dims_on_old_transformers():
     """Without ``truncate_dim`` support, past-1024 dims are sliced away."""
 
     class _OldModel:
@@ -70,10 +74,9 @@ def test_embed_batch_slices_past_1024_dims_on_old_transformers(monkeypatch):
                 raise TypeError("unexpected keyword argument 'truncate_dim'")
             return np.array([[3.0, 4.0, 99.0] + [0.0] * 1024])
 
-    import services.embeddings.local_embeddings as le
-
-    monkeypatch.setattr(le, "_model", _OldModel())
-    vectors = LocalEmbeddingService._embed_batch(["doc"])
+    svc = LocalEmbeddingService(model_name="fake-embedding-model")
+    svc._model = _OldModel()
+    vectors = svc._embed_batch(["doc"])
 
     assert len(vectors) == 1
     assert len(vectors[0]) == 1024

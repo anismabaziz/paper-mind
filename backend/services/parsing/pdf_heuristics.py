@@ -93,17 +93,18 @@ def has_borderless_table(file_bytes: bytes) -> bool:
     return False
 
 
-def should_use_docling(filename: str, file_bytes: bytes | None) -> bool:
+def should_use_docling(
+    filename: str, file_bytes: bytes | None, use_docling: str
+) -> bool:
     """
     Decide whether a PDF should go through Docling.
 
-    - ``USE_DOCLING`` env: ``true`` forces Docling (if installed), ``false``
-      disables it, ``auto`` (default) uses the lightweight heuristic.
+    - ``use_docling`` setting value: ``true`` forces Docling (if installed),
+      ``false`` disables it, ``auto`` (default) uses the lightweight
+      heuristic.
     - When docling is not installed, always return False (graceful fallback).
     """
-    from settings import get_settings
-
-    use = get_settings().parsing.use_docling.lower()
+    use = use_docling.lower()
     if use in ("0", "false", "no", "off", "disable", "disabled"):
         return False
     try:

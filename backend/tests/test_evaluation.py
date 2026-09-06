@@ -21,7 +21,7 @@ import pytest
 from evaluation import cli, evaluator, judge
 from evaluation.build_primer_pdf import SOURCE as PRIMER_SOURCE
 from evaluation.metrics import hit_at_k, recall_at_k, summarize
-from services.parsing.document_parser import DocumentParser
+from services.parsing.document_parser import resolve_parser
 
 STOPWORDS = {
     "a",
@@ -258,7 +258,7 @@ class TestFixtureIntegrity:
                 parser, meaning retrieval could actually find them.
         """
         for item in fixture["questions"]:
-            text = DocumentParser.for_filename(item["document"]).extract_text(
+            text = resolve_parser(item["document"]).extract_text(
                 evaluator.read_document(item["document"])
             )
             normalized = " ".join(text.lower().split())

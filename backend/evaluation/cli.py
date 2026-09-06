@@ -38,12 +38,16 @@ def make_live_components(provider: str, model: str, api_key: str):
     """Wire the evaluator to the chosen per-run provider settings."""
     # Reuse the app's own embedding and generation paths (prompt, factory)
     # so the numbers describe what users actually get.
-    from services.embeddings.local_embeddings import embed_texts
+    from settings import get_settings
+
+    from services.embeddings.local_embeddings import LocalEmbeddingService
     from services.llm.factory import build_chat_provider
     from services.llm.google_provider import _client as google_client
     from google.genai import types
 
-    embed_fn = embed_texts
+    embed_fn = LocalEmbeddingService(
+        get_settings().embedding.embedding_model
+    ).embed_texts
     chat_provider = build_chat_provider(provider, model, api_key)
 
     def generate_fn(query, context):

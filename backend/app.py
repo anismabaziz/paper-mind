@@ -18,10 +18,12 @@ from flask_cors import CORS
 
 import settings
 from db import repository
+from providers import get_vector_index
 from storage import storage
-from services.parsing.document_parser import DocumentParser
-from services.embeddings.local_embeddings import embed_texts
+from services.parsing.document_parser import DocumentIngestor
+from services.embeddings.local_embeddings import LocalEmbeddingService
 from services.llm.factory import build_chat_provider
+from services.retrieval.reranker import RerankerService
 from services.retrieval.vector_service import VectorService
 from services.accounts.auth_service import (
     hash_password,
@@ -44,6 +46,20 @@ settings.validate()
 
 app = Flask(__name__)
 CORS(app)
+
+# Composition: settings -> clients -> services. Every service takes its
+# dependencies and settings values through the constructor.
+_app_settings = settings.get_settings()
+parser = DocumentIngestor(
+    _app_settings.parsing.use_docling,
+    _app_settings.chunking.chunk_size_tokens,
+    _app_settings.chunking.chunk_overlap_tokens,
+)
+embedding_service = LocalEmbeddingService(_app_settings.embedding.embedding_model)
+reranker = RerankerService(
+    _app_settings.rerank.rerank_model, enabled=_app_settings.rerank.enabled
+)
+vector_service = VectorService(get_vector_index(), reranker)
 
 
 def _timed_call(func, *args, **kwargs):
@@ -169,7 +185,7 @@ def process_file():
         file_content = storage.open(filename)
 
         chunk_objs, parse_elapsed = _timed_call(
-            DocumentParser.get_chunk_objects, filename, file_content
+            parser.get_chunk_objects, filename, file_content
         )
 
         # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
@@ -177,13 +193,13 @@ def process_file():
             return jsonify({"error": "No text extracted from document"}), 400
         # Remove any vectors left from a previous failed attempt
         try:
-            VectorService.delete_by_filename(filename)
+            vector_service.delete_by_filename(filename)
         except Exception as e:
             print(f"/process-file vector cleanup warning for {filename}: {e}")
         texts = [c.text for c in chunk_objs]
-        embeddings, embed_elapsed = _timed_call(embed_texts, texts)
+        embeddings, embed_elapsed = _timed_call(embedding_service.embed_texts, texts)
         _, upsert_elapsed = _timed_call(
-            VectorService.upsert_chunks, embeddings, chunk_objs, filename
+            vector_service.upsert_chunks, embeddings, chunk_objs, filename
         )
 
         # 3. Create Conversation (reuse one if the file is re-processed)
@@ -260,8 +276,8 @@ def get_response():
     # never leave the turn half-recorded.
     try:
         repository.add_message(conversation_id, "user", query)
-        query_embedding = embed_texts(query)[0]
-        sources = VectorService.query_vectors(
+        query_embedding = embedding_service.embed_texts(query)[0]
+        sources = vector_service.query_vectors(
             query_embedding, filename, query_text=query
         )
         context = "\n\n".join(source["content"] for source in sources)
@@ -367,7 +383,7 @@ def remove_file():
             return jsonify({"error": "File path required"}), 400
 
         # Always remove vectors and bytes, even if DB metadata is missing.
-        VectorService.delete_by_filename(filename)
+        vector_service.delete_by_filename(filename)
         storage.delete(filename)
 
         file_record = repository.get_file(filename)
@@ -388,7 +404,7 @@ def remove_file():
 @require_auth
 def delete_embeddings():
     """Do delete embeddings."""
-    VectorService.delete_all()
+    vector_service.delete_all()
     return jsonify({"message": "Embeddings Deleted"}), 200
 
 

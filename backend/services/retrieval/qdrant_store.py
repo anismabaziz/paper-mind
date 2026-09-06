@@ -12,10 +12,12 @@ Collection ``pdf-index`` (the Settings vector index name) is created lazily with
 
 import uuid
 
+from services.retrieval.base import VectorStore
+
 _QDRANT_DENSE_SIZE = 1024
 
 
-class QdrantIndexAdapter:
+class QdrantIndexAdapter(VectorStore):
     """
     Thin wrapper around a ``qdrant_client.QdrantClient`` implementing the.
 

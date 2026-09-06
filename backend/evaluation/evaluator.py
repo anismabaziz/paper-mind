@@ -27,7 +27,8 @@ from pathlib import Path
 
 from evaluation import judge as judge_module
 from evaluation.metrics import RetrievalReport, hit_at_k, recall_at_k, summarize
-from services.parsing.document_parser import DocumentParser
+from services.parsing.document_parser import DocumentIngestor
+from services.retrieval.reranker import RerankerService
 from services.retrieval.vector_service import matches_to_sources, shape_sources
 
 
@@ -35,6 +36,26 @@ def _is_rerank_enabled() -> bool:
     from settings import get_settings
 
     return get_settings().rerank.enabled
+
+
+def _ingestor() -> DocumentIngestor:
+    """Build the parse-and-chunk pipeline from the installed Settings."""
+    from settings import get_settings
+
+    s = get_settings()
+    return DocumentIngestor(
+        s.parsing.use_docling,
+        s.chunking.chunk_size_tokens,
+        s.chunking.chunk_overlap_tokens,
+    )
+
+
+def _reranker_from_settings() -> RerankerService:
+    """Build the gated reranker from the installed Settings."""
+    from settings import get_settings
+
+    s = get_settings()
+    return RerankerService(s.rerank.rerank_model, enabled=s.rerank.enabled)
 
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -89,7 +110,7 @@ def index_document(
         for gate reports (sec/PDF).
     """
     raw = read_document(filename, docs_dir)
-    chunks, page_numbers = DocumentParser.get_chunks(filename, raw)
+    chunks, page_numbers = _ingestor().get_chunks(filename, raw)
     embeddings = embed_fn(chunks)
     # Build BM25 sparse vectors (hash-based TF) for hybrid indexing
     try:
@@ -151,15 +172,17 @@ def retrieve(
     prefix="",
     query_text=None,
     rerank=None,
+    reranker=None,
 ):
     """
     Fetch candidates and shape them exactly like the /response route.
 
     When ``query_text`` is provided a hybrid dense+BM25 sparse query is
     issued (single Qdrant hybrid via RRF), mirroring ``VectorService``.
-    When ``RERANK=true`` (or ``rerank=True``) the FETCH_K candidates are
-    reranked with a local cross-encoder before shaping to ``k`` (top 5).
-    Entirely local CPU, no API.
+    When the reranker is enabled (or ``rerank=True``) the FETCH_K candidates
+    are reranked with a local cross-encoder before shaping to ``k`` (top 5).
+    Entirely local CPU, no API. ``reranker`` injects a pre-built service;
+    without one a settings-built reranker is used.
     """
     sparse = None
     if query_text is not None:
@@ -203,9 +226,8 @@ def retrieve(
     sources = matches_to_sources(matches, filename)
 
     # Gated local reranker mirroring VectorService — single shared gate
-    from services.retrieval.reranker import maybe_rerank
-
-    sources = maybe_rerank(query_text, sources, enabled=rerank)
+    rerank_service = reranker if reranker is not None else _reranker_from_settings()
+    sources = rerank_service.maybe_rerank(query_text, sources, enabled=rerank)
 
     return shape_sources(sources)[:k]
 
@@ -220,16 +242,20 @@ def evaluate(
     docs_dir=SAMPLE_DOCS_DIR,
     prefix="",
     rerank=None,
+    reranker=None,
 ) -> EvaluationReport:
     """
     Run every fixture question through retrieval and generation.
 
         ``judge_fn`` may be None to skip faithfulness scoring (retrieval-only
         runs and tests that focus on the metrics).
-        ``rerank`` overrides the ``RERANK`` env flag per-run (None = env).
+        ``rerank`` overrides the reranker's enabled flag per-run (None = flag).
+        ``reranker`` injects a pre-built reranker; without one, a
+        settings-built service is used for the whole run.
     """
     import time
 
+    rerank_service = reranker if reranker is not None else _reranker_from_settings()
     question_results = []
     per_question = []
     faithfulness_scores = []
@@ -247,6 +273,7 @@ def evaluate(
             prefix=prefix,
             query_text=item["question"],
             rerank=rerank,
+            reranker=rerank_service,
         )
         # Record latency delta proxy: rerank timing is printed inside reranker,
         # but we also capture per-query retrieval time for the report if rerank on
@@ -306,6 +333,7 @@ def evaluate_with_rerank_comparison(
     k: int = DEFAULT_K,
     docs_dir=SAMPLE_DOCS_DIR,
     prefix="",
+    reranker=None,
 ) -> dict:
     """
     Run the fixture twice — without and with reranking — and log hit@k /.
@@ -327,6 +355,7 @@ def evaluate_with_rerank_comparison(
         docs_dir=docs_dir,
         prefix=prefix,
         rerank=False,
+        reranker=reranker,
     )
     off_ms = (time.time() - t0) / max(len(fixture.get("questions", [])), 1) * 1000
 
@@ -341,6 +370,7 @@ def evaluate_with_rerank_comparison(
         docs_dir=docs_dir,
         prefix=prefix,
         rerank=True,
+        reranker=reranker,
     )
     on_ms = (time.time() - t1) / max(len(fixture.get("questions", [])), 1) * 1000
 

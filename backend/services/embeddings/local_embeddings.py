@@ -11,7 +11,7 @@ matches the Qdrant collection (``qdrant_store._QDRANT_DENSE_SIZE``). Keeping
 dimensions at 1024 keeps storage and latency low (~15ms vs ~42ms at 3072)
 while preserving quality.
 
-Tests never load the real model: ``embed_texts`` is monkeypatched or
+Tests never load the real model: ``embed_texts`` is faked or
 ``LocalEmbeddingService._embed_batch`` is stubbed, and the import of
 ``sentence_transformers`` is lazy so ``pytest`` does not require the package
 or a network call. When the package is not installed, a clear error is raised
@@ -25,80 +25,80 @@ from services.concurrency import map_batches_concurrently
 # Local BGE-M3 has no provider-side cap; 100 keeps CPU peak memory sane.
 EMBED_BATCH_SIZE = 100
 
-_model = None
-_model_lock = threading.Lock()
-
-
-def _get_model():
-    global _model
-    if _model is not None:
-        return _model
-    with _model_lock:
-        if _model is not None:
-            return _model
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError as exc:
-            raise ImportError(
-                "sentence-transformers is required for embedding. "
-                "Install it with `uv sync` or `pip install sentence-transformers`."
-            ) from exc
-
-        from settings import get_settings
-
-        model_name = get_settings().embedding.embedding_model
-        # ``device="cpu"`` keeps the free path CPU-only; no CUDA needed.
-        # ``trust_remote_code=True`` is required for BGE-M3's custom code.
-        _model = SentenceTransformer(model_name, trust_remote_code=True, device="cpu")
-        return _model
-
-
-def embed_texts(texts):
-    """
-    Embed any number of texts, batched and run concurrently.
-
-    Accepts a single string (query path) or a list (document path) and
-    returns one vector per input text, in input order.
-    """
-    if isinstance(texts, str):
-        texts = [texts]
-
-    if not texts:
-        return []
-
-    batches = [
-        texts[i : i + EMBED_BATCH_SIZE]
-        for i in range(0, len(texts), EMBED_BATCH_SIZE)
-    ]
-    results = map_batches_concurrently(
-        batches,
-        LocalEmbeddingService._embed_batch,
-        label=f"embed_texts: {len(texts)} texts",
-    )
-    all_values: list = []
-    for result in results:
-        all_values.extend(result)
-    return all_values
-
 
 class LocalEmbeddingService:
     """
     CPU embedding via BAAI/bge-m3.
 
-    The public entry is ``_embed_batch`` (one batch) so :func:`embed_texts`
-    can drive it through the shared concurrent batcher. Tests stub this
-    method to avoid loading weights.
+    The model name arrives through the constructor; the model itself loads
+    lazily on first use and is cached on the instance. The public entry is
+    ``embed_texts`` (batched, concurrent); ``_embed_batch`` (one batch) is
+    the seam tests stub to avoid loading weights.
     """
 
-    @staticmethod
-    def _embed_batch(texts: list[str]) -> list[list[float]]:
+    def __init__(self, model_name: str, device: str = "cpu"):
+        """Bind the model name; the model itself loads lazily."""
+        self._model_name = model_name
+        self._device = device
+        self._model = None
+        self._lock = threading.Lock()
+
+    def _get_model(self):
+        if self._model is not None:
+            return self._model
+        with self._lock:
+            if self._model is not None:
+                return self._model
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError as exc:
+                raise ImportError(
+                    "sentence-transformers is required for embedding. "
+                    "Install it with `uv sync` or `pip install sentence-transformers`."
+                ) from exc
+
+            # ``device="cpu"`` keeps the free path CPU-only; no CUDA needed.
+            # ``trust_remote_code=True`` is required for BGE-M3's custom code.
+            self._model = SentenceTransformer(
+                self._model_name, trust_remote_code=True, device=self._device
+            )
+            return self._model
+
+    def embed_texts(self, texts):
+        """
+        Embed any number of texts, batched and run concurrently.
+
+        Accepts a single string (query path) or a list (document path) and
+        returns one vector per input text, in input order.
+        """
+        if isinstance(texts, str):
+            texts = [texts]
+
+        if not texts:
+            return []
+
+        batches = [
+            texts[i : i + EMBED_BATCH_SIZE]
+            for i in range(0, len(texts), EMBED_BATCH_SIZE)
+        ]
+        results = map_batches_concurrently(
+            batches,
+            self._embed_batch,
+            label=f"embed_texts: {len(texts)} texts",
+        )
+        all_values: list = []
+        for result in results:
+            all_values.extend(result)
+        return all_values
+
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         """
         Embed one batch of texts with BGE-M3, normalized for cosine distance.
 
         Returns a list of 1024-d vectors (Matryoshka-truncated when the model
         exposes ``truncate_dim``).
         """
-        model = _get_model()
+        model = self._get_model()
         # Prefer Matryoshka truncation to 1024 when supported.
         try:
             embeddings = model.encode(
@@ -131,10 +131,3 @@ class LocalEmbeddingService:
         if hasattr(embeddings, "tolist"):
             return embeddings.tolist()
         return [list(row) for row in embeddings]
-
-    @staticmethod
-    def _reset_for_tests():
-        """Clear the cached model so tests can re-stub without leaking state."""
-        global _model
-        with _model_lock:
-            _model = None
