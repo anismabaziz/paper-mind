@@ -179,7 +179,7 @@ def test_accessor_cache_clear_builds_fresh_settings(monkeypatch):
 
 def test_booting_without_env_exits_readably(capsys, monkeypatch):
     """
-    End to end: starting the app with an empty env exits with the named.
+    End to end: composing the app with an empty env exits with the named.
 
         variable on stderr, not a library traceback.
     """
@@ -192,7 +192,7 @@ def test_booting_without_env_exits_readably(capsys, monkeypatch):
     # existing vars) and count as missing to the validator.
     # Provider keys are per-user settings now; only DATABASE_URL is required.
     result = subprocess.run(
-        [sys.executable, "-c", "import app"],
+        [sys.executable, "-c", "from app import create_app; create_app()"],
         capture_output=True,
         text=True,
         cwd=backend_dir,
@@ -206,9 +206,19 @@ def test_booting_without_env_exits_readably(capsys, monkeypatch):
 def test_providers_stay_lazy_until_first_use(monkeypatch):
     """Do test providers stay lazy until first use."""
     monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
+    constructed = []
 
-    assert providers._qdrant_client is None
-    assert providers._qdrant_index is None
+    class FakeQdrantClient:
+        def __init__(self, url):
+            constructed.append(url)
+
+    monkeypatch.setattr("qdrant_client.QdrantClient", FakeQdrantClient)
+
+    # Importing providers and reading accessors must not build anything.
+    assert constructed == []
+
+    providers.get_qdrant_client()
+    assert constructed == ["http://localhost:6333"]
 
 
 def test_provider_client_is_built_once_from_settings(monkeypatch):
@@ -233,12 +243,25 @@ def test_provider_client_is_built_once_from_settings(monkeypatch):
     assert first is second
 
 
-def test_provider_index_honors_installed_fake_and_reset():
-    """Do test provider index honors installed fake and reset."""
-    fake = object()
-    providers._qdrant_index = fake
-    assert providers.get_vector_index() is fake
+def test_provider_index_is_built_once_from_settings(monkeypatch):
+    """Do test provider index is built once from settings."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
 
-    providers.reset_providers()
-    assert providers._qdrant_index is None
-    assert providers._qdrant_client is None
+    built = []
+
+    class FakeIndexAdapter:
+        def __init__(self, client, index_name):
+            self.client = client
+            self.index_name = index_name
+            built.append(self)
+
+    monkeypatch.setattr(
+        "services.retrieval.qdrant_store.QdrantIndexAdapter", FakeIndexAdapter
+    )
+
+    first = providers.get_vector_index()
+    second = providers.get_vector_index()
+
+    assert built == [first]
+    assert first.index_name == "pdf-index"
+    assert first is second

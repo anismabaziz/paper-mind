@@ -375,5 +375,3 @@ class Repository:
                 Message.conversation_id == conversation_id
             ).delete(synchronize_session=False)
 
-
-repository = Repository()

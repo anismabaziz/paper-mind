@@ -1,36 +1,31 @@
 """
 Service-layer flow tests.
 
-Every external edge is a fake: vector index, embeddings, LLM, and storage
-are monkeypatched; the repository runs against an in-memory sqlite. No test
-touches a vector store, an LLM provider, a real Postgres, or the real upload dir.
+Every external edge is a fake: vector index, embeddings, parser, LLM, and
+storage are constructed here and injected through ``create_app``; the
+repository runs against an in-memory sqlite. No test touches a vector
+store, an LLM provider, a real Postgres, or the real upload dir.
 """
 
-import importlib
 import io
 import json
 import os
 import pathlib
 import subprocess
 import sys
+from dataclasses import replace
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app import Services, create_app
 from db import Base, Repository, User, UserSetting
 from services.accounts.secrets_service import encrypt_api_key
+from services.llm.base import ChatCredentials
 from services.parsing.document_parser import Chunk
 from services.retrieval.vector_service import TOP_K, shape_sources
-
-
-@pytest.fixture
-def app_module(monkeypatch):
-    """Do app module."""
-    import app
-
-    return importlib.import_module("app")
 
 
 @pytest.fixture
@@ -96,11 +91,9 @@ class FakeStorage:
 
 
 @pytest.fixture
-def fake_storage(monkeypatch, app_module):
-    """Do fake storage."""
-    storage = FakeStorage()
-    monkeypatch.setattr(app_module, "storage", storage)
-    return storage
+def fake_storage():
+    """Fresh in-memory storage, injected through the app factory."""
+    return FakeStorage()
 
 
 class FakeVectorService:
@@ -142,11 +135,9 @@ class FakeVectorService:
 
 
 @pytest.fixture
-def fake_vectors(monkeypatch, app_module):
-    """Do fake vectors."""
-    fake = FakeVectorService()
-    monkeypatch.setattr(app_module, "vector_service", fake)
-    return fake
+def fake_vectors():
+    """Fresh fake vector service, injected through the app factory."""
+    return FakeVectorService()
 
 
 class FakeParser:
@@ -171,47 +162,104 @@ class FakeParser:
 
 
 class FakeEmbeddingService:
-    """FakeEmbeddingService."""
+    """Fixed-vector stand-in that records every embedded text."""
 
-    def __init__(self, calls):
+    def __init__(self):
         """Initialize."""
-        self._calls = calls
+        self.embedded = []
 
     def embed_texts(self, texts):
         """Do embed texts."""
         if isinstance(texts, str):
             texts = [texts]
-        self._calls["embedded"].extend(texts)
+        self.embedded.extend(texts)
         return [[0.1, 0.2] for _ in texts]
 
 
+class FakeChatProvider:
+    """Streams fixed tokens through its factory so tests can observe calls."""
+
+    def __init__(self, factory):
+        """Initialize."""
+        self._factory = factory
+
+    def stream_response(self, query, context):
+        """Do stream response."""
+        if self._factory.provider_error is not None:
+            raise self._factory.provider_error
+        self._factory.streamed.append((query, context))
+        yield "The answer "
+        yield "is 42."
+
+    def generate_response(self, query, context):
+        """Do generate response."""
+        self._factory.answered.append((query, context))
+        return "The answer is 42."
+
+
+class FakeChatFactory:
+    """
+    Fake chat provider factory.
+
+    Records the credentials each build received and the streamed turns;
+    setting ``provider_error`` makes the built provider raise on its next
+    stream, as if the provider were down.
+    """
+
+    def __init__(self):
+        """Initialize."""
+        self.built = None
+        self.streamed = []
+        self.answered = []
+        self.provider_error = None
+
+    def __call__(self, credentials):
+        """Do build provider."""
+        self.built = credentials
+        return FakeChatProvider(self)
+
+
 @pytest.fixture
-def fake_ai(monkeypatch, app_module):
-    """Do fake ai."""
-    calls = {"embedded": [], "answered": [], "streamed": []}
+def fake_parser():
+    """Fresh fake parser, injected through the app factory."""
+    return FakeParser()
 
-    monkeypatch.setattr(app_module, "parser", FakeParser())
-    monkeypatch.setattr(app_module, "embedding_service", FakeEmbeddingService(calls))
 
-    class _FakeChatProvider:
-        def stream_response(self, query, context):
-            """Do stream response."""
-            calls["streamed"].append((query, context))
-            yield "The answer "
-            yield "is 42."
+@pytest.fixture
+def fake_embeddings():
+    """Fresh fake embedding service, injected through the app factory."""
+    return FakeEmbeddingService()
 
-        def generate_response(self, query, context):
-            """Do generate response."""
-            calls["answered"].append((query, context))
-            return "The answer is 42."
 
-    def fake_factory(provider, model, api_key):
-        """Do fake factory."""
-        calls["chat_provider"] = (provider, model, api_key)
-        return _FakeChatProvider()
+@pytest.fixture
+def fake_chat():
+    """Fresh fake chat provider factory, injected through the app factory."""
+    return FakeChatFactory()
 
-    monkeypatch.setattr(app_module, "build_chat_provider", fake_factory)
-    return calls
+
+@pytest.fixture
+def app(
+    repo, fake_storage, fake_vectors, fake_parser, fake_embeddings, fake_chat,
+    settings_obj,
+):
+    """Compose the app like production, with fakes wired through the factory."""
+    services = replace(
+        Services.from_settings(settings_obj),
+        repository=repo,
+        storage=fake_storage,
+        parser=fake_parser,
+        embedding_service=fake_embeddings,
+        vector_service=fake_vectors,
+        chat_provider_factory=fake_chat,
+    )
+    return create_app(settings_obj, services=services)
+
+
+@pytest.fixture
+def client(app):
+    """Do client."""
+    with app.test_client() as client:
+        yield client
 
 
 def parse_sse(body):
@@ -228,16 +276,6 @@ def parse_sse(body):
                 data = json.loads(line[len("data: ") :])
         events.append((name, data))
     return events
-
-
-@pytest.fixture
-def client(app_module, repo, fake_storage, fake_vectors, fake_ai):
-    """Do client."""
-    monkeypatch_fixture = pytest.MonkeyPatch()
-    monkeypatch_fixture.setattr(app_module, "repository", repo)
-    with app_module.app.test_client() as client:
-        yield client
-    monkeypatch_fixture.undo()
 
 
 def upload(client, name="doc.pdf"):
@@ -267,7 +305,7 @@ def test_upload_without_file_is_rejected(client):
     assert client.post("/upload", data={}).status_code == 400
 
 
-def test_process_embeds_and_marks_processed(client, fake_vectors, fake_ai):
+def test_process_embeds_and_marks_processed(client, fake_vectors, fake_embeddings):
     """Do test process embeds and marks processed."""
     filename = upload(client).get_json()["file"]["name"]
 
@@ -278,7 +316,7 @@ def test_process_embeds_and_marks_processed(client, fake_vectors, fake_ai):
     _, texts, upserted_file = fake_vectors.upserts[0]
     assert upserted_file == filename
     assert texts, "chunks should be extracted before embedding"
-    assert fake_ai["embedded"], "chunks should be embedded"
+    assert fake_embeddings.embedded, "chunks should be embedded"
     assert (
         client.post("/file/is-processed", json={"filename": filename}).get_json()[
             "is_processed"
@@ -287,7 +325,7 @@ def test_process_embeds_and_marks_processed(client, fake_vectors, fake_ai):
     )
 
 
-def test_ask_streams_tokens_and_persists_sources(client, fake_vectors, fake_ai):
+def test_ask_streams_tokens_and_persists_sources(client, fake_vectors):
     """Do test ask streams tokens and persists sources."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
@@ -323,71 +361,56 @@ def test_ask_streams_tokens_and_persists_sources(client, fake_vectors, fake_ai):
     )
 
 
-def test_factory_builds_provider_with_settings_arguments(app_module, monkeypatch):
+def test_factory_builds_provider_with_credentials_arguments():
     """Provider/model/key land on the instance the factory builds."""
     from services.llm.factory import build_chat_provider
     from services.llm.google_provider import GoogleProvider
     from services.llm.groq_provider import GroqProvider
 
-    seen = []
-
-    def groq_stream(self, query, context):
-        """Do groq stream."""
-        seen.append((self.name, self.api_key, self.model))
-        yield "groq answer"
-
-    def google_stream(self, query, context):
-        """Do google stream."""
-        seen.append((self.name, self.api_key, self.model))
-        yield "google answer"
-
-    monkeypatch.setattr(GroqProvider, "_stream_response", groq_stream)
-    monkeypatch.setattr(GoogleProvider, "_stream_response", google_stream)
-
-    groq = build_chat_provider("groq", "m1", "key-a")
+    groq = build_chat_provider(
+        ChatCredentials(provider="groq", model="m1", api_key="key-a")
+    )
     assert isinstance(groq, GroqProvider)
-    assert "".join(groq.stream_response("q", "ctx")) == "groq answer"
+    assert (groq.api_key, groq.model) == ("key-a", "m1")
 
-    google = build_chat_provider("google", "m2", "key-b")
+    google = build_chat_provider(
+        ChatCredentials(provider="google", model="m2", api_key="key-b")
+    )
     assert isinstance(google, GoogleProvider)
-    assert "".join(google.stream_response("q", "ctx")) == "google answer"
-
-    assert seen == [("groq", "key-a", "m1"), ("google", "key-b", "m2")]
+    assert (google.api_key, google.model) == ("key-b", "m2")
 
 
 def test_factory_rejects_unknown_provider():
     """An unknown provider name is a hard error, not a silent default."""
     from services.llm.factory import build_chat_provider
 
+    credentials = ChatCredentials(provider="anthropic", model="m1", api_key="key-a")
     with pytest.raises(ValueError, match="Unsupported provider"):
-        build_chat_provider("anthropic", "m1", "key-a")
+        build_chat_provider(credentials)
 
 
-def test_provider_failure_surfaces_without_fallback(app_module, monkeypatch):
-    """A primary failure propagates; the other provider is never tried."""
+def test_provider_failure_surfaces_without_fallback():
+    """A primary failure propagates; the factory wires no fallback provider."""
     from services.llm.factory import build_chat_provider
-    from services.llm.google_provider import GoogleProvider
-    from services.llm.groq_provider import GroqProvider
 
-    def broken_stream(self, query, context):
-        """Do broken stream."""
-        raise RuntimeError("provider down")
-        yield  # pragma: no cover
+    class _ProviderDown:
+        """Any SDK access fails: the provider is unreachable."""
 
-    def never_called(self, query, context):
-        """Do never called."""
-        raise AssertionError("fallback provider must not be invoked")
-        yield  # pragma: no cover
+        def __init__(self):
+            self._message = "provider down"
 
-    monkeypatch.setattr(GroqProvider, "_stream_response", broken_stream)
-    monkeypatch.setattr(GoogleProvider, "_stream_response", never_called)
+        def __getattr__(self, name):
+            raise RuntimeError(self._message)
 
-    provider = build_chat_provider("groq", "m1", "key-a")
-    with pytest.raises(RuntimeError):
+    provider = build_chat_provider(
+        ChatCredentials(provider="groq", model="m1", api_key="key-a"),
+        client=_ProviderDown(),
+    )
+    with pytest.raises(RuntimeError, match="provider down"):
         list(provider.stream_response("q", "ctx"))
 
 
-def test_chat_without_settings_asks_user_to_configure(client, app_module, repo):
+def test_chat_without_settings_asks_user_to_configure(client, repo):
     """A user with no saved settings gets a settings-oriented 400, not an LLM call."""
     with repo._session_factory() as session, session.begin():
         session.query(UserSetting).delete(synchronize_session=False)
@@ -400,28 +423,15 @@ def test_chat_without_settings_asks_user_to_configure(client, app_module, repo):
 
 
 def test_provider_failure_still_leaves_a_visible_reply(
-    client, fake_vectors, fake_ai, app_module, capsys
+    client, fake_vectors, fake_chat, capsys
 ):
     """Do test provider failure still leaves a visible reply."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
 
-    class _BrokenChatProvider:
-        def stream_response(self, query, context):
-            """Do broken stream."""
-            raise RuntimeError("provider down")
-            yield  # pragma: no cover
+    fake_chat.provider_error = RuntimeError("provider down")
 
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(
-        app_module, "build_chat_provider", lambda *args: _BrokenChatProvider()
-    )
-    try:
-        response = client.post(
-            "/response", json={"query": "what?", "filename": filename}
-        )
-    finally:
-        monkeypatch.undo()
+    response = client.post("/response", json={"query": "what?", "filename": filename})
 
     events = parse_sse(response.get_data(as_text=True))
     names = [name for name, _ in events]
@@ -437,7 +447,7 @@ def test_provider_failure_still_leaves_a_visible_reply(
     assert error_data["error"] in history[-1]["text"]
 
 
-def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fake_ai):
+def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fake_chat):
     """Do test sources panel order matches llm context order."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
@@ -465,7 +475,7 @@ def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fak
     )
 
     # The LLM received the same chunks, in the same order, as its context.
-    _, context = fake_ai["streamed"][0]
+    _, context = fake_chat.streamed[0]
     assert context == "strong chunk\n\nweak chunk"
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]

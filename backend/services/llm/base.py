@@ -11,7 +11,17 @@ in the factory map.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Iterator
+
+
+@dataclass(frozen=True)
+class ChatCredentials:
+    """One user's chat provider binding: provider name, model, and API key."""
+
+    provider: str
+    model: str
+    api_key: str
 
 
 class LLMProvider(ABC):
@@ -22,10 +32,26 @@ class LLMProvider(ABC):
 
     FALLBACK_ANSWER = "I don't know based on the given context."
 
-    def __init__(self, api_key: str, model: str):
-        """Bind the user's stored key and chosen model to this instance."""
+    def __init__(self, api_key: str, model: str, client=None):
+        """
+        Bind the user's stored key and chosen model to this instance.
+
+        ``client`` injects a pre-built (or fake) SDK client; when omitted,
+        the real client is built for the key on first use.
+        """
         self.api_key = api_key
         self.model = model
+        self._client_override = client
+
+    def _sdk_client(self):
+        """Return the injected client, or the real SDK client for the key."""
+        if self._client_override is not None:
+            return self._client_override
+        return self._build_client()
+
+    @abstractmethod
+    def _build_client(self):
+        """Build the provider SDK client for the stored API key."""
 
     def generate_response(self, query: str, context: str) -> str:
         """Generate a full answer, falling back to the retrieved context."""

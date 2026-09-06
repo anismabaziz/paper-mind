@@ -11,11 +11,11 @@ matches the Qdrant collection (``qdrant_store._QDRANT_DENSE_SIZE``). Keeping
 dimensions at 1024 keeps storage and latency low (~15ms vs ~42ms at 3072)
 while preserving quality.
 
-Tests never load the real model: ``embed_texts`` is faked or
-``LocalEmbeddingService._embed_batch`` is stubbed, and the import of
-``sentence_transformers`` is lazy so ``pytest`` does not require the package
-or a network call. When the package is not installed, a clear error is raised
-only when embeddings are actually generated.
+Tests never load the real model: a fake encoder is injected through the
+constructor, and the import of ``sentence_transformers`` is lazy so
+``pytest`` does not require the package or a network call. When the package
+is not installed, a clear error is raised only when embeddings are actually
+generated.
 """
 
 import threading
@@ -32,15 +32,20 @@ class LocalEmbeddingService:
 
     The model name arrives through the constructor; the model itself loads
     lazily on first use and is cached on the instance. The public entry is
-    ``embed_texts`` (batched, concurrent); ``_embed_batch`` (one batch) is
-    the seam tests stub to avoid loading weights.
+    ``embed_texts`` (batched, concurrent); tests inject a fake encoder
+    through the constructor's ``model`` argument to avoid loading weights.
     """
 
-    def __init__(self, model_name: str, device: str = "cpu"):
-        """Bind the model name; the model itself loads lazily."""
+    def __init__(self, model_name: str, device: str = "cpu", model=None):
+        """
+        Bind the model name; the model itself loads lazily.
+
+        ``model`` injects a pre-loaded (or fake) encoder; when omitted, the
+        real model loads lazily on first use.
+        """
         self._model_name = model_name
         self._device = device
-        self._model = None
+        self._model = model
         self._lock = threading.Lock()
 
     def _get_model(self):

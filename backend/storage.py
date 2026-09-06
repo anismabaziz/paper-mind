@@ -65,11 +65,3 @@ def get_storage() -> LocalStorage:
         _storage = LocalStorage(get_settings().storage.storage_dir)
     return _storage
 
-
-def __getattr__(name):
-    # `from storage import storage` resolves through here, so importing
-    # this module never builds Settings or touches the filesystem directly;
-    # the store (and its root mkdir) appears on first attribute access.
-    if name == "storage":
-        return get_storage()
-    raise AttributeError(f"module 'storage' has no attribute {name!r}")

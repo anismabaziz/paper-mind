@@ -25,9 +25,12 @@ class GroqProvider(LLMProvider):
 
     name = "groq"
 
+    def _build_client(self):
+        return _client(self.api_key)
+
     def _generate_response(self, query: str, context: str) -> str:
         """Do generate response."""
-        chat_completion = _client(self.api_key).chat.completions.create(
+        chat_completion = self._sdk_client().chat.completions.create(
             messages=[
                 {
                     "role": "system",
@@ -46,7 +49,7 @@ class GroqProvider(LLMProvider):
 
     def _stream_response(self, query: str, context: str) -> Iterator[str]:
         """Do stream response."""
-        stream = _client(self.api_key).chat.completions.create(
+        stream = self._sdk_client().chat.completions.create(
             messages=[
                 {
                     "role": "system",
@@ -68,7 +71,7 @@ class GroqProvider(LLMProvider):
 
     def verify(self) -> None:
         """Do verify."""
-        _client(self.api_key).chat.completions.create(
+        self._sdk_client().chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=1,

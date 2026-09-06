@@ -2,28 +2,22 @@
 Settings API route tests.
 
 Run through the Flask test client with the same fakes as the flow tests:
-in-memory sqlite repository, no real provider calls (verification is
-monkeypatched). Demo mode is on by default per conftest; the auth test
-turns it off explicitly.
+in-memory sqlite repository, no real provider calls (the verifier is a
+fake injected through the app factory). Demo mode is on by default per
+conftest; the auth test turns it off explicitly.
 """
 
-import importlib
-
 import pytest
+from dataclasses import replace
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app import Services, create_app
 from db import Base, Repository, User
+from services.accounts.auth_service import issue_token
 from services.accounts.secrets_service import decrypt_api_key
-
-
-@pytest.fixture
-def app_module(monkeypatch):
-    """Do app module."""
-    import app
-
-    return importlib.import_module("app")
+from services.llm.base import ChatCredentials
 
 
 @pytest.fixture
@@ -56,18 +50,29 @@ def jwt_secret(settings_obj, monkeypatch):
 
 
 @pytest.fixture
-def client(app_module, repo, demo_user, monkeypatch, jwt_secret):
-    """Do client."""
-    monkeypatch.setattr(app_module, "repository", repo)
-    with app_module.app.test_client() as client:
-        yield client, app_module
+def client(repo, demo_user, jwt_secret, settings_obj):
+    """App composed over the in-memory repository with the default verifier."""
+    services = replace(Services.from_settings(settings_obj), repository=repo)
+    application = create_app(settings_obj, services=services)
+    with application.test_client() as client:
+        yield client
 
 
-def test_settings_require_auth(app_module, repo, monkeypatch, demo_user, settings_obj):
+def make_app(repo, settings_obj, api_key_verifier=None):
+    """Compose a settings app, optionally with a fake key verifier."""
+    services = replace(
+        Services.from_settings(settings_obj),
+        repository=repo,
+        api_key_verifier=api_key_verifier,
+    )
+    return create_app(settings_obj, services=services)
+
+
+def test_settings_require_auth(repo, demo_user, settings_obj, monkeypatch):
     """Do test settings require auth."""
-    monkeypatch.setattr(app_module, "repository", repo)
     monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
-    with app_module.app.test_client() as client:
+    application = make_app(repo, settings_obj)
+    with application.test_client() as client:
         for method, path in [
             (client.get, "/settings"),
             (client.put, "/settings"),
@@ -79,7 +84,6 @@ def test_settings_require_auth(app_module, repo, monkeypatch, demo_user, setting
 
 def test_get_settings_empty_state(client):
     """Empty settings return the supported-models map and no provider."""
-    client, _ = client
     response = client.get("/settings")
     assert response.status_code == 200
     body = response.get_json()
@@ -91,7 +95,6 @@ def test_get_settings_empty_state(client):
 
 def test_put_rejects_unknown_provider(client):
     """Do test put rejects unknown provider."""
-    client, _ = client
     response = client.put(
         "/settings",
         json={"provider": "openai", "model": "gpt-4o", "api_key": "sk-test"},
@@ -102,7 +105,6 @@ def test_put_rejects_unknown_provider(client):
 
 def test_put_rejects_unknown_model(client):
     """Do test put rejects unknown model."""
-    client, _ = client
     response = client.put(
         "/settings",
         json={"provider": "groq", "model": "gpt-4o", "api_key": "sk-test"},
@@ -113,15 +115,15 @@ def test_put_rejects_unknown_model(client):
 
 def test_put_rejects_missing_key(client):
     """Do test put rejects missing key."""
-    client, _ = client
-    response = client.put("/settings", json={"provider": "groq", "model": "llama-3.3-70b-versatile"})
+    response = client.put(
+        "/settings", json={"provider": "groq", "model": "llama-3.3-70b-versatile"}
+    )
     assert response.status_code == 400
     assert "API key" in response.get_json()["error"]
 
 
-def test_put_saves_encrypted_and_get_masks(client, demo_user, jwt_secret):
+def test_put_saves_encrypted_and_get_masks(client, repo, demo_user):
     """Do test put saves encrypted and get masks."""
-    client, app_module = client
     plaintext = "sk-test-1234567890"
     response = client.put(
         "/settings",
@@ -137,57 +139,60 @@ def test_put_saves_encrypted_and_get_masks(client, demo_user, jwt_secret):
 
     # The stored value must be ciphertext, decryptable back to the key,
     # attached to the demo user's record.
-    stored = app_module.repository.get_user_settings(demo_user)
+    stored = repo.get_user_settings(demo_user)
     assert stored["encrypted_api_key"] != plaintext
     assert decrypt_api_key(stored["encrypted_api_key"]) == plaintext
 
 
-def test_put_requires_auth_resolved_user_not_found(app_module, repo, monkeypatch, settings_obj):
+def test_put_requires_auth_resolved_user_not_found(repo, settings_obj, monkeypatch):
     """A valid token whose user no longer exists yields 401, not a crash."""
-    monkeypatch.setattr(app_module, "repository", repo)
     monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
-    token = app_module.issue_token("ghost@papermind.local")
-    with app_module.app.test_client() as client:
+    token = issue_token("ghost@papermind.local")
+
+    application = make_app(repo, settings_obj)
+    with application.test_client() as client:
         response = client.get(
             "/settings", headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 401
 
 
-def test_verify_reports_ok(client, monkeypatch):
+def test_verify_reports_ok(repo, demo_user, jwt_secret, settings_obj):
     """Do test verify reports ok."""
-    client, app_module = client
     calls = []
 
-    def fake_verify(provider, model, api_key):
+    def fake_verify(credentials):
         """Do fake verify."""
-        calls.append((provider, model, api_key))
+        calls.append(credentials)
         return True, None
 
-    monkeypatch.setattr(app_module, "verify_api_key", fake_verify)
-    client.put(
-        "/settings",
-        json={"provider": "google", "model": "gemini-2.0-flash", "api_key": "sk-live"},
-    )
-    response = client.post("/settings/verify")
+    application = make_app(repo, settings_obj, api_key_verifier=fake_verify)
+    with application.test_client() as client:
+        client.put(
+            "/settings",
+            json={"provider": "google", "model": "gemini-2.0-flash", "api_key": "sk-live"},
+        )
+        response = client.post("/settings/verify")
     assert response.status_code == 200
     assert response.get_json() == {"ok": True, "error": None}
-    assert calls == [("google", "gemini-2.0-flash", "sk-live")]
+    assert calls == [
+        ChatCredentials(provider="google", model="gemini-2.0-flash", api_key="sk-live")
+    ]
 
 
-def test_verify_reports_failure(client, monkeypatch):
+def test_verify_reports_failure(repo, demo_user, jwt_secret, settings_obj):
     """Do test verify reports failure."""
-    client, app_module = client
-    monkeypatch.setattr(
-        app_module,
-        "verify_api_key",
-        lambda p, m, k: (False, "401 invalid API key"),
+    application = make_app(
+        repo,
+        settings_obj,
+        api_key_verifier=lambda credentials: (False, "401 invalid API key"),
     )
-    client.put(
-        "/settings",
-        json={"provider": "groq", "model": "llama-3.3-70b-versatile", "api_key": "bad"},
-    )
-    response = client.post("/settings/verify")
+    with application.test_client() as client:
+        client.put(
+            "/settings",
+            json={"provider": "groq", "model": "llama-3.3-70b-versatile", "api_key": "bad"},
+        )
+        response = client.post("/settings/verify")
     assert response.status_code == 200
     body = response.get_json()
     assert body["ok"] is False
@@ -196,41 +201,43 @@ def test_verify_reports_failure(client, monkeypatch):
 
 def test_verify_without_settings(client):
     """Do test verify without settings."""
-    client, _ = client
     response = client.post("/settings/verify")
     assert response.status_code == 400
     assert "No chat settings saved" in response.get_json()["error"]
 
 
-def test_verify_error_never_contains_the_key(client, monkeypatch):
+def test_verify_error_never_contains_the_key(
+    repo, demo_user, jwt_secret, settings_obj
+):
     """Do test verify error never contains the key."""
-    client, app_module = client
     secret = "sk-super-secret-value"
-    monkeypatch.setattr(
-        app_module,
-        "verify_api_key",
-        lambda p, m, k: (False, f"401: key {k} rejected"),
-    )
-    client.put(
-        "/settings",
-        json={"provider": "groq", "model": "llama-3.3-70b-versatile", "api_key": secret},
-    )
-    body = client.post("/settings/verify").get_json()
+
+    def leaking_verify(credentials):
+        """Echo the key back, as a misbehaving provider client might."""
+        return False, f"401: key {credentials.api_key} rejected"
+
+    application = make_app(repo, settings_obj, api_key_verifier=leaking_verify)
+    with application.test_client() as client:
+        client.put(
+            "/settings",
+            json={"provider": "groq", "model": "llama-3.3-70b-versatile", "api_key": secret},
+        )
+        body = client.post("/settings/verify").get_json()
     assert secret not in body["error"]
 
 
-def test_token_user_gets_their_own_record(app_module, repo, monkeypatch, jwt_secret, settings_obj):
+def test_token_user_gets_their_own_record(repo, jwt_secret, settings_obj, monkeypatch):
     """Outside demo mode, settings follow the token's user, not the demo user."""
-    monkeypatch.setattr(app_module, "repository", repo)
     monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     with repo._session_factory() as session, session.begin():
         user = User(email="real@papermind.local", password_hash="x")
         session.add(user)
         session.flush()
         user_id = user.id
-    token = app_module.issue_token("real@papermind.local")
+    token = issue_token("real@papermind.local")
 
-    with app_module.app.test_client() as client:
+    application = make_app(repo, settings_obj)
+    with application.test_client() as client:
         headers = {"Authorization": f"Bearer {token}"}
         response = client.put(
             "/settings",

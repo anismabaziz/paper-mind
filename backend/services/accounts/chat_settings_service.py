@@ -6,6 +6,8 @@ verification. Routes stay thin; the catalog and provider calls live here
 so adding a model means editing one map.
 """
 
+from services.llm.base import ChatCredentials
+
 DEMO_EMAIL = "demo@papermind.local"
 
 SUPPORTED_MODELS = {
@@ -40,12 +42,12 @@ def mask_key(api_key: str) -> str:
     return f"••••{api_key[-4:]}"
 
 
-def verify_api_key(provider: str, model: str, api_key: str) -> tuple[bool, str | None]:
+def verify_api_key(credentials: ChatCredentials) -> tuple[bool, str | None]:
     """Run a one-token completion; return (ok, error_message)."""
     from services.llm.factory import build_chat_provider
 
     try:
-        build_chat_provider(provider, model, api_key).verify()
+        build_chat_provider(credentials).verify()
         return True, None
     except Exception as e:
         return False, str(e)

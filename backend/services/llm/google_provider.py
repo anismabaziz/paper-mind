@@ -26,9 +26,12 @@ class GoogleProvider(LLMProvider):
 
     name = "google"
 
+    def _build_client(self):
+        return _client(self.api_key)
+
     def _generate_response(self, query: str, context: str) -> str:
         """Do generate response."""
-        result = _client(self.api_key).models.generate_content(
+        result = self._sdk_client().models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
@@ -57,7 +60,7 @@ class GoogleProvider(LLMProvider):
 
     def _stream_response(self, query: str, context: str) -> Iterator[str]:
         """Do stream response."""
-        for chunk in _client(self.api_key).models.generate_content_stream(
+        for chunk in self._sdk_client().models.generate_content_stream(
             model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
@@ -71,6 +74,6 @@ class GoogleProvider(LLMProvider):
 
     def verify(self) -> None:
         """Do verify."""
-        _client(self.api_key).models.generate_content(
+        self._sdk_client().models.generate_content(
             model=self.model, contents="ping", config={"max_output_tokens": 1}
         )

@@ -2,14 +2,17 @@
 Auth tests: hashing, token issue/verify, demo bypass.
 
 Auth flows run against a fake repository (dict-backed users) so no database
-is touched; endpoint tests go through the Flask test client.
+is touched; endpoint tests go through the Flask test client with the fakes
+injected through the app factory.
 """
 
 import datetime
+from dataclasses import replace
 
 import jwt as pyjwt
 import pytest
 
+from app import Services, create_app
 from services.accounts import auth_service
 from services.accounts.auth_service import (
     AuthError,
@@ -18,14 +21,6 @@ from services.accounts.auth_service import (
     verify_password,
     verify_token,
 )
-
-
-@pytest.fixture
-def app_module():
-    """Import the app once Settings are installed for the test."""
-    import app
-
-    return app
 
 
 class FakeUserRepository:
@@ -51,33 +46,47 @@ class FakeUserRepository:
         return []
 
 
+class FakeStorage:
+    """FakeStorage."""
+
+    def list(self):
+        """Do list."""
+        return []
+
+    def url(self, filename):
+        """Do url."""
+        return f"/storage/{filename}"
+
+
+class FakeVectorService:
+    """Counts wipe requests; auth tests never touch real vectors."""
+
+    def __init__(self):
+        """Initialize."""
+        self.deleted_all = False
+
+    def delete_all(self):
+        """Do delete all."""
+        self.deleted_all = True
+
+
 @pytest.fixture
-def fake_repo(app_module, monkeypatch):
+def fake_repo():
     """Do fake repo."""
-    repo = FakeUserRepository()
-    monkeypatch.setattr(app_module, "repository", repo)
-    return repo
+    return FakeUserRepository()
 
 
 @pytest.fixture
-def client(fake_repo, app_module, monkeypatch):
-    # Endpoints behind the auth tests must not touch real dependencies.
-    """Do client."""
-
-    class FakeStorage:
-        """FakeStorage."""
-
-        def list(self):
-            """Do list."""
-            return []
-
-        def url(self, filename):
-            """Do url."""
-            return f"/storage/{filename}"
-
-    monkeypatch.setattr(app_module, "storage", FakeStorage())
-    monkeypatch.setattr(app_module.vector_service, "delete_all", lambda: None)
-    with app_module.app.test_client() as client:
+def client(fake_repo, settings_obj):
+    """App composed with endpoint fakes; nothing here touches real dependencies."""
+    services = replace(
+        Services.from_settings(settings_obj),
+        repository=fake_repo,
+        storage=FakeStorage(),
+        vector_service=FakeVectorService(),
+    )
+    application = create_app(settings_obj, services=services)
+    with application.test_client() as client:
         yield client
 
 
