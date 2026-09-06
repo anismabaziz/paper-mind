@@ -1,1 +1,1 @@
-"""LLM providers (Google, Groq) and the AIService facade."""
+"""Chat providers behind the LLMProvider abstraction, plus the factory."""

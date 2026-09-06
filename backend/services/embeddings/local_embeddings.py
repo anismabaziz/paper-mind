@@ -11,14 +11,19 @@ matches the Qdrant collection (``qdrant_store._QDRANT_DENSE_SIZE``). Keeping
 dimensions at 1024 keeps storage and latency low (~15ms vs ~42ms at 3072)
 while preserving quality.
 
-Tests never load the real model: ``AIService.get_embeddings`` is monkeypatched
-or ``LocalEmbeddingService._embed_batch`` is stubbed, and the import of
+Tests never load the real model: ``embed_texts`` is monkeypatched or
+``LocalEmbeddingService._embed_batch`` is stubbed, and the import of
 ``sentence_transformers`` is lazy so ``pytest`` does not require the package
 or a network call. When the package is not installed, a clear error is raised
 only when embeddings are actually generated.
 """
 
 import threading
+
+from services.concurrency import map_batches_concurrently
+
+# Local BGE-M3 has no provider-side cap; 100 keeps CPU peak memory sane.
+EMBED_BATCH_SIZE = 100
 
 _model = None
 _model_lock = threading.Lock()
@@ -48,12 +53,40 @@ def _get_model():
         return _model
 
 
+def embed_texts(texts):
+    """
+    Embed any number of texts, batched and run concurrently.
+
+    Accepts a single string (query path) or a list (document path) and
+    returns one vector per input text, in input order.
+    """
+    if isinstance(texts, str):
+        texts = [texts]
+
+    if not texts:
+        return []
+
+    batches = [
+        texts[i : i + EMBED_BATCH_SIZE]
+        for i in range(0, len(texts), EMBED_BATCH_SIZE)
+    ]
+    results = map_batches_concurrently(
+        batches,
+        LocalEmbeddingService._embed_batch,
+        label=f"embed_texts: {len(texts)} texts",
+    )
+    all_values: list = []
+    for result in results:
+        all_values.extend(result)
+    return all_values
+
+
 class LocalEmbeddingService:
     """
     CPU embedding via BAAI/bge-m3.
 
-    The public entry is ``_embed_batch`` (one batch) so ``AIService`` can
-    reuse its existing concurrent batcher and retry shape. Tests stub this
+    The public entry is ``_embed_batch`` (one batch) so :func:`embed_texts`
+    can drive it through the shared concurrent batcher. Tests stub this
     method to avoid loading weights.
     """
 

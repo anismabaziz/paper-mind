@@ -6,9 +6,11 @@ used without process-global state.
 """
 
 from functools import lru_cache
+from typing import Iterator
 
 from groq import Groq
 
+from services.llm.base import LLMProvider
 from services.prompts import SYSTEM_INSTRUCTION
 
 
@@ -18,13 +20,14 @@ def _client(api_key: str) -> Groq:
     return Groq(api_key=api_key)
 
 
-class GroqService:
-    """GroqService."""
+class GroqProvider(LLMProvider):
+    """Chat through the Groq SDK."""
 
-    @staticmethod
-    def generate_response(query: str, context: str, api_key: str, model: str) -> str:
+    name = "groq"
+
+    def _generate_response(self, query: str, context: str) -> str:
         """Do generate response."""
-        chat_completion = _client(api_key).chat.completions.create(
+        chat_completion = _client(self.api_key).chat.completions.create(
             messages=[
                 {
                     "role": "system",
@@ -35,16 +38,15 @@ class GroqService:
                     "content": f"Context: {context}\n\nQuery: {query}",
                 },
             ],
-            model=model,
+            model=self.model,
         )
 
         result = chat_completion.choices[0].message.content
-        return result or "I don't know based on the given context."
+        return result or self.FALLBACK_ANSWER
 
-    @staticmethod
-    def stream_response(query: str, context: str, api_key: str, model: str):
+    def _stream_response(self, query: str, context: str) -> Iterator[str]:
         """Do stream response."""
-        stream = _client(api_key).chat.completions.create(
+        stream = _client(self.api_key).chat.completions.create(
             messages=[
                 {
                     "role": "system",
@@ -55,7 +57,7 @@ class GroqService:
                     "content": f"Context: {context}\n\nQuery: {query}",
                 },
             ],
-            model=model,
+            model=self.model,
             stream=True,
         )
 
@@ -63,3 +65,11 @@ class GroqService:
             delta = chunk.choices[0].delta.content if chunk.choices else None
             if delta:
                 yield delta
+
+    def verify(self) -> None:
+        """Do verify."""
+        _client(self.api_key).chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+        )

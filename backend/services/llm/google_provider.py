@@ -6,10 +6,12 @@ used without process-global state.
 """
 
 from functools import lru_cache
+from typing import Iterator
 
 from google import genai
 from google.genai import types
 
+from services.llm.base import LLMProvider
 from services.prompts import SYSTEM_INSTRUCTION
 
 
@@ -19,14 +21,15 @@ def _client(api_key: str) -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
-class GoogleService:
-    """GoogleService."""
+class GoogleProvider(LLMProvider):
+    """Chat through the Google GenAI SDK."""
 
-    @staticmethod
-    def generate_response(query: str, context: str, api_key: str, model: str) -> str:
+    name = "google"
+
+    def _generate_response(self, query: str, context: str) -> str:
         """Do generate response."""
-        result = _client(api_key).models.generate_content(
-            model=model,
+        result = _client(self.api_key).models.generate_content(
+            model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
                 f"Context: {context}",
@@ -50,13 +53,12 @@ class GoogleService:
             if collected_parts:
                 return "\n".join(collected_parts)
 
-        return "I don't know based on the given context."
+        return self.FALLBACK_ANSWER
 
-    @staticmethod
-    def stream_response(query: str, context: str, api_key: str, model: str):
+    def _stream_response(self, query: str, context: str) -> Iterator[str]:
         """Do stream response."""
-        for chunk in _client(api_key).models.generate_content_stream(
-            model=model,
+        for chunk in _client(self.api_key).models.generate_content_stream(
+            model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
                 f"Context: {context}",
@@ -66,3 +68,9 @@ class GoogleService:
             text = getattr(chunk, "text", None)
             if text:
                 yield text
+
+    def verify(self) -> None:
+        """Do verify."""
+        _client(self.api_key).models.generate_content(
+            model=self.model, contents="ping", config={"max_output_tokens": 1}
+        )

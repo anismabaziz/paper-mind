@@ -1,7 +1,7 @@
 """
 Shared helper for concurrent batch execution.
 
-Both ``AIService.get_embeddings`` and ``VectorService.upsert_vectors``
+Both ``embed_texts`` (embeddings) and ``VectorService.upsert_vectors``
 split work into 100-item batches and run them with a 4-worker thread pool.
 The helper centralises the pool handling, ordering, timing, and the
 narrow fallback that only applies to thread-pool infrastructure failures

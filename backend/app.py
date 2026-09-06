@@ -20,7 +20,8 @@ import settings
 from db import repository
 from storage import storage
 from services.parsing.document_parser import DocumentParser
-from services.llm.ai_service import AIService
+from services.embeddings.local_embeddings import embed_texts
+from services.llm.factory import build_chat_provider
 from services.retrieval.vector_service import VectorService
 from services.accounts.auth_service import (
     hash_password,
@@ -180,7 +181,7 @@ def process_file():
         except Exception as e:
             print(f"/process-file vector cleanup warning for {filename}: {e}")
         texts = [c.text for c in chunk_objs]
-        embeddings, embed_elapsed = _timed_call(AIService.get_embeddings, texts)
+        embeddings, embed_elapsed = _timed_call(embed_texts, texts)
         _, upsert_elapsed = _timed_call(
             VectorService.upsert_chunks, embeddings, chunk_objs, filename
         )
@@ -240,7 +241,11 @@ def get_response():
                 "Re-save your provider settings, then try again."
             }
         ), 500
-    provider, model = stored["provider"], stored["model"]
+    try:
+        chat_provider = build_chat_provider(stored["provider"], stored["model"], api_key)
+    except ValueError as e:
+        print(f"/response provider error for user {user['id']}: {e}")
+        return jsonify({"error": str(e)}), 500
 
     file_record = repository.get_file(filename)
     if not file_record:
@@ -255,7 +260,7 @@ def get_response():
     # never leave the turn half-recorded.
     try:
         repository.add_message(conversation_id, "user", query)
-        query_embedding = AIService.get_embeddings(query)[0]
+        query_embedding = embed_texts(query)[0]
         sources = VectorService.query_vectors(
             query_embedding, filename, query_text=query
         )
@@ -272,7 +277,7 @@ def get_response():
         """Do generate."""
         fragments = []
         try:
-            for token in AIService.stream_response(query, context, provider, model, api_key):
+            for token in chat_provider.stream_response(query, context):
                 fragments.append(token)
                 yield event("token", {"text": token})
         except Exception as e:

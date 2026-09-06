@@ -4,15 +4,14 @@ Embedding path tests.
 Embedding generation is fully local (BGE-M3 via ``sentence-transformers``):
 no API key, no network. The real model is never loaded here —
 ``LocalEmbeddingService._embed_batch`` is stubbed so these tests cover the
-batching and input-shaping contract of ``AIService.get_embeddings`` and the
-truncation contract of the local service itself.
+batching and input-shaping contract of ``embed_texts`` and the truncation
+contract of the local service itself.
 """
 
 import numpy as np
 import pytest
 
-from services.llm.ai_service import AIService
-from services.embeddings.local_embeddings import LocalEmbeddingService
+from services.embeddings.local_embeddings import LocalEmbeddingService, embed_texts
 
 
 class _RecordingEmbedder:
@@ -34,10 +33,10 @@ def recorder(monkeypatch):
     return stub
 
 
-def test_get_embeddings_batches_and_preserves_order(recorder):
+def test_embed_texts_batches_and_preserves_order(recorder):
     """205 texts split into batches of at most 100, order preserved."""
     texts = [f"chunk-{i}" for i in range(205)]
-    result = AIService.get_embeddings(texts)
+    result = embed_texts(texts)
 
     assert recorder.batches == [
         [f"chunk-{i}" for i in range(0, 100)],
@@ -48,17 +47,17 @@ def test_get_embeddings_batches_and_preserves_order(recorder):
     assert [v[0] for v in result] == [1.0] * 100 + [2.0] * 100 + [3.0] * 5
 
 
-def test_get_embeddings_wraps_a_single_string(recorder):
+def test_embed_texts_wraps_a_single_string(recorder):
     """Query path passes one string; it must come back as one vector."""
-    result = AIService.get_embeddings("a single query")
+    result = embed_texts("a single query")
 
     assert recorder.batches == [["a single query"]]
     assert len(result) == 1
 
 
-def test_get_embeddings_empty_input_returns_empty(recorder):
+def test_embed_texts_empty_input_returns_empty(recorder):
     """Empty list short-circuits before any batch is dispatched."""
-    assert AIService.get_embeddings([]) == []
+    assert embed_texts([]) == []
     assert recorder.batches == []
 
 

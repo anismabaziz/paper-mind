@@ -42,22 +42,10 @@ def mask_key(api_key: str) -> str:
 
 def verify_api_key(provider: str, model: str, api_key: str) -> tuple[bool, str | None]:
     """Run a one-token completion; return (ok, error_message)."""
+    from services.llm.factory import build_chat_provider
+
     try:
-        if provider == "google":
-            from google import genai
-
-            client = genai.Client(api_key=api_key)
-            client.models.generate_content(
-                model=model, contents="ping", config={"max_output_tokens": 1}
-            )
-        else:
-            from groq import Groq
-
-            Groq(api_key=api_key).chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=1,
-            )
+        build_chat_provider(provider, model, api_key).verify()
         return True, None
     except Exception as e:
         return False, str(e)

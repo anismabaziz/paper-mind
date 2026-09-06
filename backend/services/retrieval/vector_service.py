@@ -66,8 +66,8 @@ def matches_to_sources(matches, filename):
 
 class VectorService:
     # Keep batches well under Qdrant's upsert limits.
-    # Keep in sync with AIService.EMBED_BATCH_SIZE so one embedding batch maps
-    # to one upsert batch without re-chunking.
+    # Keep in sync with EMBED_BATCH_SIZE in services/embeddings/local_embeddings.py
+    # so one embedding batch maps to one upsert batch without re-chunking.
     """VectorService."""
 
     UPSERT_BATCH_SIZE = 100

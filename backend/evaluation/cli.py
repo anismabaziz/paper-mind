@@ -36,17 +36,19 @@ EVAL_PREFIX = "eval-"
 
 def make_live_components(provider: str, model: str, api_key: str):
     """Wire the evaluator to the chosen per-run provider settings."""
-    # Reuse the app's own embedding and generation paths (prompt, dispatch)
+    # Reuse the app's own embedding and generation paths (prompt, factory)
     # so the numbers describe what users actually get.
-    from services.llm.ai_service import AIService
-    from services.llm.google_service import _client as google_client
+    from services.embeddings.local_embeddings import embed_texts
+    from services.llm.factory import build_chat_provider
+    from services.llm.google_provider import _client as google_client
     from google.genai import types
 
-    embed_fn = AIService.get_embeddings
+    embed_fn = embed_texts
+    chat_provider = build_chat_provider(provider, model, api_key)
 
     def generate_fn(query, context):
         """Do generate fn."""
-        return AIService.generate_response(query, context, provider, model, api_key)
+        return chat_provider.generate_response(query, context)
 
     def judge_fn(prompt):
         """Do judge fn."""

@@ -179,26 +179,26 @@ def fake_ai(monkeypatch, app_module):
         calls["embedded"].extend(texts)
         return [[0.1, 0.2] for _ in texts]
 
-    def generate_response(query, context, provider, model, api_key):
-        """Do generate response."""
-        calls["answered"].append((query, context))
-        return "The answer is 42."
+    monkeypatch.setattr(app_module, "embed_texts", get_embeddings)
 
-    def stream_response(query, context, provider, model, api_key):
-        """Do stream response."""
-        calls["streamed"].append((query, context))
-        yield "The answer "
-        yield "is 42."
+    class _FakeChatProvider:
+        def stream_response(self, query, context):
+            """Do stream response."""
+            calls["streamed"].append((query, context))
+            yield "The answer "
+            yield "is 42."
 
-    monkeypatch.setattr(
-        app_module.AIService, "get_embeddings", staticmethod(get_embeddings)
-    )
-    monkeypatch.setattr(
-        app_module.AIService, "generate_response", staticmethod(generate_response)
-    )
-    monkeypatch.setattr(
-        app_module.AIService, "stream_response", staticmethod(stream_response)
-    )
+        def generate_response(self, query, context):
+            """Do generate response."""
+            calls["answered"].append((query, context))
+            return "The answer is 42."
+
+    def fake_factory(provider, model, api_key):
+        """Do fake factory."""
+        calls["chat_provider"] = (provider, model, api_key)
+        return _FakeChatProvider()
+
+    monkeypatch.setattr(app_module, "build_chat_provider", fake_factory)
     return calls
 
 
@@ -311,53 +311,68 @@ def test_ask_streams_tokens_and_persists_sources(client, fake_vectors, fake_ai):
     )
 
 
-def test_chat_dispatches_on_settings_arguments(app_module, monkeypatch):
-    """Provider/model/key come from the settings arguments, not config."""
-    from services.llm.ai_service import AIService
-    from services.llm.google_service import GoogleService
-    from services.llm.groq_service import GroqService
+def test_factory_builds_provider_with_settings_arguments(app_module, monkeypatch):
+    """Provider/model/key land on the instance the factory builds."""
+    from services.llm.factory import build_chat_provider
+    from services.llm.google_provider import GoogleProvider
+    from services.llm.groq_provider import GroqProvider
 
     seen = []
 
-    def groq_stream(query, context, api_key, model):
+    def groq_stream(self, query, context):
         """Do groq stream."""
-        seen.append(("groq", api_key, model))
+        seen.append((self.name, self.api_key, self.model))
         yield "groq answer"
 
-    def google_stream(query, context, api_key, model):
+    def google_stream(self, query, context):
         """Do google stream."""
-        seen.append(("google", api_key, model))
+        seen.append((self.name, self.api_key, self.model))
         yield "google answer"
 
-    monkeypatch.setattr(GroqService, "stream_response", staticmethod(groq_stream))
-    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(google_stream))
+    monkeypatch.setattr(GroqProvider, "_stream_response", groq_stream)
+    monkeypatch.setattr(GoogleProvider, "_stream_response", google_stream)
 
-    assert "".join(AIService.stream_response("q", "ctx", "groq", "m1", "key-a")) == "groq answer"
-    assert "".join(AIService.stream_response("q", "ctx", "google", "m2", "key-b")) == "google answer"
+    groq = build_chat_provider("groq", "m1", "key-a")
+    assert isinstance(groq, GroqProvider)
+    assert "".join(groq.stream_response("q", "ctx")) == "groq answer"
+
+    google = build_chat_provider("google", "m2", "key-b")
+    assert isinstance(google, GoogleProvider)
+    assert "".join(google.stream_response("q", "ctx")) == "google answer"
+
     assert seen == [("groq", "key-a", "m1"), ("google", "key-b", "m2")]
+
+
+def test_factory_rejects_unknown_provider():
+    """An unknown provider name is a hard error, not a silent default."""
+    from services.llm.factory import build_chat_provider
+
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        build_chat_provider("anthropic", "m1", "key-a")
 
 
 def test_provider_failure_surfaces_without_fallback(app_module, monkeypatch):
     """A primary failure propagates; the other provider is never tried."""
-    from services.llm.ai_service import AIService
-    from services.llm.google_service import GoogleService
-    from services.llm.groq_service import GroqService
+    from services.llm.factory import build_chat_provider
+    from services.llm.google_provider import GoogleProvider
+    from services.llm.groq_provider import GroqProvider
 
-    def broken_stream(query, context, api_key, model):
+    def broken_stream(self, query, context):
         """Do broken stream."""
         raise RuntimeError("provider down")
         yield  # pragma: no cover
 
-    def never_called(query, context, api_key, model):
+    def never_called(self, query, context):
         """Do never called."""
         raise AssertionError("fallback provider must not be invoked")
         yield  # pragma: no cover
 
-    monkeypatch.setattr(GroqService, "stream_response", staticmethod(broken_stream))
-    monkeypatch.setattr(GoogleService, "stream_response", staticmethod(never_called))
+    monkeypatch.setattr(GroqProvider, "_stream_response", broken_stream)
+    monkeypatch.setattr(GoogleProvider, "_stream_response", never_called)
 
+    provider = build_chat_provider("groq", "m1", "key-a")
     with pytest.raises(RuntimeError):
-        list(AIService.stream_response("q", "ctx", "groq", "m1", "key-a"))
+        list(provider.stream_response("q", "ctx"))
 
 
 def test_chat_without_settings_asks_user_to_configure(client, app_module, repo):
@@ -379,14 +394,15 @@ def test_provider_failure_still_leaves_a_visible_reply(
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
 
-    def broken_stream(query, context, provider, model, api_key):
-        """Do broken stream."""
-        raise RuntimeError("provider down")
-        yield  # pragma: no cover
+    class _BrokenChatProvider:
+        def stream_response(self, query, context):
+            """Do broken stream."""
+            raise RuntimeError("provider down")
+            yield  # pragma: no cover
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
-        app_module.AIService, "stream_response", staticmethod(broken_stream)
+        app_module, "build_chat_provider", lambda *args: _BrokenChatProvider()
     )
     try:
         response = client.post(
