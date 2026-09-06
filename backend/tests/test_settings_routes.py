@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db import Base, Repository, User
-from services.secrets_service import decrypt_api_key
+from services.accounts.secrets_service import decrypt_api_key
 
 
 @pytest.fixture

@@ -10,9 +10,9 @@ in-memory data only.
 import pytest
 
 import providers
-from services import document_parser
-from services.document_parser import DocumentParser
-from services.vector_service import MAX_RETRIEVED_SOURCES, VectorService
+from services.parsing import document_parser
+from services.parsing.document_parser import DocumentParser
+from services.retrieval.vector_service import MAX_RETRIEVED_SOURCES, VectorService
 
 
 class TestDocumentParser:
@@ -289,7 +289,7 @@ class TestChunkMetadata:
 
     def test_matches_to_sources_preserves_page_no_and_hash(self):
         """Do test matches to sources preserves page no and hash."""
-        from services.vector_service import matches_to_sources
+        from services.retrieval.vector_service import matches_to_sources
 
         matches = [
             {

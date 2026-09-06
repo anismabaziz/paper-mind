@@ -27,8 +27,8 @@ from pathlib import Path
 
 from evaluation import judge as judge_module
 from evaluation.metrics import RetrievalReport, hit_at_k, recall_at_k, summarize
-from services.document_parser import DocumentParser
-from services.vector_service import matches_to_sources, shape_sources
+from services.parsing.document_parser import DocumentParser
+from services.retrieval.vector_service import matches_to_sources, shape_sources
 
 
 def _is_rerank_enabled() -> bool:
@@ -93,7 +93,7 @@ def index_document(
     embeddings = embed_fn(chunks)
     # Build BM25 sparse vectors (hash-based TF) for hybrid indexing
     try:
-        from services.hybrid import build_sparse_vectors
+        from services.retrieval.hybrid import build_sparse_vectors
     except Exception:
         build_sparse_vectors = None  # type: ignore
     if build_sparse_vectors is not None:
@@ -164,7 +164,7 @@ def retrieve(
     sparse = None
     if query_text is not None:
         try:
-            from services.hybrid import build_sparse_vector
+            from services.retrieval.hybrid import build_sparse_vector
 
             sparse = build_sparse_vector(query_text)
             if not sparse["indices"]:
@@ -203,7 +203,7 @@ def retrieve(
     sources = matches_to_sources(matches, filename)
 
     # Gated local reranker mirroring VectorService — single shared gate
-    from services.reranker import maybe_rerank
+    from services.retrieval.reranker import maybe_rerank
 
     sources = maybe_rerank(query_text, sources, enabled=rerank)
 

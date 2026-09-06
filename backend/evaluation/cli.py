@@ -38,8 +38,8 @@ def make_live_components(provider: str, model: str, api_key: str):
     """Wire the evaluator to the chosen per-run provider settings."""
     # Reuse the app's own embedding and generation paths (prompt, dispatch)
     # so the numbers describe what users actually get.
-    from services.ai_service import AIService
-    from services.google_service import _client as google_client
+    from services.llm.ai_service import AIService
+    from services.llm.google_service import _client as google_client
     from google.genai import types
 
     embed_fn = AIService.get_embeddings

@@ -121,7 +121,7 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 The storage module (`backend/storage.py`) abstracts where uploaded files live;
 the app currently ships the `LocalStorage` implementation, and anything that
 can save, open, and serve a file can be substituted without touching route
-code. The document parser (`backend/services/document_parser.py`) maps file
+code. The document parser (`backend/services/parsing/document_parser.py`) maps file
 extensions to parsers; chunking is owned by the parser (token-based
 `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken
 cl100k_base`) so swapping parsers cannot silently change chunk sizes.
@@ -129,11 +129,11 @@ Honest note: PDF has two branches behind the same parser — `pymupdf` fast path
 default for born-digital single-column PDFs, and an opt-in Docling branch
 (`USE_DOCLING=auto|true`, `.[docling]` extra, `granite-docling-258M` ~1.1GB)
 that preserves tables as Markdown and reading order for two-column / scanned
-/ borderless-table PDFs. The heuristic in `services/pdf_heuristics.py`
+/ borderless-table PDFs. The heuristic in `backend/services/parsing/pdf_heuristics.py`
 routes only those PDFs to Docling; everything else stays on `pymupdf`.
 
 **Vendor-neutral auth.** Auth is plain JWT with bcrypt-hashed passwords,
-implemented in `backend/services/auth_service.py`. `DEMO_MODE=true` disables
+implemented in `backend/services/accounts/auth_service.py`. `DEMO_MODE=true` disables
 the checks entirely, which keeps the app usable for a demo or a code review
 without handing out accounts. Token signing falls back to a per-process
 random secret when `JWT_SECRET` is unset, which is fine for a laptop and

@@ -10,8 +10,8 @@ import datetime
 import jwt as pyjwt
 import pytest
 
-from services import auth_service
-from services.auth_service import (
+from services.accounts import auth_service
+from services.accounts.auth_service import (
     AuthError,
     hash_password,
     issue_token,

@@ -8,8 +8,8 @@ requiring a paid OCR API. Heavy deps (``docling`` + ``granite-docling-258M``
 (Docker volume ``hf_cache`` in compose.yaml) so the download only happens
 once.
 
-The parser is reached through :class:`services.document_parser.DocumentParser`
-(same interface as :class:`services.pdf_service.PDFParser`) so swapping parsers
+The parser is reached through :class:`services.parsing.document_parser.DocumentParser`
+(same interface as :class:`services.parsing.pdf_service.PDFParser`) so swapping parsers
 cannot silently change chunk sizes. Tests mock this parser and never download.
 """
 

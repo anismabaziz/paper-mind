@@ -5,7 +5,7 @@ import uuid
 
 from providers import get_vector_index
 from services.concurrency import map_batches_concurrently
-from services.hybrid import build_sparse_vector, build_sparse_vectors
+from services.retrieval.hybrid import build_sparse_vector, build_sparse_vectors
 
 # How many candidates the index is asked for vs. how many survive shaping.
 # Asking for more than we keep gives dedupe room to work.
@@ -108,7 +108,7 @@ class VectorService:
         # Backward-compatible helper: bundle parallel lists into Chunk, then delegate.
         # The parallel lists are a data clump; new code should call
         # `_build_vectors_from_chunks` with a `list[Chunk]`.
-        from services.document_parser import Chunk
+        from services.parsing.document_parser import Chunk
 
         chunks = [
             Chunk(
@@ -159,7 +159,7 @@ class VectorService:
         """Do upsert vectors."""
         if not embeddings:
             return None
-        from services.document_parser import Chunk
+        from services.parsing.document_parser import Chunk
 
         # Bundle the parallel lists so the rest of the path uses Chunk
         chunks = [
@@ -243,7 +243,7 @@ class VectorService:
         # Gated local reranker over FETCH_K candidates before shaping to 5.
         # Centralised in reranker.maybe_rerank so VectorService and evaluator
         # share one gate; entirely local CPU, no API.
-        from services.reranker import maybe_rerank
+        from services.retrieval.reranker import maybe_rerank
 
         sources = maybe_rerank(query_text, sources, enabled=rerank)
 

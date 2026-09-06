@@ -19,17 +19,17 @@ from flask_cors import CORS
 import settings
 from db import repository
 from storage import storage
-from services.document_parser import DocumentParser
-from services.ai_service import AIService
-from services.vector_service import VectorService
-from services.auth_service import (
+from services.parsing.document_parser import DocumentParser
+from services.llm.ai_service import AIService
+from services.retrieval.vector_service import VectorService
+from services.accounts.auth_service import (
     hash_password,
     is_demo_mode,
     issue_token,
     require_auth,
     verify_password,
 )
-from services.chat_settings_service import (
+from services.accounts.chat_settings_service import (
     DEMO_EMAIL,
     SUPPORTED_MODELS,
     SettingsError,
@@ -37,7 +37,7 @@ from services.chat_settings_service import (
     validate,
     verify_api_key,
 )
-from services.secrets_service import decrypt_api_key, encrypt_api_key
+from services.accounts.secrets_service import decrypt_api_key, encrypt_api_key
 
 settings.validate()
 

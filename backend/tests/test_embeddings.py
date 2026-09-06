@@ -11,8 +11,8 @@ truncation contract of the local service itself.
 import numpy as np
 import pytest
 
-from services.ai_service import AIService
-from services.local_embeddings import LocalEmbeddingService
+from services.llm.ai_service import AIService
+from services.embeddings.local_embeddings import LocalEmbeddingService
 
 
 class _RecordingEmbedder:
@@ -71,7 +71,7 @@ def test_embed_batch_slices_past_1024_dims_on_old_transformers(monkeypatch):
                 raise TypeError("unexpected keyword argument 'truncate_dim'")
             return np.array([[3.0, 4.0, 99.0] + [0.0] * 1024])
 
-    import services.local_embeddings as le
+    import services.embeddings.local_embeddings as le
 
     monkeypatch.setattr(le, "_model", _OldModel())
     vectors = LocalEmbeddingService._embed_batch(["doc"])

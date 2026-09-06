@@ -441,7 +441,7 @@ class QdrantIndexAdapter:
             return {"matches": dense_matches[:top_k]}
 
         try:
-            from services.hybrid import rrf_fusion
+            from services.retrieval.hybrid import rrf_fusion
 
             fused = rrf_fusion([dense_matches, sparse_matches], limit=top_k)
             return {"matches": fused}

@@ -27,7 +27,7 @@ def get_vector_index():
     """Do get vector index."""
     global _qdrant_index
     if _qdrant_index is None:
-        from services.qdrant_store import QdrantIndexAdapter
+        from services.retrieval.qdrant_store import QdrantIndexAdapter
 
         _qdrant_index = QdrantIndexAdapter(
             get_qdrant_client(), get_settings().vector.index_name

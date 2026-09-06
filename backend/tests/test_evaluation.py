@@ -21,7 +21,7 @@ import pytest
 from evaluation import cli, evaluator, judge
 from evaluation.build_primer_pdf import SOURCE as PRIMER_SOURCE
 from evaluation.metrics import hit_at_k, recall_at_k, summarize
-from services.document_parser import DocumentParser
+from services.parsing.document_parser import DocumentParser
 
 STOPWORDS = {
     "a",

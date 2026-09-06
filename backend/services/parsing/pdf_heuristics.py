@@ -4,8 +4,8 @@ Lightweight PDF heuristics for layout-aware routing.
 All checks use ``pymupdf`` only and stay under 50ms for a 30-page PDF,
 versus seconds for a Docling layout pass. The heuristics decide whether
 a PDF is image-only / two-column / borderless-table and therefore benefits
-from :class:`services.docling_parser.DoclingParser`; others stay on the
-:class:`services.pdf_service.PDFParser` fast path.
+from :class:`services.parsing.docling_parser.DoclingParser`; others stay on the
+:class:`services.parsing.pdf_service.PDFParser` fast path.
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ def should_use_docling(filename: str, file_bytes: bytes | None) -> bool:
     if use in ("0", "false", "no", "off", "disable", "disabled"):
         return False
     try:
-        from services.docling_parser import DoclingParser
+        from services.parsing.docling_parser import DoclingParser
 
         if not DoclingParser.is_available():
             return False

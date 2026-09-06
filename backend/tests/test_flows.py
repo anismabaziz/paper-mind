@@ -20,10 +20,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db import Base, Repository, User, UserSetting
-from services.document_parser import DocumentParser
-from services.pdf_service import PDFParser
-from services.secrets_service import encrypt_api_key
-from services.vector_service import TOP_K, shape_sources
+from services.parsing.document_parser import DocumentParser
+from services.parsing.pdf_service import PDFParser
+from services.accounts.secrets_service import encrypt_api_key
+from services.retrieval.vector_service import TOP_K, shape_sources
 
 
 @pytest.fixture
@@ -313,9 +313,9 @@ def test_ask_streams_tokens_and_persists_sources(client, fake_vectors, fake_ai):
 
 def test_chat_dispatches_on_settings_arguments(app_module, monkeypatch):
     """Provider/model/key come from the settings arguments, not config."""
-    from services.ai_service import AIService
-    from services.google_service import GoogleService
-    from services.groq_service import GroqService
+    from services.llm.ai_service import AIService
+    from services.llm.google_service import GoogleService
+    from services.llm.groq_service import GroqService
 
     seen = []
 
@@ -339,9 +339,9 @@ def test_chat_dispatches_on_settings_arguments(app_module, monkeypatch):
 
 def test_provider_failure_surfaces_without_fallback(app_module, monkeypatch):
     """A primary failure propagates; the other provider is never tried."""
-    from services.ai_service import AIService
-    from services.google_service import GoogleService
-    from services.groq_service import GroqService
+    from services.llm.ai_service import AIService
+    from services.llm.google_service import GoogleService
+    from services.llm.groq_service import GroqService
 
     def broken_stream(query, context, api_key, model):
         """Do broken stream."""

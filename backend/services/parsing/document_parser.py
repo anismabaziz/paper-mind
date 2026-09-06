@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from services.pdf_service import PDFParser
+from services.parsing.pdf_service import PDFParser
 from settings import get_settings
 
 
@@ -48,7 +48,7 @@ _PARSERS = {".pdf": PDFParser}
 
 # Re-export for callers that probe the registry (spec pins _PARSERS shape)
 try:
-    from services.docling_parser import DoclingParser as _DoclingParser
+    from services.parsing.docling_parser import DoclingParser as _DoclingParser
 
     _PARSERS[".pdf:docling"] = _DoclingParser  # optional layout-aware branch
 except Exception:
@@ -56,21 +56,21 @@ except Exception:
 
 
 def _should_use_docling(filename: str, file_bytes: bytes | None) -> bool:
-    """Delegate to :mod:`services.pdf_heuristics` to keep this module focused."""
-    from services.pdf_heuristics import should_use_docling
+    """Delegate to :mod:`services.parsing.pdf_heuristics` to keep this module focused."""
+    from services.parsing.pdf_heuristics import should_use_docling
 
     return should_use_docling(filename, file_bytes)
 
 
 # Backward-compat re-exports so existing probes/tests keep working
 try:
-    from services.pdf_heuristics import (
+    from services.parsing.pdf_heuristics import (
         has_borderless_table as _has_borderless_table,
     )
-    from services.pdf_heuristics import (
+    from services.parsing.pdf_heuristics import (
         is_image_only_pdf as _is_image_only_pdf,
     )
-    from services.pdf_heuristics import (
+    from services.parsing.pdf_heuristics import (
         is_two_column_pdf as _is_two_column_pdf,
     )
 except Exception:  # pragma: no cover
@@ -110,7 +110,7 @@ class DocumentParser:
         # PDF: may route to Docling via heuristic
         if file_bytes is not None and _should_use_docling(filename, file_bytes):
             try:
-                from services.docling_parser import DoclingParser
+                from services.parsing.docling_parser import DoclingParser
 
                 return DoclingParser
             except Exception:
@@ -188,7 +188,7 @@ class DocumentParser:
         # paying Docling cost for single-column born-digital PDFs.
         if file_bytes is not None and _should_use_docling(filename, file_bytes):
             try:
-                from services.docling_parser import DoclingParser
+                from services.parsing.docling_parser import DoclingParser
 
                 page_texts = DoclingParser.extract_pages(file_bytes)
                 chunks_with_page = cls.split_pages(page_texts)

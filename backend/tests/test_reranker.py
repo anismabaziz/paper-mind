@@ -10,8 +10,8 @@ importing weights, so pytest stays fast and offline.
 """
 
 import providers
-from services import reranker
-from services.vector_service import VectorService
+from services.retrieval import reranker
+from services.retrieval.vector_service import VectorService
 from evaluation import evaluator
 
 

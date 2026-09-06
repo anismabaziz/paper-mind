@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db import Base, Repository, User
-from services.secrets_service import (
+from services.accounts.secrets_service import (
     SecretsError,
     decrypt_api_key,
     encrypt_api_key,

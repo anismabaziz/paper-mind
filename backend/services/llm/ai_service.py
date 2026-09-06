@@ -1,9 +1,9 @@
 """Chat orchestration over the per-user provider settings."""
 
 from services.concurrency import map_batches_concurrently
-from services.google_service import GoogleService
-from services.groq_service import GroqService
-from services.local_embeddings import LocalEmbeddingService
+from services.llm.google_service import GoogleService
+from services.llm.groq_service import GroqService
+from services.embeddings.local_embeddings import LocalEmbeddingService
 
 
 class AIService:

@@ -13,7 +13,7 @@ import uuid
 from alembic import op
 import sqlalchemy as sa
 
-from services.auth_service import hash_password
+from services.accounts.auth_service import hash_password
 
 # revision identifiers, used by Alembic.
 revision: str = "f1c3a9b4d2e7"
