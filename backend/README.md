@@ -7,8 +7,8 @@ Flask API for RAG chat over uploaded PDFs. Defaults to free local components
 
 Same table as the top-level README (kept here so env docs stay local):
 
-- `VECTOR_BACKEND=qdrant` (default, `http://localhost:6333`, compose `qdrant` service) vs `pinecone` (+ `PINECONE_API_KEY`)
-- `EMBED_BACKEND=local` (default, `BAAI/bge-m3` 1024d, no key) vs `gemini` (`gemini-embedding-001` + `GOOGLE_API_KEY`)
+- Qdrant on `http://localhost:6333` (compose `qdrant` service), no API key
+- Embeddings: `BAAI/bge-m3` 1024d via `sentence-transformers`, CPU, no API key
 - `RERANK=false` (default) / `true` — local cross-encoder over 50→5 (`cross-encoder/ms-marco-MiniLM-L-6-v2` 22M fast default, or `BAAI/bge-reranker-v2-m3`)
 - `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken cl100k_base`, per-page, with `page_no` + `content_hash`
 - Parser: `pymupdf` fast path default; `USE_DOCLING=auto` (default) routes only image-only / borderless-table / 2-col PDFs to Docling (`.[docling]` extra, `granite-docling-258M`); `true` forces all, `false` never.
@@ -30,17 +30,27 @@ DEMO_MODE=true uv run python app.py   # API on http://127.0.0.1:3000 (GET /healt
 
 Keys path (opt-in):
 
-```bash
-export VECTOR_BACKEND=pinecone PINECONE_API_KEY=...
-export EMBED_BACKEND=gemini GOOGLE_API_KEY=...   # or keep local
-# MODE=google needs GOOGLE_API_KEY, MODE=groq needs GROQ_API_KEY
-docker compose -f backend/compose.yaml up -d
-cd backend && uv run python app.py
-```
-
-Either path boots Postgres (+ Qdrant when `VECTOR_BACKEND=qdrant`). The backend
+Either path boots Postgres and Qdrant. The backend
 runs locally via `uv run python app.py` and serves the API on `http://127.0.0.1:3000`
 (`GET /health` to check) after `uv run alembic upgrade head`.
+
+## Chat provider settings
+
+There are no provider env vars. Chat provider, model, and API key are per-user
+settings stored encrypted in Postgres and configured through the app's
+Settings dialog:
+
+- `GET /settings` — current settings (masked key) plus the supported
+  provider → models map
+- `PUT /settings` — validate provider/model and encrypt the key
+- `POST /settings/verify` — one-token completion against the chosen
+  provider/model with the stored key
+
+All three are authenticated; in demo mode they operate on the seeded demo
+user's record. Chat runs on the requester's own settings — a user with no
+saved settings gets a clear "configure a provider in Settings" error, and the
+backend boots fine with no keys at all. Retrieval-only evaluation
+(`evaluation.cli --live --no-judge`) needs no chat key either.
 
 ## Setup (manual, without Docker)
 
@@ -83,7 +93,7 @@ used (fine for demos, set it for shared deployments).
 uv run pytest
 ```
 
-Tests never talk to real Pinecone, LLM, Postgres, or the real upload
+Tests never talk to real Qdrant, LLM, Postgres, or the real upload
 directory — `tests/conftest.py` provides dummy environment values, and the
 flow tests in `tests/test_flows.py` run against fakes and in-memory sqlite.
 
@@ -93,34 +103,29 @@ flow tests in `tests/test_flows.py` run against fakes and in-memory sqlite.
 ground-truth fixture (`evaluation/fixture.json`): ten questions over two
 sample documents in `evaluation/sample_docs/` — one authored in-repo
 (CC0), one published paper (CC BY 4.0). The evaluator reports
-`hit@5`/`recall@5` (k=5, `FETCH_K=10` internally) + per-question breakdown and
+`hit@5`/`recall@5` (k=5, 10 candidates fetched internally) + per-question breakdown and
 ingest `sec/PDF` (parse/embed/upsert wall time via `evaluation/evaluator.py`;
 `POST /process-file` also logs `parse/embed/upsert/total` per file).
 `uv run pytest` exercises the scoring on deterministic fakes and stays
-headless (no Qdrant/Pinecone/LLM, heavy models mocked).
+headless (no Qdrant/LLM, heavy models mocked).
 
 Live run — opt-in because it writes into the real vector index (and the
 judge costs LLM calls):
 
 ```bash
 cd backend
-# Free local path: Qdrant on http://localhost:6333, no Pinecone/Google keys needed
-# (requires: docker compose -f compose.yaml up -d qdrant, or QDRANT_URL=http://localhost:6333,
-#  VECTOR_BACKEND=qdrant + EMBED_BACKEND=local — both are the defaults)
+# Free local path: Qdrant on http://localhost:6333, no API key needed
+# (requires: docker compose -f compose.yaml up -d qdrant, or QDRANT_URL=http://localhost:6333)
 uv run python -m evaluation.cli --live --no-judge          # retrieval only, no LLM key
-uv run python -m evaluation.cli --live                     # + LLM-as-judge faithfulness (needs MODE key)
+uv run python -m evaluation.cli --live                     # + LLM-as-judge faithfulness (needs a chat key)
 uv run python -m evaluation.cli --live --json              # machine-readable
 uv run python -m evaluation.cli --live --rerank            # force RERANK=true (local cross-encoder 50→5)
 uv run python -m evaluation.cli --live --compare-rerank    # with vs without reranker + latency delta
-
-# With keys (Pinecone/Gemini) — same CLI, just flip env:
-VECTOR_BACKEND=pinecone PINECONE_API_KEY=... EMBED_BACKEND=gemini GOOGLE_API_KEY=... uv run python -m evaluation.cli --live
 ```
 
 A live run indexes the sample docs under an `eval-` prefix in the vector
-index and deletes them afterwards. When `VECTOR_BACKEND=qdrant` (default)
-the index lives at `http://localhost:6333` (compose exposes 6333→6333 and
+index and deletes them afterwards. The index lives at `http://localhost:6333`
+(compose exposes 6333→6333 and
 6334→6334);
-no Pinecone or Google key is required for retrieval-only (`--no-judge`)
-when `EMBED_BACKEND=local`.
+no chat key is required for retrieval-only (`--no-judge`).
 

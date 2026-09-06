@@ -1,7 +1,5 @@
 """Module docstring."""
 
-import os
-
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -10,13 +8,16 @@ from sqlalchemy import pool
 from alembic import context
 
 from db import Base
+from settings import get_settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# The schema lives in DATABASE_URL; alembic.ini never hardcodes it.
-database_url = os.getenv("DATABASE_URL")
+# The schema lives in DATABASE_URL; alembic.ini never hardcodes it. An
+# unset URL falls back to the ini file; the app's boot validation is what
+# reports the missing variable.
+database_url = get_settings().database.database_url
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 

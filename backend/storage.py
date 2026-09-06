@@ -7,7 +7,7 @@ service means implementing the same five methods.
 
 from pathlib import Path
 
-import config
+from settings import get_settings
 
 
 class LocalStorage:
@@ -55,4 +55,13 @@ class LocalStorage:
         return path
 
 
-storage = LocalStorage(config.STORAGE_DIR)
+_storage = None
+
+
+def get_storage() -> LocalStorage:
+    """Build the process-wide store once, from Settings."""
+    global _storage
+    if _storage is None:
+        _storage = LocalStorage(get_settings().storage.storage_dir)
+    return _storage
+

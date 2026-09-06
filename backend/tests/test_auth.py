@@ -2,17 +2,19 @@
 Auth tests: hashing, token issue/verify, demo bypass.
 
 Auth flows run against a fake repository (dict-backed users) so no database
-is touched; endpoint tests go through the Flask test client.
+is touched; endpoint tests go through the Flask test client with the fakes
+injected through the app factory.
 """
 
 import datetime
+from dataclasses import replace
 
 import jwt as pyjwt
 import pytest
 
-import app as app_module
-from services import auth_service
-from services.auth_service import (
+from app import Services, create_app
+from services.accounts import auth_service
+from services.accounts.auth_service import (
     AuthError,
     hash_password,
     issue_token,
@@ -44,33 +46,47 @@ class FakeUserRepository:
         return []
 
 
+class FakeStorage:
+    """FakeStorage."""
+
+    def list(self):
+        """Do list."""
+        return []
+
+    def url(self, filename):
+        """Do url."""
+        return f"/storage/{filename}"
+
+
+class FakeVectorService:
+    """Counts wipe requests; auth tests never touch real vectors."""
+
+    def __init__(self):
+        """Initialize."""
+        self.deleted_all = False
+
+    def delete_all(self):
+        """Do delete all."""
+        self.deleted_all = True
+
+
 @pytest.fixture
-def fake_repo(monkeypatch):
+def fake_repo():
     """Do fake repo."""
-    repo = FakeUserRepository()
-    monkeypatch.setattr(app_module, "repository", repo)
-    return repo
+    return FakeUserRepository()
 
 
 @pytest.fixture
-def client(fake_repo, monkeypatch):
-    # Endpoints behind the auth tests must not touch real dependencies.
-    """Do client."""
-
-    class FakeStorage:
-        """FakeStorage."""
-
-        def list(self):
-            """Do list."""
-            return []
-
-        def url(self, filename):
-            """Do url."""
-            return f"/storage/{filename}"
-
-    monkeypatch.setattr(app_module, "storage", FakeStorage())
-    monkeypatch.setattr(app_module.VectorService, "delete_all", lambda: None)
-    with app_module.app.test_client() as client:
+def client(fake_repo, settings_obj):
+    """App composed with endpoint fakes; nothing here touches real dependencies."""
+    services = replace(
+        Services.from_settings(settings_obj),
+        repository=fake_repo,
+        storage=FakeStorage(),
+        vector_service=FakeVectorService(),
+    )
+    application = create_app(settings_obj, services=services)
+    with application.test_client() as client:
         yield client
 
 
@@ -98,29 +114,29 @@ def test_hashes_are_salted():
 # -- tokens -----------------------------------------------------------------
 
 
-def test_token_roundtrip():
+def test_token_roundtrip(settings_obj):
     """Do test token roundtrip."""
     token = issue_token("a@b.com")
     assert verify_token(token) == "a@b.com"
 
 
-def test_garbage_token_rejected():
+def test_garbage_token_rejected(settings_obj):
     """Do test garbage token rejected."""
     with pytest.raises(AuthError):
         verify_token("not-a-jwt")
 
 
-def test_wrong_key_rejected(monkeypatch):
+def test_wrong_key_rejected(monkeypatch, settings_obj):
     """Do test wrong key rejected."""
     token = issue_token("a@b.com")
-    monkeypatch.setenv("JWT_SECRET", "a-different-secret")
+    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "a-different-secret")
     with pytest.raises(AuthError):
         verify_token(token)
 
 
-def test_expired_token_rejected(monkeypatch):
+def test_expired_token_rejected(monkeypatch, settings_obj):
     """Do test expired token rejected."""
-    monkeypatch.setenv("JWT_SECRET", "fixed-secret")
+    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "fixed-secret")
     now = datetime.datetime.now(datetime.timezone.utc)
     expired = pyjwt.encode(
         {"sub": "a@b.com", "exp": now - datetime.timedelta(minutes=1)},
@@ -191,48 +207,48 @@ def test_login_rejects_bad_credentials(client, fake_repo):
 # -- endpoint enforcement ---------------------------------------------------
 
 
-def test_demo_mode_allows_protected_endpoints_without_token(client, monkeypatch):
+def test_demo_mode_allows_protected_endpoints_without_token(client, monkeypatch, settings_obj):
     """Do test demo mode allows protected endpoints without token."""
-    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
     assert client.get("/files").status_code == 200
 
 
-def test_demo_off_rejects_missing_token(client, monkeypatch):
+def test_demo_off_rejects_missing_token(client, monkeypatch, settings_obj):
     """Do test demo off rejects missing token."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     response = client.get("/files")
     assert response.status_code == 401
     assert "token" in response.get_json()["error"].lower()
 
 
-def test_demo_off_rejects_invalid_token(client, monkeypatch):
+def test_demo_off_rejects_invalid_token(client, monkeypatch, settings_obj):
     """Do test demo off rejects invalid token."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     response = client.get("/files", headers={"Authorization": "Bearer garbage"})
     assert response.status_code == 401
 
 
-def test_demo_off_accepts_valid_token(client, monkeypatch):
+def test_demo_off_accepts_valid_token(client, monkeypatch, settings_obj):
     """Do test demo off accepts valid token."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     assert client.get("/files", headers=auth_headers()).status_code == 200
 
 
-def test_wipe_requires_post_and_auth(client, monkeypatch):
+def test_wipe_requires_post_and_auth(client, monkeypatch, settings_obj):
     """Do test wipe requires post and auth."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     assert client.get("/delete-embeddings").status_code == 405
     assert client.post("/delete-embeddings").status_code == 401
 
-    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
     assert client.post("/delete-embeddings").status_code == 200
 
 
-def test_storage_download_is_gated(client, monkeypatch):
+def test_storage_download_is_gated(client, monkeypatch, settings_obj):
     """Do test storage download is gated."""
-    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
     assert client.get("/storage/doc.pdf").status_code == 401
 
-    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
     # 404 (not 401): demo on lets the request through to the storage layer.
     assert client.get("/storage/doc.pdf").status_code == 404

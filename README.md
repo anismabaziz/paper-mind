@@ -14,6 +14,9 @@ machine.
 - PDF upload, parsing, chunking, and indexing into a vector store
 - Streaming chat over the indexed document (SSE), with retrieved sources
   attached to each answer
+- Per-user chat settings: bring your own provider (Google or Groq), model, and
+  API key via the Settings dialog — stored encrypted, never returned in
+  plaintext
 - JWT auth with a demo mode for frictionless local use
 - Retrieval evaluator with a committed ground-truth fixture
 - Postgres for persistence, local filesystem for uploaded files
@@ -44,31 +47,32 @@ Then open the printed localhost URL. Environment variables for the frontend
 are documented in [frontend/.env.example](frontend/.env.example), and the
 backend's in [backend/.env.example](backend/.env.example).
 
-Keys path — flip an env var and keep using paid providers:
+## Configuring a chat provider
 
-```bash
-export VECTOR_BACKEND=pinecone PINECONE_API_KEY=...
-export EMBED_BACKEND=gemini GOOGLE_API_KEY=...   # or keep local embeddings
-export MODE=google        # or groq with GROQ_API_KEY
-docker compose -f backend/compose.yaml up -d
-cd backend && uv run python app.py
-```
+There are no provider keys in the environment. Open the Settings dialog in the
+app, pick a provider (Google or Groq) and a model from the curated list, paste
+your own API key, and hit "Test connection" to verify before saving. Keys are
+stored encrypted per user and applied to new chats immediately. In demo mode
+the dialog configures the seeded demo user, so a recruiter can run the whole
+flow without an account — the only thing they still need is one API key of
+their own.
 
-## Free local vs keys
+Everything below runs free and local — no API keys anywhere in the pipeline
+except the chat LLM, which each user configures in the app:
 
-| Concern | Free local (default) | Keys (opt-in) |
-|---|---|---|
-| Vector store | `VECTOR_BACKEND=qdrant` on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`) | `VECTOR_BACKEND=pinecone` + `PINECONE_API_KEY`, collection `pdf-index` |
-| Embeddings | `EMBED_BACKEND=local` — `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume | `EMBED_BACKEND=gemini` — `gemini-embedding-001` (768d), needs `GOOGLE_API_KEY` |
-| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, `FETCH_K=50` → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) | Same, with Pinecone `alpha` blend (`HYBRID_ALPHA`) |
-| Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata | Same |
-| Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all | Same |
-| Chat LLM | Still needs `MODE=google` (`GOOGLE_API_KEY`) or `MODE=groq` (`GROQ_API_KEY`) for answers | Same |
-| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no Pinecone/Google) — see `backend/README.md` | `--live` with judge needs the chat key |
+| Concern | Detail |
+|---|---|
+| Vector store | Qdrant on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`), collection `pdf-index` |
+| Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume — no API key |
+| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
+| Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata |
+| Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
+| Chat LLM | Per-user Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest |
+| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no chat key); `--live` with the LLM-as-judge needs a key |
 
 All free-path knobs live in `backend/.env.example`:
-`VECTOR_BACKEND`, `EMBED_BACKEND`, `RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
-`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`, `HYBRID_ALPHA`/`FETCH_K`.
+`RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
+`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`.
 
 The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only).
 Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backend/README.md).
@@ -81,7 +85,7 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 
 1. A PDF is uploaded, parsed into text, and split into chunks by the parser
    (so the chunking policy can't drift per format).
-2. Chunks are embedded and stored in Pinecone; document metadata lives in
+2. Chunks are embedded and stored in Qdrant; document metadata lives in
    Postgres.
 3. A question is embedded, the nearest chunks are retrieved, and the LLM's
    answer streams back over SSE as it is generated.
@@ -95,6 +99,7 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 │   Frontend   │────────────▶│              Backend (Flask)          │
 └──────────────┘             │                                       │
                              │  auth ── JWT (bcrypt) or demo bypass  │
+                             │  settings ── per-user provider config │
                              │  chat ── SSE stream, answers + sources│
                              │  eval ── retrieval/answer evaluator   │
                              │                                       │
@@ -103,9 +108,10 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
                              └──────┬──────────────┬───────────┬─────┘
                                     │              │           │
                              ┌──────▼─────┐ ┌──────▼────┐ ┌────▼─────┐
-                             │  Postgres  │ │ Qdrant    │ │ LLM API  │
-                             │ (metadata, │ │ (default) │ │ (Google  │
-                             │  messages) │ │ or Pinec. │ │ or Groq) │
+                             │  Postgres  │ │ Qdrant    │ │ Chat LLM │
+                             │ (metadata, │ │ (vectors, │ │ (Google  │
+                             │  messages, │ │  only)    │ │ or Groq, │
+                             │  settings) │ │           │ │ per user)│
                              └────────────┘ └───────────┘ └──────────┘
 ```
 
@@ -115,7 +121,7 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 The storage module (`backend/storage.py`) abstracts where uploaded files live;
 the app currently ships the `LocalStorage` implementation, and anything that
 can save, open, and serve a file can be substituted without touching route
-code. The document parser (`backend/services/document_parser.py`) maps file
+code. The document parser (`backend/services/parsing/document_parser.py`) maps file
 extensions to parsers; chunking is owned by the parser (token-based
 `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken
 cl100k_base`) so swapping parsers cannot silently change chunk sizes.
@@ -123,11 +129,11 @@ Honest note: PDF has two branches behind the same parser — `pymupdf` fast path
 default for born-digital single-column PDFs, and an opt-in Docling branch
 (`USE_DOCLING=auto|true`, `.[docling]` extra, `granite-docling-258M` ~1.1GB)
 that preserves tables as Markdown and reading order for two-column / scanned
-/ borderless-table PDFs. The heuristic in `services/pdf_heuristics.py`
+/ borderless-table PDFs. The heuristic in `backend/services/parsing/pdf_heuristics.py`
 routes only those PDFs to Docling; everything else stays on `pymupdf`.
 
 **Vendor-neutral auth.** Auth is plain JWT with bcrypt-hashed passwords,
-implemented in `backend/services/auth_service.py`. `DEMO_MODE=true` disables
+implemented in `backend/services/accounts/auth_service.py`. `DEMO_MODE=true` disables
 the checks entirely, which keeps the app usable for a demo or a code review
 without handing out accounts. Token signing falls back to a per-process
 random secret when `JWT_SECRET` is unset, which is fine for a laptop and
@@ -137,9 +143,19 @@ documented as not fine for anything shared.
 rather than arriving as one block, because a retrieval answer can take long
 enough to generate that blocking feels broken. Sources are attached when the
 stream completes and stored alongside the answer, so the conversation survives
-a reload. If the primary provider fails mid-stream, the backend does not
-replay the partial answer through the fallback; it surfaces the failure
-instead.
+a reload. If the chosen provider fails mid-stream, the backend does not
+silently answer through a different one; it surfaces the failure so the user
+can fix their own key or quota. That no-fallback rule is deliberate — with
+user-supplied keys, a silent switch would bill someone else's account
+(see [docs/adr/0001-per-user-byo-provider-keys.md](docs/adr/0001-per-user-byo-provider-keys.md)).
+
+**Per-user BYO keys.** Provider, model, and API key are per-user settings
+configured in the Settings dialog, not server environment variables. Keys are
+encrypted at rest with Fernet and only ever returned masked. The app boots
+with no provider key present; a user who has not saved settings gets a clear
+error pointing at Settings rather than a crash or an env default. Demo mode
+maps anonymous requests to a seeded demo user whose settings are edited
+through the same dialog.
 
 **Retrieval evaluation.** `backend/evaluation/` measures the retrieval
 pipeline against a committed ground-truth fixture: ten questions over two
@@ -156,7 +172,7 @@ cd backend
 uv run pytest
 ```
 
-Tests run against fakes and in-memory sqlite; they never touch real Qdrant/Pinecone,
+Tests run against fakes and in-memory sqlite; they never touch real Qdrant,
 the LLM, or real Postgres (heavy models mocked or `pytest.importorskip`'d; `uv run pytest` stays headless).
 
 The evaluator (`backend/evaluation/`) measures retrieval against
@@ -164,15 +180,15 @@ The evaluator (`backend/evaluation/`) measures retrieval against
 `ingest sec/PDF` (parse/embed/upsert wall time) via
 `evaluation/evaluator.py`; live runs are opt-in (`--live`). See
 [backend/README.md](backend/README.md) for free local live instructions
-(`http://localhost:6333` without Pinecone/Google keys).
+(`http://localhost:6333` without any chat key).
 
 ## Technologies
 
 - Backend: Python, Flask, SQLAlchemy, Alembic
 - Frontend: React, TypeScript, Vite, Tailwind CSS, Zustand, React Query
 - Database: Postgres
-- Vector store: Qdrant (default, local) or Pinecone (opt-in, `VECTOR_BACKEND`)
-- Embeddings: BGE-M3 local (`EMBED_BACKEND=local`, default) or Gemini (`gemini-embedding-001`)
-- LLM: Google Gemini or Groq (chosen with `MODE`)
+- Vector store: Qdrant (local, `http://localhost:6333`)
+- Embeddings: BGE-M3 local via `sentence-transformers` (CPU, 1024d, no key)
+- LLM: Google Gemini or Groq, per user via the Settings dialog (BYO key, encrypted at rest)
 - Chunking: `tiktoken` `cl100k_base`, `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50`
 - Retrieval: hybrid dense + BM25 (`rank-bm25`) with RRF, gated local cross-encoder reranker
