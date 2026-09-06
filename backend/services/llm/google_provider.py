@@ -1,20 +1,38 @@
-"""Module docstring."""
+"""
+Google chat provider.
 
+Clients are built per API key (cached) so every user's stored key can be
+used without process-global state.
+"""
+
+from functools import lru_cache
+from typing import Iterator
+
+from google import genai
 from google.genai import types
-import config
+
+from services.llm.base import LLMProvider
 from services.prompts import SYSTEM_INSTRUCTION
 
-CHAT_MODEL = config.CHAT_MODEL
+
+@lru_cache(maxsize=32)
+def _client(api_key: str) -> genai.Client:
+    """Do client."""
+    return genai.Client(api_key=api_key)
 
 
-class GoogleService:
-    """GoogleService."""
+class GoogleProvider(LLMProvider):
+    """Chat through the Google GenAI SDK."""
 
-    @staticmethod
-    def generate_response(query: str, context: str) -> str:
+    name = "google"
+
+    def _build_client(self):
+        return _client(self.api_key)
+
+    def _generate_response(self, query: str, context: str) -> str:
         """Do generate response."""
-        result = config.genai_client.models.generate_content(
-            model=CHAT_MODEL,
+        result = self._sdk_client().models.generate_content(
+            model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
                 f"Context: {context}",
@@ -38,13 +56,12 @@ class GoogleService:
             if collected_parts:
                 return "\n".join(collected_parts)
 
-        return "I don't know based on the given context."
+        return self.FALLBACK_ANSWER
 
-    @staticmethod
-    def stream_response(query: str, context: str):
+    def _stream_response(self, query: str, context: str) -> Iterator[str]:
         """Do stream response."""
-        for chunk in config.genai_client.models.generate_content_stream(
-            model=CHAT_MODEL,
+        for chunk in self._sdk_client().models.generate_content_stream(
+            model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
             contents=[
                 f"Context: {context}",
@@ -54,3 +71,9 @@ class GoogleService:
             text = getattr(chunk, "text", None)
             if text:
                 yield text
+
+    def verify(self) -> None:
+        """Do verify."""
+        self._sdk_client().models.generate_content(
+            model=self.model, contents="ping", config={"max_output_tokens": 1}
+        )

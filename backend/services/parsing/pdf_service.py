@@ -5,24 +5,13 @@ import re
 
 import pymupdf
 
+from services.parsing.document_parser import DocumentParser
 
-class PDFParser:
-    """PDFParser."""
 
-    @staticmethod
-    def extract_text(pdf_content):
-        """Do extract text."""
-        # Flat text for backward compatibility: join pages with space and
-        # normalize newlines to spaces so legacy callers see a single line.
-        # Page-aware callers should use extract_pages which keeps row breaks.
-        pages = PDFParser.extract_pages(pdf_content)
-        flat = " ".join(pages)
-        flat = flat.replace("\n", " ")
-        flat = re.sub(r"\s{2,}", " ", flat)
-        return flat.strip()
+class PDFParser(DocumentParser):
+    """PDF extraction via pymupdf: the fast, always-available path."""
 
-    @staticmethod
-    def extract_pages(pdf_content) -> list[str]:
+    def extract_pages(self, pdf_content) -> list[str]:
         """
         Extract one string per page.
 
@@ -59,3 +48,13 @@ class PDFParser:
                 page_text = "\n".join(normalized_lines)
                 pages.append(page_text)
         return pages
+
+    def extract_text(self, pdf_content) -> str:
+        """Flat text: join pages with space and normalize newlines to spaces."""
+        # Flat text for backward compatibility. Page-aware callers should
+        # use extract_pages which keeps row breaks.
+        pages = self.extract_pages(pdf_content)
+        flat = " ".join(pages)
+        flat = flat.replace("\n", " ")
+        flat = re.sub(r"\s{2,}", " ", flat)
+        return flat.strip()

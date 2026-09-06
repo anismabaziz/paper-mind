@@ -1,10 +1,10 @@
 """
-Qdrant backend adapter with Pinecone-compatible shape.
+Qdrant backend adapter.
 
 Provides ``upsert``/``query``/``delete`` so ``VectorService`` and
-``evaluation/evaluator.py`` can switch backends without code changes.
+``evaluation/evaluator.py`` share one store interface.
 
-Collection ``pdf-index`` (``config.INDEX_NAME``) is created lazily with:
+Collection ``pdf-index`` (the Settings vector index name) is created lazily with:
 
 * dense vector ``size 1024`` ``distance Cosine``
 * ``sparse_vectors`` with ``modifier IDF`` (BM25 sparse via ``rank-bm25``)
@@ -12,14 +12,16 @@ Collection ``pdf-index`` (``config.INDEX_NAME``) is created lazily with:
 
 import uuid
 
+from services.retrieval.base import VectorStore
+
 _QDRANT_DENSE_SIZE = 1024
 
 
-class QdrantIndexAdapter:
+class QdrantIndexAdapter(VectorStore):
     """
-    Thin wrapper around a ``qdrant_client.QdrantClient`` that speaks the.
+    Thin wrapper around a ``qdrant_client.QdrantClient`` implementing the.
 
-    subset of the Pinecone ``Index`` API used in this repo, plus hybrid
+    ``upsert``/``query``/``delete`` store API used in this repo, plus hybrid
     sparse support for ``VectorService``.
     """
 
@@ -140,10 +142,10 @@ class QdrantIndexAdapter:
         scored.sort(key=lambda m: m["score"], reverse=True)
         return scored[:top_k]
 
-    # ------------------------------------------------------------------ Pinecone-compatible API
+    # ------------------------------------------------------------------ store API
 
     def upsert(self, vectors):
-        """``vectors``: list of ``{"id": str, "values": list[float], "metadata": dict, "sparse_values": {"indices": [], "values": []}}``."""
+        """``vectors``: list of ``{"id": str, "values": list[float], "metadata": dict, "sparse_vector": {"indices": [], "values": []}}``."""
         if not vectors:
             return {"upserted": 0}
         self._ensure_collection()
@@ -163,7 +165,7 @@ class QdrantIndexAdapter:
                 vid = str(uuid.uuid5(uuid.NAMESPACE_URL, vid))
             values = v.get("values") or []
             payload = dict(v.get("metadata") or {})
-            sparse = v.get("sparse_values") or v.get("sparse_vector") or v.get("sparse")
+            sparse = v.get("sparse_vector") or v.get("sparse")
             # Cache for python-side fallback
             if sparse:
                 # normalise to dict shape
@@ -411,11 +413,7 @@ class QdrantIndexAdapter:
         self._ensure_collection()
         q_filter = self._to_filter(filter)
 
-        sparse_vector = (
-            kwargs.get("sparse_vector")
-            or kwargs.get("sparse_values")
-            or kwargs.get("sparse")
-        )
+        sparse_vector = kwargs.get("sparse_vector") or kwargs.get("sparse")
         # Normalise sparse_vector from object to dict if needed
         if sparse_vector is not None and hasattr(sparse_vector, "indices"):
             sparse_vector = {
@@ -445,7 +443,7 @@ class QdrantIndexAdapter:
             return {"matches": dense_matches[:top_k]}
 
         try:
-            from services.hybrid import rrf_fusion
+            from services.retrieval.hybrid import rrf_fusion
 
             fused = rrf_fusion([dense_matches, sparse_matches], limit=top_k)
             return {"matches": fused}
@@ -517,7 +515,7 @@ class QdrantIndexAdapter:
         if filter is None:
             return {"deleted": 0}
 
-        # Handle delete_all passed via dict: Pinecone allows
+        # Handle delete_all passed via dict: accept
         # ``delete(delete_all=True)`` – our caller uses keyword.
         q_filter = self._to_filter(filter)
         if q_filter is None:

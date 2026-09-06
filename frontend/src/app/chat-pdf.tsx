@@ -1,4 +1,4 @@
-import { MessageSquare, Send, ChevronRight, ChevronDown, Loader2, Cpu, User, Copy, Check, FileText } from "lucide-react";
+import { MessageSquare, Send, ChevronRight, ChevronDown, Loader2, Cpu, User, Copy, Check, FileText, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import usePdfStore from "@/store/pdf-state";
@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useQuery } from "@tanstack/react-query";
 import { checkIsProcessed, chatStream, getMessages, ISource } from "@/services/files";
+import useSettingsUi from "@/store/settings-ui";
 import { cn } from "@/lib/utils";
 
 interface ChatMessage {
@@ -15,7 +16,18 @@ interface ChatMessage {
   sender: 'user' | 'bot';
   sources?: ISource[];
   failed?: boolean;
+  needsSettings?: boolean;
 }
+
+// Messages the backend returns when chat is impossible without provider
+// settings; these get a shortcut to the Settings dialog.
+const SETTINGS_ERROR_PATTERNS = [
+  "No chat provider configured",
+  "Re-save your provider settings",
+];
+
+const isSettingsError = (message: string) =>
+  SETTINGS_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 
 export default function ChatPDF() {
   const { file } = usePdfStore();
@@ -88,7 +100,12 @@ export default function ChatPDF() {
         },
         onError: (message) => {
           setMessages((prev) =>
-            prev.map((msg) => msg.id === botId ? { ...msg, text: message, failed: true } : msg)
+            prev.map((msg) => msg.id === botId ? {
+              ...msg,
+              text: message,
+              failed: true,
+              needsSettings: isSettingsError(message),
+            } : msg)
           );
         },
         onDone: (sources) => {
@@ -97,10 +114,16 @@ export default function ChatPDF() {
           );
         },
       });
-    } catch {
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "";
       setMessages((prev) =>
         prev.map((msg) => msg.id === botId
-          ? { ...msg, text: "Connection lost. Please ensure the backend server is active.", failed: true }
+          ? {
+              ...msg,
+              text: message || "Connection lost. Please ensure the backend server is active.",
+              failed: true,
+              needsSettings: isSettingsError(message),
+            }
           : msg)
       );
     } finally {
@@ -188,7 +211,10 @@ export default function ChatPDF() {
                     System Response
                   </div>
                   {msg.text ? (
-                    <MarkdownRenderer text={msg.text} />
+                    <>
+                      <MarkdownRenderer text={msg.text} />
+                      {msg.needsSettings && <OpenSettingsLink />}
+                    </>
                   ) : (
                     <span className="flex items-center gap-1.5 py-1" aria-label="Loading agent response">
                       <span className="h-1.5 w-1.5 bg-slate-400 rounded-full animate-bounce" />
@@ -233,6 +259,19 @@ export default function ChatPDF() {
         </p>
       </div>
     </div>
+  );
+}
+
+function OpenSettingsLink() {
+  const openSettings = useSettingsUi((s) => s.open);
+  return (
+    <button
+      onClick={openSettings}
+      className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-red-900 underline uppercase tracking-wider hover:text-red-700 cursor-pointer"
+    >
+      <Settings size={10} />
+      Open Settings
+    </button>
   );
 }
 

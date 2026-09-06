@@ -1,6 +1,7 @@
 import ChatPDF from "./app/chat-pdf";
 import ListPDF from "./app/list-pdf";
 import Navbar from "./app/navbar";
+import SettingsDialog from "./app/settings-dialog";
 import ViewPDF from "./app/view-pdf";
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
           </div>
         </div>
       </main>
+      <SettingsDialog />
     </div>
   );
 }

@@ -1,17 +1,16 @@
 """
 Gated local cross-encoder reranker tests — headless, no model download.
 
-RERANK=true|false gates rerank of 50 hybrid candidates before shape_sources
-keeps top 5. Flag off preserves legacy order; flag on yields reranked,
-deduped, score-ordered results, entirely local CPU.
+The reranker's enabled flag gates rerank of 50 hybrid candidates before
+shape_sources keeps top 5. Flag off preserves legacy order; flag on yields
+reranked, deduped, score-ordered results, entirely local CPU.
 
-All branches use fakes: the cross-encoder is stubbed via _reranker, never
-importing weights, so pytest stays fast and offline.
+All branches use fakes injected through constructors: the cross-encoder is a
+fake model object, the index a fake store, so pytest stays fast and offline.
 """
 
-import config
-from services import reranker
-from services.vector_service import VectorService
+from services.retrieval.reranker import RerankerService
+from services.retrieval.vector_service import VectorService
 from evaluation import evaluator
 
 
@@ -70,37 +69,33 @@ def _matches(n=10):
     ]
 
 
+def make_reranker(enabled=True, model=None) -> RerankerService:
+    """Return a reranker with the gate and model the test chooses."""
+    return RerankerService(model_name="fake-rerank-model", enabled=enabled, model=model)
+
+
+def make_service(matches, reranker=None) -> VectorService:
+    """Return a VectorService over a fake store with an injected reranker."""
+    return VectorService(FakeIndex(matches), reranker)
+
+
 class TestRerankerGate:
     """TestRerankerGate."""
 
-    def test_flag_off_preserves_legacy_order(self, monkeypatch):
+    def test_flag_off_preserves_legacy_order(self):
         """Do test flag off preserves legacy order."""
-        monkeypatch.setenv("RERANK", "false")
-        reranker._reset_for_tests()
-        idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
-        monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
+        service = make_service(_matches(10), make_reranker(enabled=False))
 
-        sources = VectorService.query_vectors(
-            [0.1] * 8, "doc.pdf", query_text="test query"
-        )
+        sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="test query")
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
 
-    def test_flag_on_reranked_order_differs_deduped_and_score_ordered(
-        self, monkeypatch
-    ):
+    def test_flag_on_reranked_order_differs_deduped_and_score_ordered(self):
         """Do test flag on reranked order differs deduped and score ordered."""
-        monkeypatch.setenv("RERANK", "true")
-        reranker._reset_for_tests()
-        reranker._reranker = InvertingModel()
+        service = make_service(
+            _matches(10), make_reranker(enabled=True, model=InvertingModel())
+        )
 
-        idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
-        monkeypatch.setenv("VECTOR_BACKEND", "qdrant")
-
-        sources_on = VectorService.query_vectors(
+        sources_on = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="test query"
         )
         # InvertingModel gives chunk 9 highest, so top 5 should be 9..5
@@ -137,7 +132,6 @@ class TestRerankerGate:
                 },
             },
         ]
-        dup_idx = FakeIndex(dup_matches)
 
         class DupModel:
             """DupModel."""
@@ -146,42 +140,37 @@ class TestRerankerGate:
                 """Do predict."""
                 return [0.1, 0.9, 0.5]
 
-        reranker._reranker = DupModel()
-        monkeypatch.setattr(config, "_pinecone_index", dup_idx)
-        before = VectorService.query_vectors(
-            [0.1] * 8, "doc.pdf", query_text="q", rerank=False
+        dup_service = make_service(
+            dup_matches, make_reranker(enabled=True, model=DupModel())
         )
+        before = dup_service.query_vectors([0.1] * 8, "doc.pdf", query_text="q", rerank=False)
         assert len(before) == 2  # deduped legacy still 2
-        deduped = VectorService.query_vectors(
+        deduped = dup_service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=True
         )
         assert len(deduped) == 2
         assert deduped[0]["content"] == "dup"
         assert deduped[0]["score"] == 0.9
 
-    def test_explicit_rerank_param_overrides_env(self, monkeypatch):
-        # Env says true but explicit False preserves legacy
-        """Do test explicit rerank param overrides env."""
-        monkeypatch.setenv("RERANK", "true")
-        reranker._reset_for_tests()
-        reranker._reranker = InvertingModel()
-        idx = FakeIndex(_matches(10))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+    def test_explicit_rerank_param_overrides_flag(self):
+        # Flag says true but explicit False preserves legacy
+        """Do test explicit rerank param overrides flag."""
+        service = make_service(
+            _matches(10), make_reranker(enabled=True, model=InvertingModel())
+        )
 
-        legacy = VectorService.query_vectors(
+        legacy = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
         )
         assert [s["content"] for s in legacy] == [f"chunk {i}" for i in range(5)]
 
-        reranked = VectorService.query_vectors(
+        reranked = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=True
         )
         assert [s["content"] for s in reranked] != [s["content"] for s in legacy]
 
-    def test_no_query_text_never_reranks(self, monkeypatch):
+    def test_no_query_text_never_reranks(self):
         """Do test no query text never reranks."""
-        monkeypatch.setenv("RERANK", "true")
         calls = []
 
         class CountingModel:
@@ -192,23 +181,18 @@ class TestRerankerGate:
                 calls.append(pairs)
                 return [0] * len(pairs)
 
-        reranker._reset_for_tests()
-        reranker._reranker = CountingModel()
-        idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+        service = make_service(
+            _matches(5), make_reranker(enabled=True, model=CountingModel())
+        )
 
         # No query_text -> no rerank
-        VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text=None)
+        service.query_vectors([0.1] * 8, "doc.pdf", query_text=None)
         assert calls == []
 
-    def test_entirely_local_cpu_no_api(self, monkeypatch):
-        # Ensure rerank path does not hit network: stub _get_reranker and
-        # assert it is the only provider touched
+    def test_entirely_local_cpu_no_api(self):
+        # Ensure rerank path does not hit network: the fake model is the only
+        # provider touched
         """Do test entirely local cpu no api."""
-        monkeypatch.setenv("RERANK", "true")
-        reranker._reset_for_tests()
-
         invoked = {}
 
         class LocalOnly:
@@ -219,30 +203,25 @@ class TestRerankerGate:
                 invoked["device"] = "cpu"  # model was constructed with device=cpu
                 return [float(len(p[1])) for p in pairs]
 
-        reranker._reranker = LocalOnly()
-        idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
+        service = make_service(
+            _matches(5), make_reranker(enabled=True, model=LocalOnly())
+        )
 
-        VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text="hello")
+        service.query_vectors([0.1] * 8, "doc.pdf", query_text="hello")
         assert invoked, "local model should have been invoked"
         # No external call recorded — entirely local
 
     def test_model_load_failure_degrades_to_legacy(self, monkeypatch, capsys):
         """Do test model load failure degrades to legacy."""
-        monkeypatch.setenv("RERANK", "true")
-        reranker._reset_for_tests()
+        reranker_svc = make_reranker(enabled=True)  # no injected model: lazy load
         monkeypatch.setattr(
-            reranker,
-            "_get_reranker",
+            reranker_svc,
+            "_get_model",
             lambda: (_ for _ in ()).throw(RuntimeError("load failed")),
         )
+        service = make_service(_matches(5), reranker_svc)
 
-        idx = FakeIndex(_matches(5))
-        monkeypatch.setattr(config, "_pinecone_index", idx)
-        monkeypatch.setattr(config, "_qdrant_index", None)
-
-        sources = VectorService.query_vectors([0.1] * 8, "doc.pdf", query_text="q")
+        sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="q")
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
         assert "degraded" in capsys.readouterr().out.lower()
 
@@ -250,7 +229,7 @@ class TestRerankerGate:
 class TestEvaluatorReranker:
     """TestEvaluatorReranker."""
 
-    def test_evaluator_retrieve_respects_flag(self, monkeypatch):
+    def test_evaluator_retrieve_respects_flag(self):
         """Do test evaluator retrieve respects flag."""
 
         class FakeIdx:
@@ -266,21 +245,30 @@ class TestEvaluatorReranker:
             """Do embed."""
             return [[0.1] * 4 for _ in texts]
 
-        monkeypatch.setenv("RERANK", "false")
-        reranker._reset_for_tests()
-        reranker._reranker = InvertingModel()
         off = evaluator.retrieve(
-            embed(["q"])[0], "doc.pdf", idx, k=5, query_text="q", rerank=False
+            embed(["q"])[0],
+            "doc.pdf",
+            idx,
+            k=5,
+            query_text="q",
+            rerank=False,
+            reranker=make_reranker(enabled=True, model=InvertingModel()),
         )
         assert [s["content"] for s in off] == [f"chunk {i}" for i in range(5)]
 
         on = evaluator.retrieve(
-            embed(["q"])[0], "doc.pdf", idx, k=5, query_text="q", rerank=True
+            embed(["q"])[0],
+            "doc.pdf",
+            idx,
+            k=5,
+            query_text="q",
+            rerank=True,
+            reranker=make_reranker(enabled=True, model=InvertingModel()),
         )
         assert [s["content"] for s in on] == [f"chunk {i}" for i in range(9, 4, -1)]
 
     def test_hit5_faithfulness_logged_with_and_without_reranking_and_latency_delta(
-        self, monkeypatch, capsys
+        self, capsys
     ):
         # Minimal fixture where reranking flips order but we can still measure hit@5
         """Do test hit5 faithfulness logged with and without reranking and latency delta."""
@@ -368,28 +356,42 @@ class TestEvaluatorReranker:
             return "answer"
 
         # Flag off
-        reranker._reset_for_tests()
-        reranker._reranker = IdentityModel()  # keeps legacy order
         report_off = evaluator.evaluate(
-            fixture, idx, embed, gen, judge_fn=None, k=5, rerank=False
+            fixture,
+            idx,
+            embed,
+            gen,
+            judge_fn=None,
+            k=5,
+            rerank=False,
+            reranker=make_reranker(enabled=True, model=IdentityModel()),
         )
         assert report_off.retrieval.hit_rate in (0.0, 1.0)
 
         # Flag on with inverting model — should change order but still deduped/score-ordered
-        reranker._reset_for_tests()
-        reranker._reranker = InvertingModel()
         capsys.readouterr()  # clear
         report_on = evaluator.evaluate(
-            fixture, idx, embed, gen, judge_fn=None, k=5, rerank=True
+            fixture,
+            idx,
+            embed,
+            gen,
+            judge_fn=None,
+            k=5,
+            rerank=True,
+            reranker=make_reranker(enabled=True, model=InvertingModel()),
         )
         out = capsys.readouterr().out
         assert "rerank" in out.lower()
 
         # Comparison helper logs hit@5/faithfulness delta and latency for 50 docs
-        reranker._reset_for_tests()
-        reranker._reranker = InvertingModel()
         comp = evaluator.evaluate_with_rerank_comparison(
-            fixture, idx, embed, gen, judge_fn=None, k=5
+            fixture,
+            idx,
+            embed,
+            gen,
+            judge_fn=None,
+            k=5,
+            reranker=make_reranker(enabled=True, model=InvertingModel()),
         )
         assert "off" in comp and "on" in comp and "latency_delta_ms" in comp
         cap = capsys.readouterr().out

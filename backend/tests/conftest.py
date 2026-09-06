@@ -1,40 +1,62 @@
 """
 Shared test fixtures.
 
-Convention: tests never talk to real Pinecone, LLM, Postgres, or any file
-storage outside tmp dirs. Dummy environment variables are set before any
-config import so module loading stays offline; anything that would hit a
-network or disk is faked per-test with monkeypatch.
+Convention: tests never talk to real Qdrant, LLM, or Postgres, and every
+upload goes through a fake storage object. A pinned test Settings is
+installed for every test; fakes are constructed per-test and injected
+through the app factory or service constructors rather than patched onto
+modules.
 """
 
-import os
+from pathlib import Path
+
+# Settings loads backend/.env when the app boots; tests must not inherit a
+# developer's values, so dotenv is neutralized before any module imports it.
+import dotenv
+
+dotenv.load_dotenv = lambda *a, **k: False
 
 import pytest
 
-DUMMY_ENV = {
-    "DATABASE_URL": "sqlite:///:memory:",
-    "PINECONE_API_KEY": "dummy-pinecone-key",
-    "MODE": "google",
-    "GOOGLE_API_KEY": "dummy-google-key",
-    "GROQ_API_KEY": "dummy-groq-key",
-    # Demo on by default so flow tests exercise business logic; auth tests
-    # override DEMO_MODE explicitly.
-    "DEMO_MODE": "true",
-}
+import settings as settings_module
+from settings import (
+    AuthSettings,
+    ChunkingSettings,
+    DatabaseSettings,
+    EmbeddingSettings,
+    ParsingSettings,
+    RerankSettings,
+    Settings,
+    StorageSettings,
+    VectorSettings,
+)
 
-# Test modules import app (and trigger config validation) during collection,
-# before any fixture runs, so the dummy environment must be in place at
-# conftest import time too. The autouse fixture below re-applies it per test,
-# since monkeypatch may have reverted individual variables mid-run.
-os.environ.update(DUMMY_ENV)
+# Pinned offline-safe settings: sqlite in memory, deterministic secret, demo
+# on so flow tests exercise business logic (auth tests override demo_mode
+# explicitly). Every group is explicit so a real .env cannot leak through.
+TEST_SETTINGS = Settings(
+    database=DatabaseSettings(database_url="sqlite:///:memory:"),
+    storage=StorageSettings(
+        storage_dir=settings_module.BACKEND_DIR / "data" / "storage"
+    ),
+    vector=VectorSettings(),
+    embedding=EmbeddingSettings(),
+    chunking=ChunkingSettings(),
+    rerank=RerankSettings(),
+    parsing=ParsingSettings(),
+    auth=AuthSettings(jwt_secret="test-jwt-secret", demo_mode=True),
+)
 
 
 @pytest.fixture(autouse=True)
-def dummy_env(monkeypatch):
-    """Provide a complete, offline-safe environment for every test."""
-    # A developer's real .env must not leak into tests: config would
-    # re-read it on reload and the dummy values below would be ignored.
-    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
-    for key, value in DUMMY_ENV.items():
-        monkeypatch.setenv(key, value)
-    return DUMMY_ENV
+def test_settings():
+    """Install the pinned test Settings for the duration of each test."""
+    settings_module.set_settings(TEST_SETTINGS)
+    yield TEST_SETTINGS
+    settings_module.set_settings(None)
+
+
+@pytest.fixture
+def settings_obj():
+    """Return the installed test Settings; tweak group fields via monkeypatch."""
+    return settings_module.get_settings()

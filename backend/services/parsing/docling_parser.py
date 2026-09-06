@@ -8,8 +8,8 @@ requiring a paid OCR API. Heavy deps (``docling`` + ``granite-docling-258M``
 (Docker volume ``hf_cache`` in compose.yaml) so the download only happens
 once.
 
-The parser is reached through :class:`services.document_parser.DocumentParser`
-(same interface as :class:`services.pdf_service.PDFParser`) so swapping parsers
+The parser is reached through :func:`services.parsing.document_parser.resolve_parser`
+(same interface as :class:`services.parsing.pdf_service.PDFParser`) so swapping parsers
 cannot silently change chunk sizes. Tests mock this parser and never download.
 """
 
@@ -20,6 +20,8 @@ import io
 import re
 from collections import Counter
 from typing import List
+
+from services.parsing.document_parser import DocumentParser
 
 # ---------------------------------------------------------------------------
 # Header/footer dedup helper (pure python, no heavy deps)
@@ -115,7 +117,7 @@ def _ensure_docling_available() -> None:
     _try_import_docling()
 
 
-class DoclingParser:
+class DoclingParser(DocumentParser):
     r"""
     Layout-aware PDF parser via Docling (MIT).
 
@@ -123,7 +125,7 @@ class DoclingParser:
       (``| col |``), keeping row boundaries as ``\\n``.
     - Strips repeating headers/footers via dedup (>70% same position).
     - Preserves ``page_no``: :meth:`extract_pages` returns one string per
-      page (1-indexed page_no travels via ``DocumentParser``).
+      page (1-indexed page_no travels via the chunker).
     - Heavy import is lazy so collection never triggers a download.
     """
 
@@ -132,8 +134,7 @@ class DoclingParser:
         """Do is available."""
         return _is_docling_available()
 
-    @staticmethod
-    def extract_pages(pdf_content: bytes) -> List[str]:
+    def extract_pages(self, pdf_content: bytes) -> List[str]:
         """
         Extract one Markdown string per page.
 
@@ -286,15 +287,14 @@ class DoclingParser:
         pages_md = _strip_repeating_headers_footers(pages_md)
         return pages_md
 
-    @staticmethod
-    def extract_text(pdf_content: bytes) -> str:
+    def extract_text(self, pdf_content: bytes) -> str:
         """
         Flat Markdown for backward compatibility (joined pages).
 
         Preserves Markdown tables and hierarchy; callers needing page_no should
         use :meth:`extract_pages`.
         """
-        pages = DoclingParser.extract_pages(pdf_content)
+        pages = self.extract_pages(pdf_content)
         # Join with double newline to keep markdown table block boundaries
         flat = "\n\n".join(p.strip() for p in pages if p.strip())
         # Normalize: collapse 3+ newlines to 2, strip

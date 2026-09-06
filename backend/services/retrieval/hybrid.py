@@ -14,8 +14,7 @@ space bounded without a global vocabulary table. When ``rank-bm25`` is
 installed we could build corpus-level IDF, but the hash+TF path is free,
 deterministic, and sufficient for the portfolio's keyword recall gate.
 
-Fusion defaults to RRF(k=60) per the spec; alpha blend (dense * alpha +
-sparse * (1-alpha)) is used for the Pinecone path which natively blends.
+Fusion is RRF(k=60), applied by Qdrant on the ``sparse`` field at query time.
 """
 
 from __future__ import annotations
@@ -73,7 +72,6 @@ VOCAB_SIZE = 30_000
 
 RRF_K = 60
 DEFAULT_FETCH_K = 50
-DEFAULT_ALPHA = 0.7
 
 
 def tokenize(text: str) -> list[str]:
@@ -91,8 +89,8 @@ def build_sparse_vector(text: str) -> dict:
     Build a BM25-style sparse vector from ``text``.
 
     Returns ``{"indices": [...], "values": [...]}`` sorted by index,
-    compatible with Pinecone's ``sparse_values`` shape and convertible to
-    Qdrant's ``SparseVector``. TF is encoded as ``1 + log(tf)`` (BM25 TF
+    convertible to Qdrant's ``SparseVector``. TF is encoded as ``1 + log(tf)``
+    (BM25 TF
     saturation proxy); IDF is deferred to Qdrant's ``modifier: IDF``. When
     ``rank-bm25`` is installed the same tokenisation is used so the Python
     fallback scorer (``_sparse_dot``) can apply corpus IDF via ``BM25Okapi``.
@@ -173,8 +171,6 @@ def rrf_fusion(
     merged ranking is sorted by fused score descending. ``limit`` caps the
     returned list (default ``FETCH_K=50``). Dedupe by ``id`` keeping the
     highest fused score; ``metadata`` is carried from the first occurrence.
-
-    This is the Qdrant-side fusion; Pinecone uses alpha blend instead.
     """
     fused: dict[str, dict] = {}
     scores: dict[str, float] = {}
@@ -197,66 +193,3 @@ def rrf_fusion(
     if limit is not None:
         ranked = ranked[:limit]
     return ranked
-
-
-def alpha_blend(
-    dense_results: list[dict],
-    sparse_results: list[dict],
-    alpha: float = DEFAULT_ALPHA,
-    limit: int | None = DEFAULT_FETCH_K,
-) -> list[dict]:
-    """
-    Weighted score blend for Pinecone's hybrid path.
-
-    Scores are assumed to be cosine / BM25 in [0,1] already; if sparse
-    scores are unbounded they should be normalised before blending. Here
-    we min-max normalise each list to [0,1] then blend.
-    """
-    if not dense_results and not sparse_results:
-        return []
-
-    def _norm(results: list[dict]) -> dict[str, float]:
-        if not results:
-            return {}
-        vals = [r.get("score", 0.0) for r in results]
-        lo, hi = min(vals), max(vals)
-        spread = hi - lo if hi != lo else 1.0
-        return {
-            str(r.get("id", i)): (r.get("score", 0.0) - lo) / spread
-            for i, r in enumerate(results)
-        }
-
-    d_norm = _norm(dense_results)
-    s_norm = _norm(sparse_results)
-
-    all_ids = set(d_norm) | set(s_norm)
-    dense_by_id = {str(r.get("id", i)): r for i, r in enumerate(dense_results)}
-    sparse_by_id = {str(r.get("id", i)): r for i, r in enumerate(sparse_results)}
-
-    blended: list[dict] = []
-    for doc_id in all_ids:
-        d = d_norm.get(doc_id, 0.0)
-        s = s_norm.get(doc_id, 0.0)
-        score = alpha * d + (1.0 - alpha) * s
-        # Prefer dense metadata, fallback to sparse
-        base = dense_by_id.get(doc_id) or sparse_by_id.get(doc_id) or {}
-        blended.append({**dict(base), "score": float(score), "id": doc_id})
-
-    blended.sort(key=lambda d: d["score"], reverse=True)
-    if limit is not None:
-        blended = blended[:limit]
-    return blended
-
-
-def fuse_via_rrf_or_alpha(
-    dense_results: list[dict],
-    sparse_results: list[dict],
-    method: str = "rrf",
-    alpha: float = DEFAULT_ALPHA,
-    k: int = RRF_K,
-    limit: int | None = DEFAULT_FETCH_K,
-) -> list[dict]:
-    """Do fuse via rrf or alpha."""
-    if method == "alpha":
-        return alpha_blend(dense_results, sparse_results, alpha=alpha, limit=limit)
-    return rrf_fusion([dense_results, sparse_results], k=k, limit=limit)
