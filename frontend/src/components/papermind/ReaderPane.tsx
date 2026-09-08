@@ -109,6 +109,8 @@ export function ReaderPane() {
   const [progress, setProgress] = useState(0);
   const [page, setPage] = useState(1);
   const [numPages, setNumPages] = useState<number | null>(null);
+  const [flashedPage, setFlashedPage] = useState<number | null>(null);
+  const flashTimeoutRef = useRef<number | null>(null);
   const fileData = usePdfFileData(file);
 
   const thumbnailFileData = useMemo(() => (fileData ? { data: fileData.slice() } : null), [fileData]);
@@ -217,12 +219,16 @@ export function ReaderPane() {
     if (!Number.isFinite(target) || target < 1) return;
     if (numPages != null && target > numPages) return;
     setPage(target);
+    setFlashedPage(target);
+    if (flashTimeoutRef.current) window.clearTimeout(flashTimeoutRef.current);
+    flashTimeoutRef.current = window.setTimeout(() => setFlashedPage(null), 1700);
     requestAnimationFrame(() => scrollToPage(target));
   }, [citationTarget, numPages, scrollToPage]);
 
   useEffect(() => {
     return () => {
       if (programmaticTimeoutRef.current) window.clearTimeout(programmaticTimeoutRef.current);
+      if (flashTimeoutRef.current) window.clearTimeout(flashTimeoutRef.current);
     };
   }, []);
 
@@ -498,7 +504,14 @@ export function ReaderPane() {
                         </div>
                       }
                     >
-                      <ReaderDocument file={file} zoom={zoom} onLoadSuccess={setNumPages} data={fileData} />
+                      <ReaderDocument
+                        file={file}
+                        zoom={zoom}
+                        onLoadSuccess={setNumPages}
+                        data={fileData}
+                        activePage={page}
+                        flashedPage={flashedPage}
+                      />
                     </Suspense>
                   </div>
                   {!isProcessed && (

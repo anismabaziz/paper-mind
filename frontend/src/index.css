@@ -259,6 +259,18 @@
 .react-pdf__Page__textContent ::selection {
   background: var(--marker-soft);
 }
+.react-pdf__Page__textContent ::-moz-selection {
+  background: var(--marker-soft);
+}
+.react-pdf__Page__textContent span::selection {
+  background: var(--marker-soft);
+}
+.react-pdf__Page__textContent span::-moz-selection {
+  background: var(--marker-soft);
+}
 .react-pdf__Page__textContent span {
   font-family: inherit;
 }
+/* Ensure TextLayer remains selectable and no viewer chrome leaks in.
+   Only editorial tokens (paper-grain, shadow-sheet, rule, marker, canvas,
+   paper, ink) are used — no viewer default-layout.css is imported. */
