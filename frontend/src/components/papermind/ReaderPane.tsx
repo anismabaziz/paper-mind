@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState, useEffect } from "react";
+import { lazy, Suspense, useRef, useState, useEffect, useMemo, useCallback } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -13,8 +13,10 @@ import {
   MoreHorizontal,
   Columns2,
 } from "lucide-react";
+import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
 import { checkIsProcessed, deleteFile, getFileMeta } from "@/services/files";
+import { getToken } from "@/services/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
@@ -24,7 +26,79 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 
+// Ensure worker is configured even before lazy ReaderDocument loads (for thumbnails)
+if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+}
+
+const thumbnailOptions = {
+  cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+  cMapPacked: true,
+  standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
+};
+
 const ReaderDocument = lazy(() => import("./ReaderDocument"));
+
+function FakePageBars() {
+  return (
+    <span className="flex h-full flex-col gap-[3px]">
+      {Array.from({ length: 11 }).map((_, i) => (
+        <span key={i} className="block h-[2px] rounded-full bg-ink/15" style={{ width: `${55 + ((i * 37) % 45)}%` }} />
+      ))}
+    </span>
+  );
+}
+
+function ThumbnailPlaceholder({ count }: { count: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
+        <div
+          key={n}
+          className="relative aspect-[3/4] overflow-hidden rounded-[2px] border border-rule bg-paper p-1.5 opacity-40"
+        >
+          <FakePageBars />
+          <span className="absolute right-1 bottom-1 font-mono text-[0.55rem] text-ink-faint">{n}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function usePdfFileData(file: { url: string } | null) {
+  const [data, setData] = useState<Uint8Array | null>(null);
+
+  useEffect(() => {
+    if (!file) {
+      setData(null);
+      return;
+    }
+    const url = file.url;
+    let cancelled = false;
+    const controller = new AbortController();
+    async function load() {
+      setData(null);
+      try {
+        const token = getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+        const res = await fetch(url, { headers, signal: controller.signal });
+        if (!res.ok) throw new Error(`Failed to load PDF (${res.status})`);
+        const buf = await res.arrayBuffer();
+        if (!cancelled) setData(new Uint8Array(buf));
+      } catch {
+        if (!cancelled) setData(null);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [file?.url]);
+
+  return data;
+}
 
 export function ReaderPane() {
   const { file, citationTarget } = usePdfStore();
@@ -32,9 +106,15 @@ export function ReaderPane() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(100);
   const [showOutline, setShowOutline] = useState(true);
-  const [progress, setProgress] = useState(18);
+  const [progress, setProgress] = useState(0);
   const [page, setPage] = useState(1);
   const [numPages, setNumPages] = useState<number | null>(null);
+  const fileData = usePdfFileData(file);
+
+  const thumbnailFileData = useMemo(() => (fileData ? { data: fileData.slice() } : null), [fileData]);
+  const isProgrammaticRef = useRef(false);
+  const programmaticTimeoutRef = useRef<number | null>(null);
+
   const checkProcessedQuery = useQuery({
     queryKey: [file?.name, "is-processed"],
     queryFn: () => checkIsProcessed(file!),
@@ -55,15 +135,80 @@ export function ReaderPane() {
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
   const outline = metaQuery.data?.outline ?? [];
 
+  const scrollToPage = useCallback((pageNum: number) => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const target = container.querySelector<HTMLElement>(`[data-page="${pageNum}"]`);
+    if (!target) return;
+    isProgrammaticRef.current = true;
+    if (programmaticTimeoutRef.current) window.clearTimeout(programmaticTimeoutRef.current);
+    // Compute offset relative to scroll container (includes title sheet height)
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const top = targetRect.top - containerRect.top + container.scrollTop;
+    container.scrollTo({ top, behavior: "smooth" });
+    programmaticTimeoutRef.current = window.setTimeout(() => {
+      isProgrammaticRef.current = false;
+    }, 800);
+  }, []);
+
   useEffect(() => {
     // reset page when file changes
     setPage(1);
     setNumPages(null);
+    setProgress(0);
   }, [file?.id]);
 
   useEffect(() => {
     if (numPages && page > numPages) setPage(numPages);
   }, [numPages, page]);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ratio = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
+    setProgress(Math.round(ratio * 100));
+  }, []);
+
+  // IntersectionObserver drives active page highlight; progress ribbon follows real scroll
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || numPages == null || numPages === 0) return;
+
+    let observer: IntersectionObserver | null = null;
+    let timeoutId: number | null = null;
+
+    const setup = () => {
+      const els = root.querySelectorAll<HTMLElement>("[data-page]");
+      if (els.length === 0) {
+        timeoutId = window.setTimeout(setup, 150);
+        return;
+      }
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (isProgrammaticRef.current) return;
+          let best: { page: number; ratio: number } | null = null;
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const pg = Number((entry.target as HTMLElement).dataset.page);
+            if (!Number.isFinite(pg)) continue;
+            if (!best || entry.intersectionRatio > best.ratio) best = { page: pg, ratio: entry.intersectionRatio };
+          }
+          if (best) {
+            setPage(best.page);
+          }
+        },
+        { root, threshold: [0, 0.3, 0.5, 0.7, 1], rootMargin: "0px 0px -20% 0px" },
+      );
+      els.forEach((el) => observer!.observe(el));
+    };
+
+    timeoutId = window.setTimeout(setup, 50);
+    return () => {
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+      observer?.disconnect();
+    };
+  }, [numPages, file?.id, zoom, fileData]);
 
   // Citation page-jump: ChatPane sets citationTarget → scroll Page N into view
   useEffect(() => {
@@ -72,15 +217,14 @@ export function ReaderPane() {
     if (!Number.isFinite(target) || target < 1) return;
     if (numPages != null && target > numPages) return;
     setPage(target);
-    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [citationTarget, numPages]);
+    requestAnimationFrame(() => scrollToPage(target));
+  }, [citationTarget, numPages, scrollToPage]);
 
-  function onScroll() {
-    const el = scrollRef.current;
-    if (!el) return;
-    const ratio = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
-    setProgress(Math.round(18 + ratio * 60));
-  }
+  useEffect(() => {
+    return () => {
+      if (programmaticTimeoutRef.current) window.clearTimeout(programmaticTimeoutRef.current);
+    };
+  }, []);
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-canvas">
@@ -174,7 +318,11 @@ export function ReaderPane() {
           <div className="flex items-center gap-1 border-l border-rule pl-4">
             <button
               type="button"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => {
+                const next = Math.max(1, page - 1);
+                setPage(next);
+                scrollToPage(next);
+              }}
               className="flex size-6 items-center justify-center text-ink-soft hover:text-ink"
               aria-label="Previous page"
             >
@@ -185,7 +333,11 @@ export function ReaderPane() {
             </span>
             <button
               type="button"
-              onClick={() => setPage((p) => Math.min(numPages ?? p, p + 1))}
+              onClick={() => {
+                const next = Math.min(numPages ?? page, page + 1);
+                setPage(next);
+                scrollToPage(next);
+              }}
               className="flex size-6 items-center justify-center text-ink-soft hover:text-ink"
               aria-label="Next page"
             >
@@ -212,8 +364,7 @@ export function ReaderPane() {
                       type="button"
                       onClick={() => {
                         setPage(o.page);
-                        // Scroll the reading sheet to top so the target Page wrapper is visible
-                        scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                        scrollToPage(o.page);
                       }}
                       className={cn(
                         "flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left text-[0.8rem] leading-snug transition-colors",
@@ -230,46 +381,47 @@ export function ReaderPane() {
             )}
 
             <p className="label-meta pt-6 pb-3">Pages</p>
-            <div className="grid grid-cols-2 gap-2">
-              {numPages
-                ? Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
+            {!file || !thumbnailFileData || numPages == null ? (
+              <ThumbnailPlaceholder count={numPages ?? 4} />
+            ) : (
+              <Document file={thumbnailFileData} options={thumbnailOptions} loading={<ThumbnailPlaceholder count={numPages} />}>
+                <div className="grid grid-cols-2 gap-2">
+                  {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
                     <button
                       key={n}
                       type="button"
-                      onClick={() => setPage(n)}
+                      onClick={() => {
+                        setPage(n);
+                        scrollToPage(n);
+                      }}
                       className={cn(
-                        "group relative aspect-[3/4] overflow-hidden rounded-[2px] border bg-paper p-1.5 transition-all",
+                        "group relative aspect-[3/4] overflow-hidden rounded-[2px] border bg-paper transition-all",
                         page === n ? "border-marker shadow-sheet" : "border-rule opacity-70 hover:opacity-100",
                       )}
                     >
-                      <span className="flex h-full flex-col gap-[3px]">
-                        {Array.from({ length: 11 }).map((_, i) => (
-                          <span key={i} className="block h-[2px] rounded-full bg-ink/15" style={{ width: `${55 + ((i * 37) % 45)}%` }} />
-                        ))}
+                      <Page
+                        width={90}
+                        pageNumber={n}
+                        renderTextLayer={false}
+                        renderAnnotationLayer={false}
+                        className="bg-paper [&_canvas]:mx-auto [&_canvas]:block"
+                      />
+                      <span className="pointer-events-none absolute right-1 bottom-1 rounded-sm bg-paper/80 px-0.5 font-mono text-[0.55rem] text-ink-faint">
+                        {n}
                       </span>
-                      <span className="absolute right-1 bottom-1 font-mono text-[0.55rem] text-ink-faint">{n}</span>
                     </button>
-                  ))
-                : Array.from({ length: 4 }, (_, i) => i + 1).map((n) => (
-                    <div
-                      key={n}
-                      className="relative aspect-[3/4] overflow-hidden rounded-[2px] border border-rule bg-paper p-1.5 opacity-40"
-                    >
-                      <span className="flex h-full flex-col gap-[3px]">
-                        {Array.from({ length: 11 }).map((_, i) => (
-                          <span key={i} className="block h-[2px] rounded-full bg-ink/15" style={{ width: `${55 + ((i * 37) % 45)}%` }} />
-                        ))}
-                      </span>
-                      <span className="absolute right-1 bottom-1 font-mono text-[0.55rem] text-ink-faint">{n}</span>
-                    </div>
                   ))}
-            </div>
+                </div>
+              </Document>
+            )}
 
             {file && (
               <div className="mt-6 border-t border-rule pt-4">
                 <p className="label-meta pb-2">Document</p>
                 <p className="font-serif text-xs leading-snug">{file.name}</p>
-                <p className="mt-1 font-mono text-[0.62rem] text-ink-faint">{(file.metadata.size / 1024).toFixed(0)} KB · {file.metadata.content_type}</p>
+                <p className="mt-1 font-mono text-[0.62rem] text-ink-faint">
+                  {(file.metadata.size / 1024).toFixed(0)} KB · {file.metadata.content_type}
+                </p>
                 <span
                   className={cn(
                     "mt-2 inline-flex border px-2 py-0.5 font-mono text-[0.6rem] uppercase tracking-wider",
@@ -284,7 +436,7 @@ export function ReaderPane() {
         )}
 
         {/* Reading sheet */}
-        <div ref={scrollRef} onScroll={onScroll} className="scroll-slim flex-1 overflow-y-auto px-6 py-8">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {!file ? (
             <div className="mx-auto flex min-h-[520px] max-w-[560px] flex-col items-center justify-center">
               <div className="paper-grain w-full bg-paper px-10 py-16 text-center shadow-sheet">
@@ -333,10 +485,12 @@ export function ReaderPane() {
                 <div className="flex items-center justify-between border-b border-rule px-6 py-3">
                   <span className="label-meta">Page {String(page).padStart(2, "0")}</span>
                   <span className="h-px flex-1 mx-3 bg-rule" />
-                  <span className="label-meta">{file.name} · p. {page}</span>
+                  <span className="label-meta">
+                    {file.name} · p. {page}
+                  </span>
                 </div>
                 <div className="relative bg-canvas p-3">
-                  <div id={`page-${page}`} className="overflow-hidden border border-rule bg-white">
+                  <div className="overflow-hidden border border-rule bg-white">
                     <Suspense
                       fallback={
                         <div className="grid h-[760px] place-items-center bg-white">
@@ -344,7 +498,7 @@ export function ReaderPane() {
                         </div>
                       }
                     >
-                      <ReaderDocument file={file} page={page} zoom={zoom} onLoadSuccess={setNumPages} />
+                      <ReaderDocument file={file} zoom={zoom} onLoadSuccess={setNumPages} data={fileData} />
                     </Suspense>
                   </div>
                   {!isProcessed && (
