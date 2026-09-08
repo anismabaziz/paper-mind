@@ -14,7 +14,7 @@ import {
   Columns2,
 } from "lucide-react";
 import usePdfStore from "@/store/pdf-state";
-import { checkIsProcessed, deleteFile } from "@/services/files";
+import { checkIsProcessed, deleteFile, getFileMeta } from "@/services/files";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
@@ -25,12 +25,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const ReaderDocument = lazy(() => import("./ReaderDocument"));
-
-const outline = [
-  { id: "sec-intro", label: "I. Introduction", page: 1 },
-  { id: "sec-why", label: "II. Why Access Control Is Not Enough", page: 2 },
-  { id: "sec-drift", label: "III. Codified Policies and Reasoning Drift", page: 3 },
-];
 
 export function ReaderPane() {
   const { file } = usePdfStore();
@@ -48,12 +42,19 @@ export function ReaderPane() {
     enabled: !!file,
   });
 
+  const metaQuery = useQuery({
+    queryKey: [file?.name, "meta"],
+    queryFn: () => getFileMeta(file!.name),
+    enabled: !!file,
+  });
+
   const deleteMutation = useMutation({
     mutationFn: deleteFile,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
   });
 
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
+  const outline = metaQuery.data?.outline ?? [];
 
   useEffect(() => {
     // reset page when file changes
@@ -190,23 +191,34 @@ export function ReaderPane() {
         {showOutline && (
           <div className="scroll-slim hidden w-56 shrink-0 overflow-y-auto border-r border-rule bg-background/50 px-4 py-5 xl:block">
             <p className="label-meta pb-3">Contents</p>
-            <ul className="space-y-1">
-              {outline.map((o) => (
-                <li key={o.id}>
-                  <button
-                    type="button"
-                    onClick={() => setPage(o.page)}
-                    className={cn(
-                      "flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left text-[0.8rem] leading-snug transition-colors",
-                      page === o.page ? "bg-marker-soft text-ink" : "text-ink-soft hover:bg-paper hover:text-ink",
-                    )}
-                  >
-                    <span className="font-mono text-[0.62rem] text-ink-faint">{o.page}</span>
-                    {o.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {outline.length === 0 ? (
+              <p className="py-2 font-mono text-[0.68rem] text-ink-faint">
+                {metaQuery.isLoading ? "Loading outline…" : "No outline available"}
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {outline.map((o, idx) => (
+                  <li key={`${o.title}-${o.page}-${idx}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPage(o.page);
+                        // Scroll the reading sheet to top so the target Page wrapper is visible
+                        scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className={cn(
+                        "flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left text-[0.8rem] leading-snug transition-colors",
+                        page === o.page ? "bg-marker-soft text-ink" : "text-ink-soft hover:bg-paper hover:text-ink",
+                      )}
+                      style={{ paddingLeft: `${8 + Math.max(0, o.level - 1) * 12}px` }}
+                    >
+                      <span className="font-mono text-[0.62rem] text-ink-faint">{o.page}</span>
+                      {o.title}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
             <p className="label-meta pt-6 pb-3">Pages</p>
             <div className="grid grid-cols-2 gap-2">

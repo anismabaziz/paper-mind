@@ -7,6 +7,7 @@ instances it uses from that wiring. Tests assemble the same graph by
 passing fakes through the factory's parameters instead of patching modules.
 """
 
+import io
 import json
 import os
 import time
@@ -200,6 +201,34 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": "Invalid email or password"}), 401
 
         return jsonify({"token": issue_token(email)}), 200
+
+    @app.route("/files/<path:filename>/meta", methods=["GET"])
+    @require_auth
+    def get_file_meta(filename):
+        # Exists check first so unknown names are 404, not 500 from storage.
+        if not storage.exists(filename):
+            return jsonify({"error": "File not found"}), 404
+        try:
+            raw = storage.open(filename)
+            # FakeStorage returns bytes directly; LocalStorage also returns bytes.
+            if hasattr(raw, "read"):
+                raw = raw.read()
+            if isinstance(raw, bytearray):
+                raw = bytes(raw)
+            import pymupdf
+
+            with pymupdf.open("pdf", io.BytesIO(raw)) as doc:
+                toc = doc.get_toc()  # [level, title, page, ...]
+                outline = [
+                    {"title": t[1], "page": t[2], "level": t[0]} for t in toc
+                ]
+                page_count = len(doc)
+            return jsonify({"pageCount": page_count, "outline": outline}), 200
+        except ValueError as e:
+            # storage traversal guard
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/storage/<path:filename>", methods=["GET"])
     @require_auth

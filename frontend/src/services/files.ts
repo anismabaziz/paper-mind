@@ -154,3 +154,20 @@ export async function getMessages(filename: string) {
     })
   ).data;
 }
+
+export interface FileMetaOutlineEntry {
+  title: string;
+  page: number;
+  level: number;
+}
+
+export interface FileMeta {
+  pageCount: number;
+  outline: FileMetaOutlineEntry[];
+}
+
+export async function getFileMeta(name: string) {
+  return (
+    await client.get<FileMeta>(`/files/${encodeURIComponent(name)}/meta`)
+  ).data;
+}
