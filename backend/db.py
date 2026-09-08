@@ -33,6 +33,10 @@ def _new_id():
     return uuid.uuid4().hex
 
 
+# Singleton PK for the global app_settings row.
+APP_SETTINGS_ID = "app"
+
+
 class Base(DeclarativeBase):
     """Base."""
 
@@ -46,9 +50,27 @@ class FileRecord(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     filename: Mapped[str] = mapped_column(String(255), unique=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    original_filename: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, default=None
+    )
     is_processed: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AppSettings(Base):
+    """Global application settings (single-row, no user FK)."""
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: APP_SETTINGS_ID)
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(128))
+    encrypted_api_key: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -220,7 +242,11 @@ class Repository:
     @staticmethod
     def _file_dict(record):
         return _to_dict(
-            record, filename=record.filename, is_processed=record.is_processed
+            record,
+            filename=record.filename,
+            title=record.title,
+            original_filename=record.original_filename,
+            is_processed=record.is_processed,
         )
 
     # -- users ------------------------------------------------------------
@@ -281,6 +307,51 @@ class Repository:
             record.encrypted_api_key = encrypted_api_key
             session.flush()
             return self._settings_dict(record)
+
+    # -- app settings -----------------------------------------------------
+
+    @staticmethod
+    def _app_settings_dict(record: "AppSettings") -> dict:
+        return {
+            "id": record.id,
+            "provider": record.provider,
+            "model": record.model,
+            "encrypted_api_key": record.encrypted_api_key,
+            "updated_at": (
+                record.updated_at.isoformat() if record.updated_at else None
+            ),
+        }
+
+    @staticmethod
+    def _app_settings_row(session) -> "AppSettings | None":
+        """Fetch the singleton row, handling legacy PKs."""
+        record = session.get(AppSettings, APP_SETTINGS_ID)
+        if record is None:
+            record = session.scalars(select(AppSettings).limit(1)).first()
+        return record
+
+    def get_app_settings(self) -> dict | None:
+        """Return the global app settings row, or None if not yet configured."""
+        with self._session_factory() as session:
+            record = self._app_settings_row(session)
+            if not record:
+                return None
+            return self._app_settings_dict(record)
+
+    def upsert_app_settings(
+        self, provider: str, model: str, encrypted_api_key: str
+    ) -> dict:
+        """Create or update the singleton app settings row."""
+        with self._session_factory() as session, session.begin():
+            record = self._app_settings_row(session)
+            if record is None:
+                record = AppSettings(id=APP_SETTINGS_ID)
+                session.add(record)
+            record.provider = provider
+            record.model = model
+            record.encrypted_api_key = encrypted_api_key
+            session.flush()
+            return self._app_settings_dict(record)
 
     # -- conversations ----------------------------------------------------
 
