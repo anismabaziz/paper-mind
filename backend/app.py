@@ -144,6 +144,15 @@ def _settings_payload(stored, plaintext_key=None):
     }
 
 
+def _normalize_source(source: dict) -> dict:
+    """Return a copy with canonical ``page`` (from ``page_no`` if needed)."""
+    if "page" in source:
+        page = source["page"]
+    else:
+        page = source.get("page_no")
+    return {**source, "page": page if page is not None else None}
+
+
 def _register_routes(app: Flask, services: Services) -> None:
     """Register every route as a closure over the injected services."""
     storage_dir = services.settings.storage.storage_dir
@@ -391,9 +400,10 @@ def _register_routes(app: Flask, services: Services) -> None:
         try:
             repository.add_message(conversation_id, "user", query)
             query_embedding = embedding_service.embed_texts(query)[0]
-            sources = vector_service.query_vectors(
+            raw_sources = vector_service.query_vectors(
                 query_embedding, filename, query_text=query
             )
+            sources = [_normalize_source(s) for s in raw_sources]
             context = "\n\n".join(source["content"] for source in sources)
         except Exception as e:
             print(f"/response retrieval error: {e}")

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -26,6 +26,11 @@ type Props = {
 export default function ReaderDocument({ file, page, zoom, onLoadSuccess }: Props) {
   const [data, setData] = useState<Uint8Array | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // pdf.js transfers the buffer to the worker, detaching the original.
+  // Cloning keeps the state buffer intact so re-renders / StrictMode
+  // double-mounts don't hit "ArrayBuffer is detached and could not be cloned".
+  const fileData = useMemo(() => (data ? { data: data.slice() } : null), [data]);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +71,7 @@ export default function ReaderDocument({ file, page, zoom, onLoadSuccess }: Prop
     );
   }
 
-  if (!data) {
+  if (!data || !fileData) {
     return (
       <div className="grid h-[760px] place-items-center bg-white">
         <p className="font-mono text-xs text-ink-faint">Loading document…</p>
@@ -83,7 +88,7 @@ export default function ReaderDocument({ file, page, zoom, onLoadSuccess }: Prop
 
   return (
     <Document
-      file={{ data }}
+      file={fileData}
       options={options}
       onLoadSuccess={({ numPages }: { numPages: number }) => onLoadSuccess(numPages)}
       onLoadError={(error: Error) => setFetchError(error.message)}

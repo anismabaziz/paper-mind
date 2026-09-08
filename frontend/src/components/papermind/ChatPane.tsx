@@ -28,6 +28,7 @@ const suggestedPrompts = [
 
 function SourceList({ sources }: { sources: ISource[] }) {
   const [open, setOpen] = useState(true);
+  const setCitationTarget = usePdfStore((s) => s.setCitationTarget);
   return (
     <div className="mt-4 border-t border-rule pt-3">
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between text-ink-faint hover:text-ink">
@@ -38,13 +39,29 @@ function SourceList({ sources }: { sources: ISource[] }) {
         <ol className="mt-3 space-y-3">
           {sources.map((s, idx) => {
             const conf = Math.round((s.score ?? 0) * 100);
+            const hasPage = s.page != null;
+            const citationButton = (
+              <span className="font-mono text-[0.62rem] tracking-wide text-ink-faint">
+                <span className="text-marker">[{idx + 1}]</span> {s.document} · chunk {s.chunk_index}
+                {hasPage ? ` · p. ${s.page}` : ""}
+              </span>
+            );
             return (
               <li key={idx}>
-                <div className="group block w-full border-l-2 border-rule py-0.5 pl-3 text-left transition-colors hover:border-marker">
+                <button
+                  type="button"
+                  disabled={!hasPage}
+                  onClick={() => {
+                    if (hasPage) setCitationTarget(s.page);
+                  }}
+                  className={cn(
+                    "group block w-full border-l-2 py-0.5 pl-3 text-left transition-colors",
+                    hasPage ? "border-rule hover:border-marker cursor-pointer" : "border-rule cursor-default",
+                  )}
+                  title={hasPage ? `Jump to page ${s.page}` : undefined}
+                >
                   <span className="flex items-baseline justify-between gap-2">
-                    <span className="font-mono text-[0.62rem] tracking-wide text-ink-faint">
-                      <span className="text-marker">[{idx + 1}]</span> {s.document} · chunk {s.chunk_index}
-                    </span>
+                    {citationButton}
                     <span className="font-mono text-[0.6rem] text-ink-faint">{conf}%</span>
                   </span>
                   <span className="mt-1 block font-serif text-[0.85rem] leading-snug text-ink-soft italic">“{s.content.slice(0, 220)}”</span>
@@ -54,7 +71,7 @@ function SourceList({ sources }: { sources: ISource[] }) {
                     </span>
                     <span className="font-mono text-[0.58rem] text-ink-faint">{conf}% match</span>
                   </span>
-                </div>
+                </button>
               </li>
             );
           })}

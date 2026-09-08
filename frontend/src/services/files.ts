@@ -66,6 +66,7 @@ export interface ISource {
   document: string;
   chunk_index: number;
   score: number;
+  page: number | null;
 }
 
 interface IStreamHandlers {

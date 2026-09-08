@@ -27,7 +27,7 @@ import {
 const ReaderDocument = lazy(() => import("./ReaderDocument"));
 
 export function ReaderPane() {
-  const { file } = usePdfStore();
+  const { file, citationTarget } = usePdfStore();
   const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(100);
@@ -35,7 +35,6 @@ export function ReaderPane() {
   const [progress, setProgress] = useState(18);
   const [page, setPage] = useState(1);
   const [numPages, setNumPages] = useState<number | null>(null);
-
   const checkProcessedQuery = useQuery({
     queryKey: [file?.name, "is-processed"],
     queryFn: () => checkIsProcessed(file!),
@@ -65,6 +64,16 @@ export function ReaderPane() {
   useEffect(() => {
     if (numPages && page > numPages) setPage(numPages);
   }, [numPages, page]);
+
+  // Citation page-jump: ChatPane sets citationTarget → scroll Page N into view
+  useEffect(() => {
+    if (citationTarget == null || citationTarget.page == null) return;
+    const target = citationTarget.page;
+    if (!Number.isFinite(target) || target < 1) return;
+    if (numPages != null && target > numPages) return;
+    setPage(target);
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [citationTarget, numPages]);
 
   function onScroll() {
     const el = scrollRef.current;
@@ -327,7 +336,7 @@ export function ReaderPane() {
                   <span className="label-meta">{file.name} · p. {page}</span>
                 </div>
                 <div className="relative bg-canvas p-3">
-                  <div className="overflow-hidden border border-rule bg-white">
+                  <div id={`page-${page}`} className="overflow-hidden border border-rule bg-white">
                     <Suspense
                       fallback={
                         <div className="grid h-[760px] place-items-center bg-white">
@@ -351,8 +360,6 @@ export function ReaderPane() {
                   <span className="label-meta">{file.name}</span>
                   <span className="label-meta">{String(page).padStart(2, "0")}</span>
                 </div>
-                {/* margin rail */}
-                <span className="pointer-events-none absolute inset-y-0 left-6 hidden w-px bg-rule lg:block" />
               </div>
 
               {/* Figure caption mock to keep editorial rhythm */}
