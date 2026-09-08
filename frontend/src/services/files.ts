@@ -66,6 +66,7 @@ export interface ISource {
   document: string;
   chunk_index: number;
   score: number;
+  page: number | null;
 }
 
 interface IStreamHandlers {
@@ -152,5 +153,22 @@ export async function getMessages(filename: string) {
     await client.get<IGetMessages>("/messages", {
       params: { filename }
     })
+  ).data;
+}
+
+export interface FileMetaOutlineEntry {
+  title: string;
+  page: number;
+  level: number;
+}
+
+export interface FileMeta {
+  pageCount: number;
+  outline: FileMetaOutlineEntry[];
+}
+
+export async function getFileMeta(name: string) {
+  return (
+    await client.get<FileMeta>(`/files/${encodeURIComponent(name)}/meta`)
   ).data;
 }

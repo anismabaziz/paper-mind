@@ -1,50 +1,28 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+@import "tailwindcss" source(none);
+@source "../src";
 @import "tw-animate-css";
-
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
-  --radius: 0.5rem;
-  --background: oklch(0.99 0.002 240);
-  --foreground: oklch(0.15 0.005 240);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0.005 240);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0.005 240);
-  --primary: oklch(0.28 0.05 250); /* Deep Slate/Navy */
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.96 0.005 240);
-  --secondary-foreground: oklch(0.15 0.005 240);
-  --muted: oklch(0.95 0.005 240);
-  --muted-foreground: oklch(0.45 0.005 240);
-  --accent: oklch(0.94 0.005 240);
-  --accent-foreground: oklch(0.15 0.005 240);
-  --destructive: oklch(0.55 0.15 25);
-  --border: oklch(0.92 0.005 240);
-  --input: oklch(0.92 0.005 240);
-  --ring: oklch(0.4 0.05 250);
-}
-
-.dark {
-  --background: oklch(0.12 0.005 240);
-  --foreground: oklch(0.98 0 0);
-  --card: oklch(0.16 0.005 240);
-  --card-foreground: oklch(0.98 0 0);
-  --popover: oklch(0.16 0.005 240);
-  --popover-foreground: oklch(0.98 0 0);
-  --primary: oklch(0.85 0.02 240);
-  --primary-foreground: oklch(0.12 0.005 240);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-}
+/*
+ * PaperMind editorial system.
+ * Warm studio paper, carbon ink, vermilion markup, and sage metadata.
+ */
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 2px);
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-md: calc(var(--radius) - 1px);
+  --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  --font-sans: "Rubik", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Rubik", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -60,54 +38,239 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+
+  /* PaperMind semantics */
+  --color-paper: var(--paper);
+  --color-paper-edge: var(--paper-edge);
+  --color-canvas: var(--canvas);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-rule: var(--rule);
+  --color-marker: var(--marker);
+  --color-marker-soft: var(--marker-soft);
+  --color-quote: var(--quote);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --shadow-sheet: 0 1px 1px oklch(0.2 0 0 / 0.08), 0 16px 32px -20px oklch(0.2 0 0 / 0.24);
+  --shadow-rail: 1px 0 0 var(--rule);
+}
+
+:root {
+  --radius: 0.25rem;
+
+  --paper: oklch(0.985 0.006 82);
+  --paper-edge: oklch(0.93 0.01 80);
+  --canvas: oklch(0.955 0.008 82);
+  --ink: oklch(0.24 0.008 55);
+  --ink-soft: oklch(0.46 0.015 55);
+  --ink-faint: oklch(0.6 0.025 145);
+  --rule: oklch(0.24 0.008 55 / 0.14);
+  --marker: oklch(0.58 0.19 30);
+  --marker-soft: oklch(0.58 0.19 30 / 0.09);
+  --quote: oklch(0.88 0.07 84);
+
+  --background: oklch(0.965 0.01 82);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.995 0.004 90);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: oklch(0.98 0.008 88);
+  --secondary: oklch(0.93 0.008 84);
+  --secondary-foreground: var(--ink);
+  --muted: oklch(0.94 0.007 84);
+  --muted-foreground: var(--ink-soft);
+  --accent: var(--marker);
+  --accent-foreground: oklch(0.98 0.008 88);
+  --destructive: oklch(0.55 0.2 27);
+  --destructive-foreground: oklch(0.98 0.008 88);
+  --border: var(--rule);
+  --input: oklch(0.23 0.014 60 / 0.16);
+  --ring: oklch(0.47 0.145 28 / 0.4);
+
+  --chart-1: oklch(0.47 0.145 28);
+  --chart-2: oklch(0.6 0.09 190);
+  --chart-3: oklch(0.5 0.07 250);
+  --chart-4: oklch(0.75 0.13 90);
+  --chart-5: oklch(0.55 0.1 150);
+  --sidebar: oklch(0.985 0.004 80);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--marker);
+  --sidebar-primary-foreground: oklch(0.98 0.008 88);
+  --sidebar-accent: oklch(0.93 0.008 84);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--rule);
+  --sidebar-ring: oklch(0.47 0.145 28 / 0.4);
+}
+
+.dark {
+  --paper: oklch(0.24 0.012 70);
+  --paper-edge: oklch(0.3 0.014 70);
+  --canvas: oklch(0.18 0.01 70);
+  --ink: oklch(0.93 0.01 85);
+  --ink-soft: oklch(0.74 0.012 80);
+  --ink-faint: oklch(0.58 0.012 80);
+  --rule: oklch(0.93 0.01 85 / 0.12);
+  --marker: oklch(0.68 0.13 32);
+  --marker-soft: oklch(0.68 0.13 32 / 0.16);
+  --quote: oklch(0.5 0.09 92);
+
+  --background: oklch(0.16 0.01 70);
+  --foreground: var(--ink);
+  --card: oklch(0.21 0.011 70);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.21 0.011 70);
+  --popover-foreground: var(--ink);
+  --primary: oklch(0.93 0.01 85);
+  --primary-foreground: oklch(0.2 0.011 70);
+  --secondary: oklch(0.26 0.012 70);
+  --secondary-foreground: var(--ink);
+  --muted: oklch(0.26 0.012 70);
+  --muted-foreground: var(--ink-soft);
+  --accent: var(--marker);
+  --accent-foreground: oklch(0.16 0.01 70);
+  --destructive: oklch(0.65 0.18 27);
+  --destructive-foreground: oklch(0.16 0.01 70);
+  --border: var(--rule);
+  --input: oklch(0.93 0.01 85 / 0.18);
+  --ring: oklch(0.68 0.13 32 / 0.45);
+
+  --sidebar: oklch(0.19 0.01 70);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--marker);
+  --sidebar-primary-foreground: oklch(0.16 0.01 70);
+  --sidebar-accent: oklch(0.26 0.012 70);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--rule);
+  --sidebar-ring: oklch(0.68 0.13 32 / 0.45);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
-    font-family: 'Inter', system-ui, sans-serif;
+    border-color: var(--color-border);
   }
+
   body {
-    @apply bg-slate-50 text-slate-900 overflow-hidden h-screen w-screen;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
   }
 }
 
-.glass {
-  @apply bg-white border border-slate-200/80 shadow-sm;
+/* Small-caps meta label used across the chrome */
+@utility label-meta {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--ink-faint);
 }
 
-.glass-dark {
-  @apply bg-slate-950 border border-slate-800 shadow-md;
+/* Highlighter pass over reader text */
+@utility mark-quote {
+  background-image: linear-gradient(
+    to bottom,
+    transparent 12%,
+    color-mix(in oklab, var(--quote) 55%, transparent) 12%,
+    color-mix(in oklab, var(--quote) 55%, transparent) 92%,
+    transparent 92%
+  );
+  box-decoration-break: clone;
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+@utility mark-cited {
+  background-color: var(--marker-soft);
+  box-shadow: inset 0 -1px 0 0 color-mix(in oklab, var(--marker) 45%, transparent);
+  box-decoration-break: clone;
 }
 
-::-webkit-scrollbar-track {
-  @apply bg-transparent;
+/* Restrained print texture on the reading sheet */
+@utility paper-grain {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.22;
+    background-image: radial-gradient(
+      color-mix(in oklab, var(--ink) 5%, transparent) 0.5px,
+      transparent 0.5px
+    );
+    background-size: 4px 4px;
+  }
 }
 
-::-webkit-scrollbar-thumb {
-  @apply bg-slate-400/20 rounded-full hover:bg-slate-400/40 transition-colors;
+@keyframes flash-cite {
+  0% {
+    background-color: color-mix(in oklab, var(--marker) 22%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 
-.neo-shadow {
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+@utility flash-cite {
+  animation: flash-cite 1.6s ease-out;
 }
 
-.active-glow {
-  @apply relative overflow-hidden;
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.active-glow::after {
-  content: '';
-  @apply absolute inset-0 bg-primary/5 pointer-events-none;
+@utility rise-in {
+  animation: rise-in 400ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
+@utility scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--ink) 18%, transparent) transparent;
+}
 
+/* react-pdf TextLayer selection and typography inherits editorial tokens */
+.react-pdf__Page__textContent ::selection {
+  background: var(--marker-soft);
+}
+.react-pdf__Page__textContent ::-moz-selection {
+  background: var(--marker-soft);
+}
+.react-pdf__Page__textContent span::selection {
+  background: var(--marker-soft);
+}
+.react-pdf__Page__textContent span::-moz-selection {
+  background: var(--marker-soft);
+}
+.react-pdf__Page__textContent span {
+  font-family: inherit;
+}
+/* Ensure TextLayer remains selectable and no viewer chrome leaks in.
+   Only editorial tokens (paper-grain, shadow-sheet, rule, marker, canvas,
+   paper, ink) are used — no viewer default-layout.css is imported. */

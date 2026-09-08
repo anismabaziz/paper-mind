@@ -27,18 +27,18 @@ export default function SettingsDialog() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-md glass rounded-xl shadow-lg p-6 relative">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md border border-rule bg-paper shadow-sheet p-6 relative">
         <button
           onClick={close}
           aria-label="Close settings"
-          className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 cursor-pointer"
+          className="absolute right-4 top-4 text-ink-faint hover:text-ink cursor-pointer"
         >
           <X size={16} />
         </button>
         <div className="flex items-center gap-2 mb-5">
-          <Settings size={16} className="text-slate-600" />
-          <h2 className="font-semibold text-sm uppercase tracking-wider text-slate-700">
+          <Settings size={16} className="text-ink-soft" />
+          <h2 className="font-mono text-xs font-semibold uppercase tracking-widest text-ink">
             Settings
           </h2>
         </div>
@@ -85,7 +85,7 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
       }}
       className="space-y-3"
     >
-      <p className="text-xs text-slate-500 leading-relaxed">
+      <p className="font-serif text-xs leading-relaxed text-ink-soft">
         Sign in to manage your own chat provider and API key. Demo mode runs
         on the shared demo user instead.
       </p>
@@ -94,7 +94,7 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
         placeholder="Email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        className="h-10 bg-white border-slate-200 text-xs"
+        className="h-10 bg-paper border-rule text-xs focus-visible:border-ink focus-visible:ring-0"
         autoComplete="email"
       />
       <Input
@@ -102,11 +102,11 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
         placeholder="Password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        className="h-10 bg-white border-slate-200 text-xs"
+        className="h-10 bg-paper border-rule text-xs focus-visible:border-ink focus-visible:ring-0"
         autoComplete="current-password"
       />
       {error && <FormFeedback kind="error" text={error} />}
-      <Button type="submit" className="w-full h-10 bg-primary text-white text-xs" disabled={submitting}>
+      <Button type="submit" className="w-full h-10 bg-ink text-paper text-xs hover:bg-ink/90 border-ink" disabled={submitting}>
         {submitting && <Loader2 size={14} className="animate-spin" />}
         Sign in
       </Button>
@@ -202,14 +202,14 @@ function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
     <div className="space-y-3">
       {settingsQuery.isLoading ? (
         <div className="flex justify-center py-6">
-          <Loader2 size={18} className="animate-spin text-slate-400" />
+          <Loader2 size={18} className="animate-spin text-ink-faint" />
         </div>
       ) : settingsQuery.isError ? (
         <FormFeedback kind="error" text={errorMessage(settingsQuery.error, "Could not load settings.")} />
       ) : (
         <>
           <label className="block">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Provider</span>
+            <span className="label-meta">Provider</span>
             <select
               value={provider}
               onChange={(e) => {
@@ -228,7 +228,7 @@ function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
           </label>
 
           <label className="block">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Model</span>
+            <span className="label-meta">Model</span>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
@@ -245,13 +245,13 @@ function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
           </label>
 
           <label className="block">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">API key</span>
+            <span className="label-meta">API key</span>
             <Input
               type="password"
               placeholder={savedMaskedKey ? `Saved key ${savedMaskedKey} — paste a new key to replace` : "Paste your API key"}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              className="h-10 bg-white border-slate-200 text-xs"
+              className="h-10 bg-paper border-rule text-xs focus-visible:border-ink focus-visible:ring-0"
               autoComplete="off"
             />
           </label>
@@ -262,7 +262,7 @@ function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
             <Button
               onClick={handleSave}
               disabled={!provider || !model || !apiKey || saving}
-              className="flex-1 h-10 bg-primary text-white text-xs"
+              className="flex-1 h-10 bg-ink text-paper text-xs hover:bg-ink/90"
             >
               {saving && <Loader2 size={14} className="animate-spin" />}
               Save
@@ -271,7 +271,7 @@ function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
               onClick={handleTest}
               disabled={saving || testing}
               variant="outline"
-              className="flex-1 h-10 text-xs border-slate-200 bg-white hover:bg-slate-50"
+              className="flex-1 h-10 text-xs border-rule bg-paper hover:bg-canvas text-ink"
             >
               {testing && <Loader2 size={14} className="animate-spin" />}
               Test connection
@@ -280,7 +280,7 @@ function SettingsForm({ onUnauthorized }: { onUnauthorized: () => void }) {
           {getToken() && (
             <button
               onClick={handleLogout}
-              className="text-[10px] font-medium text-slate-400 hover:text-slate-600 uppercase tracking-wider cursor-pointer"
+              className="font-mono text-[0.62rem] font-medium uppercase tracking-widest text-ink-faint hover:text-ink cursor-pointer"
             >
               Sign out
             </button>
@@ -295,10 +295,10 @@ function FormFeedback({ kind, text }: { kind: "success" | "error"; text: string 
   return (
     <p
       className={cn(
-        "text-xs rounded px-3 py-2 border",
+        "rounded-sm border px-3 py-2 font-mono text-xs",
         kind === "success"
-          ? "bg-green-50 border-green-200 text-green-800"
-          : "bg-red-50 border-red-200 text-red-800"
+          ? "border-ink/20 bg-canvas text-ink"
+          : "border-destructive/20 bg-destructive/5 text-destructive"
       )}
     >
       {text}
@@ -322,4 +322,4 @@ function errorMessage(e: unknown, fallback: string): string {
 }
 
 const selectClass =
-  "h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-slate-50 disabled:text-slate-400";
+  "h-10 w-full rounded-sm border border-rule bg-paper px-3 text-xs text-ink focus:outline-none focus:border-ink disabled:bg-canvas disabled:text-ink-faint font-mono";

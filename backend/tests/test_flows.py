@@ -342,14 +342,13 @@ def test_ask_streams_tokens_and_persists_sources(client, fake_vectors):
     done_name, done_data = events[-1]
     assert done_name == "done"
     assert done_data["done"] is True
-    assert done_data["sources"] == [
-        {
-            "content": "chunk about topic",
-            "document": "doc.pdf",
-            "chunk_index": 0,
-            "score": 0.92,
-        }
-    ]
+    assert len(done_data["sources"]) == 1
+    src = done_data["sources"][0]
+    assert src["content"] == "chunk about topic"
+    assert src["document"] == "doc.pdf"
+    assert src["chunk_index"] == 0
+    assert src["score"] == 0.92
+    assert "page" in src
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
     assert [(m["sender"], m["text"]) for m in history] == [

@@ -7,6 +7,7 @@ instances it uses from that wiring. Tests assemble the same graph by
 passing fakes through the factory's parameters instead of patching modules.
 """
 
+import io
 import json
 import os
 import time
@@ -143,6 +144,15 @@ def _settings_payload(stored, plaintext_key=None):
     }
 
 
+def _normalize_source(source: dict) -> dict:
+    """Return a copy with canonical ``page`` (from ``page_no`` if needed)."""
+    if "page" in source:
+        page = source["page"]
+    else:
+        page = source.get("page_no")
+    return {**source, "page": page if page is not None else None}
+
+
 def _register_routes(app: Flask, services: Services) -> None:
     """Register every route as a closure over the injected services."""
     storage_dir = services.settings.storage.storage_dir
@@ -200,6 +210,34 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": "Invalid email or password"}), 401
 
         return jsonify({"token": issue_token(email)}), 200
+
+    @app.route("/files/<path:filename>/meta", methods=["GET"])
+    @require_auth
+    def get_file_meta(filename):
+        # Exists check first so unknown names are 404, not 500 from storage.
+        if not storage.exists(filename):
+            return jsonify({"error": "File not found"}), 404
+        try:
+            raw = storage.open(filename)
+            # FakeStorage returns bytes directly; LocalStorage also returns bytes.
+            if hasattr(raw, "read"):
+                raw = raw.read()
+            if isinstance(raw, bytearray):
+                raw = bytes(raw)
+            import pymupdf
+
+            with pymupdf.open("pdf", io.BytesIO(raw)) as doc:
+                toc = doc.get_toc()  # [level, title, page, ...]
+                outline = [
+                    {"title": t[1], "page": t[2], "level": t[0]} for t in toc
+                ]
+                page_count = len(doc)
+            return jsonify({"pageCount": page_count, "outline": outline}), 200
+        except ValueError as e:
+            # storage traversal guard
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/storage/<path:filename>", methods=["GET"])
     @require_auth
@@ -362,9 +400,10 @@ def _register_routes(app: Flask, services: Services) -> None:
         try:
             repository.add_message(conversation_id, "user", query)
             query_embedding = embedding_service.embed_texts(query)[0]
-            sources = vector_service.query_vectors(
+            raw_sources = vector_service.query_vectors(
                 query_embedding, filename, query_text=query
             )
+            sources = [_normalize_source(s) for s in raw_sources]
             context = "\n\n".join(source["content"] for source in sources)
         except Exception as e:
             print(f"/response retrieval error: {e}")

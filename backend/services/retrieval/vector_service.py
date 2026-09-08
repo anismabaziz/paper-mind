@@ -51,12 +51,14 @@ def matches_to_sources(matches, filename):
             if isinstance(match, dict)
             else (getattr(match, "score", 0.0) or 0.0)
         )
+        page_no = metadata.get("page_no")
         sources.append(
             {
                 "content": content,
                 "document": metadata.get("pdf_name", filename),
                 "chunk_index": metadata.get("chunk_index", 0),
-                "page_no": metadata.get("page_no"),
+                "page_no": page_no,
+                "page": page_no,
                 "content_hash": metadata.get("content_hash") or _content_hash(content),
                 "score": float(score),
             }

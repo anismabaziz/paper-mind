@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     create_engine,
@@ -92,6 +93,7 @@ class Source(Base):
     document: Mapped[str] = mapped_column(String(255))
     chunk_index: Mapped[int] = mapped_column()
     score: Mapped[float] = mapped_column()
+    page: Mapped[int | None] = mapped_column(Integer, default=None, nullable=True)
 
 
 class User(Base):
@@ -322,6 +324,7 @@ class Repository:
                         document=source["document"],
                         chunk_index=source["chunk_index"],
                         score=source["score"],
+                        page=source.get("page", source.get("page_no")),
                     )
                 )
             return message.id
@@ -366,6 +369,7 @@ class Repository:
             "document": source.document,
             "chunk_index": source.chunk_index,
             "score": source.score,
+            "page": source.page,
         }
 
     def delete_messages(self, conversation_id: str) -> None:
