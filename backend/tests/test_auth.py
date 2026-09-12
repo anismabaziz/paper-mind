@@ -1,84 +1,59 @@
 """
-Auth tests: hashing, token issue/verify, demo bypass.
+Auth removal tests: every endpoint is open, no JWT is issued or verified.
 
-Auth flows run against a fake repository (dict-backed users) so no database
-is touched; endpoint tests go through the Flask test client with the fakes
-injected through the app factory.
+Replaces the legacy multi-user auth tests. The app runs as a single-instance
+open-source workspace; no token is required and no /auth/* routes exist.
 """
 
-import datetime
+import pytest
 from dataclasses import replace
 
-import jwt as pyjwt
-import pytest
-
 from app import Services, create_app
-from services.accounts import auth_service
-from services.accounts.auth_service import (
-    AuthError,
-    hash_password,
-    issue_token,
-    verify_password,
-    verify_token,
-)
-
-
-class FakeUserRepository:
-    """FakeUserRepository."""
-
-    def __init__(self):
-        """Initialize."""
-        self.users = {}
-
-    def create_user(self, email, password_hash):
-        """Do create user."""
-        self.users[email] = password_hash
-        return {"id": "u1", "email": email}
-
-    def get_user_by_email(self, email):
-        """Do get user by email."""
-        if email not in self.users:
-            return None
-        return {"id": "u1", "email": email, "password_hash": self.users[email]}
-
-    def list_files(self):
-        """Do list files."""
-        return []
 
 
 class FakeStorage:
     """FakeStorage."""
 
     def list(self):
-        """Do list."""
+        """List."""
         return []
 
     def url(self, filename):
-        """Do url."""
+        """Url."""
         return f"/storage/{filename}"
 
 
 class FakeVectorService:
-    """Counts wipe requests; auth tests never touch real vectors."""
+    """Counts wipe requests; no real vectors."""
 
     def __init__(self):
         """Initialize."""
         self.deleted_all = False
 
     def delete_all(self):
-        """Do delete all."""
+        """Delete all."""
         self.deleted_all = True
 
 
 @pytest.fixture
 def fake_repo():
-    """Do fake repo."""
-    return FakeUserRepository()
+    """Provide a minimal fake repository for open-endpoint checks."""
+    class _Repo:
+        def list_files(self):
+            return []
+
+        def get_app_settings(self):
+            return None
+
+        def get_file(self, filename):
+            return None
+
+    return _Repo()
 
 
 @pytest.fixture
 def client(fake_repo, settings_obj):
-    """App composed with endpoint fakes; nothing here touches real dependencies."""
+    """Provide a test client wired to fakes."""
     services = replace(
         Services.from_settings(settings_obj),
         repository=fake_repo,
@@ -90,165 +65,47 @@ def client(fake_repo, settings_obj):
         yield client
 
 
-def auth_headers(email="a@b.com"):
-    """Do auth headers."""
-    return {"Authorization": f"Bearer {issue_token(email)}"}
-
-
-# -- hashing ----------------------------------------------------------------
-
-
-def test_hash_is_not_plaintext_and_verifies():
-    """Do test hash is not plaintext and verifies."""
-    stored = hash_password("hunter2")
-    assert stored != "hunter2"
-    assert verify_password("hunter2", stored)
-    assert not verify_password("wrong", stored)
-
-
-def test_hashes_are_salted():
-    """Do test hashes are salted."""
-    assert hash_password("hunter2") != hash_password("hunter2")
-
-
-# -- tokens -----------------------------------------------------------------
-
-
-def test_token_roundtrip(settings_obj):
-    """Do test token roundtrip."""
-    token = issue_token("a@b.com")
-    assert verify_token(token) == "a@b.com"
-
-
-def test_garbage_token_rejected(settings_obj):
-    """Do test garbage token rejected."""
-    with pytest.raises(AuthError):
-        verify_token("not-a-jwt")
-
-
-def test_wrong_key_rejected(monkeypatch, settings_obj):
-    """Do test wrong key rejected."""
-    token = issue_token("a@b.com")
-    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "a-different-secret")
-    with pytest.raises(AuthError):
-        verify_token(token)
-
-
-def test_expired_token_rejected(monkeypatch, settings_obj):
-    """Do test expired token rejected."""
-    monkeypatch.setattr(settings_obj.auth, "jwt_secret", "fixed-secret")
-    now = datetime.datetime.now(datetime.timezone.utc)
-    expired = pyjwt.encode(
-        {"sub": "a@b.com", "exp": now - datetime.timedelta(minutes=1)},
-        "fixed-secret",
-        algorithm="HS256",
-    )
-    with pytest.raises(AuthError, match="expired"):
-        verify_token(expired)
-
-
-# -- register / login -------------------------------------------------------
-
-
-def test_register_creates_user_with_bcrypt_hash_and_returns_token(client, fake_repo):
-    """Do test register creates user with bcrypt hash and returns token."""
-    response = client.post(
-        "/auth/register", json={"email": "A@B.com", "password": "hunter2"}
-    )
-
-    assert response.status_code == 201
-    assert response.get_json()["token"]
-    stored = fake_repo.users["a@b.com"]  # normalized to lowercase
-    assert stored != "hunter2"
-    assert verify_password("hunter2", stored)
-
-
-def test_register_rejects_duplicate_email(client, fake_repo):
-    """Do test register rejects duplicate email."""
-    client.post("/auth/register", json={"email": "a@b.com", "password": "x"})
-    response = client.post("/auth/register", json={"email": "a@b.com", "password": "y"})
-    assert response.status_code == 409
-
-
-def test_register_requires_email_and_password(client):
-    """Do test register requires email and password."""
-    assert client.post("/auth/register", json={}).status_code == 400
-
-
-def test_login_returns_usable_token(client, fake_repo):
-    """Do test login returns usable token."""
-    client.post("/auth/register", json={"email": "a@b.com", "password": "hunter2"})
-
-    response = client.post(
-        "/auth/login", json={"email": "a@b.com", "password": "hunter2"}
-    )
-
-    assert response.status_code == 200
-    assert verify_token(response.get_json()["token"]) == "a@b.com"
-
-
-def test_login_rejects_bad_credentials(client, fake_repo):
-    """Do test login rejects bad credentials."""
-    client.post("/auth/register", json={"email": "a@b.com", "password": "hunter2"})
-    assert (
-        client.post(
-            "/auth/login", json={"email": "a@b.com", "password": "nope"}
-        ).status_code
-        == 401
-    )
-    assert (
-        client.post(
-            "/auth/login", json={"email": "nobody@x.com", "password": "hunter2"}
-        ).status_code
-        == 401
-    )
-
-
-# -- endpoint enforcement ---------------------------------------------------
-
-
-def test_demo_mode_allows_protected_endpoints_without_token(client, monkeypatch, settings_obj):
-    """Do test demo mode allows protected endpoints without token."""
-    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
+def test_open_endpoints_return_non_401_without_token(client):
+    """All remaining routes return non-401 without any Authorization header."""
+    # GET /files, GET /settings are 200 in open mode
+    assert client.get("/files").status_code != 401
     assert client.get("/files").status_code == 200
+    assert client.get("/settings").status_code != 401
+    assert client.get("/settings").status_code == 200
+
+    # POST /upload without file is 400, not 401
+    assert client.post("/upload", data={}).status_code != 401
+
+    # POST /response without provider is 400 (no settings), not 401
+    resp = client.post("/response", json={"query": "hi", "filename": "doc.pdf"})
+    assert resp.status_code != 401
+
+    # POST /delete-embeddings is open
+    assert client.post("/delete-embeddings").status_code != 401
 
 
-def test_demo_off_rejects_missing_token(client, monkeypatch, settings_obj):
-    """Do test demo off rejects missing token."""
-    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
-    response = client.get("/files")
-    assert response.status_code == 401
-    assert "token" in response.get_json()["error"].lower()
+def test_auth_routes_are_gone(client):
+    """Legacy /auth/* routes no longer exist."""
+    assert client.post("/auth/register", json={}).status_code == 404
+    assert client.post("/auth/login", json={}).status_code == 404
 
 
-def test_demo_off_rejects_invalid_token(client, monkeypatch, settings_obj):
-    """Do test demo off rejects invalid token."""
-    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
-    response = client.get("/files", headers={"Authorization": "Bearer garbage"})
-    assert response.status_code == 401
+def test_jwt_code_is_gone():
+    """JWT issuance/verification helpers no longer exist."""
+    import services.accounts.auth_service as auth
+
+    assert not hasattr(auth, "issue_token")
+    assert not hasattr(auth, "verify_token")
+    assert not hasattr(auth, "require_auth")
 
 
-def test_demo_off_accepts_valid_token(client, monkeypatch, settings_obj):
-    """Do test demo off accepts valid token."""
-    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
-    assert client.get("/files", headers=auth_headers()).status_code == 200
-
-
-def test_wipe_requires_post_and_auth(client, monkeypatch, settings_obj):
-    """Do test wipe requires post and auth."""
-    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
-    assert client.get("/delete-embeddings").status_code == 405
-    assert client.post("/delete-embeddings").status_code == 401
-
-    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
-    assert client.post("/delete-embeddings").status_code == 200
-
-
-def test_storage_download_is_gated(client, monkeypatch, settings_obj):
-    """Do test storage download is gated."""
-    monkeypatch.setattr(settings_obj.auth, "demo_mode", False)
-    assert client.get("/storage/doc.pdf").status_code == 401
-
-    monkeypatch.setattr(settings_obj.auth, "demo_mode", True)
-    # 404 (not 401): demo on lets the request through to the storage layer.
+def test_no_authorization_header_required_for_storage(client):
+    """Storage download goes to 404 (not 401) when file missing."""
+    # Without auth, missing file is 404, not 401
     assert client.get("/storage/doc.pdf").status_code == 404
+
+
+def test_delete_embeddings_method_still_post(client):
+    """DELETE embeddings still requires POST, but no auth."""
+    assert client.get("/delete-embeddings").status_code == 405
+    assert client.post("/delete-embeddings").status_code == 200

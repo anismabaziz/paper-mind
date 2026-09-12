@@ -26,6 +26,7 @@ import usePdfStore from "@/store/pdf-state";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef } from "react";
 import type { File as DbFile } from "@/types/db";
+import { displayTitle } from "@/types/db";
 
 export default function ListPDF() {
   const queryClient = useQueryClient();
@@ -207,7 +208,7 @@ export default function ListPDF() {
                     "text-[12px] font-medium truncate transition-colors",
                     selectedFile?.id === file.id ? "text-slate-950 font-semibold" : "text-slate-700"
                   )}>
-                    {file.name.replace(/\.[^/.]+$/, "")}
+                    {displayTitle(file)}
                   </p>
                   {isProcessing && (
                     <div className="flex items-center gap-1 font-semibold text-[8px] uppercase tracking-wider text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">

@@ -33,6 +33,10 @@ def _new_id():
     return uuid.uuid4().hex
 
 
+# Singleton PK for the global app_settings row.
+APP_SETTINGS_ID = "app"
+
+
 class Base(DeclarativeBase):
     """Base."""
 
@@ -46,9 +50,27 @@ class FileRecord(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     filename: Mapped[str] = mapped_column(String(255), unique=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    original_filename: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, default=None
+    )
     is_processed: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AppSettings(Base):
+    """Global application settings (single-row, no user FK)."""
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: APP_SETTINGS_ID)
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(128))
+    encrypted_api_key: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -94,35 +116,6 @@ class Source(Base):
     chunk_index: Mapped[int] = mapped_column()
     score: Mapped[float] = mapped_column()
     page: Mapped[int | None] = mapped_column(Integer, default=None, nullable=True)
-
-
-class User(Base):
-    """User."""
-
-    __tablename__ = "users"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
-    email: Mapped[str] = mapped_column(String(255), unique=True)
-    password_hash: Mapped[str] = mapped_column(String(128))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-
-class UserSetting(Base):
-    """UserSetting."""
-
-    __tablename__ = "user_settings"
-
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
-    )
-    provider: Mapped[str] = mapped_column(String(32))
-    model: Mapped[str] = mapped_column(String(128))
-    encrypted_api_key: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
 
 
 def _engine_kwargs(url: str):
@@ -177,13 +170,29 @@ class Repository:
 
     # -- files ----------------------------------------------------------
 
-    def create_file(self, filename: str) -> dict:
+    def create_file(
+        self,
+        filename: str,
+        title: str | None = None,
+        original_filename: str | None = None,
+    ) -> dict:
         """Do create file."""
         with self._session_factory() as session, session.begin():
-            record = FileRecord(filename=filename)
+            record = FileRecord(
+                filename=filename, title=title, original_filename=original_filename
+            )
             session.add(record)
             session.flush()
             return self._file_dict(record)
+
+    def set_file_title(self, filename: str, title: str) -> None:
+        """Persist a derived title for the file identified by storage filename."""
+        with self._session_factory() as session, session.begin():
+            record = session.scalars(
+                select(FileRecord).where(FileRecord.filename == filename)
+            ).first()
+            if record:
+                record.title = title
 
     def get_file(self, filename: str) -> dict | None:
         """Do get file."""
@@ -220,37 +229,19 @@ class Repository:
     @staticmethod
     def _file_dict(record):
         return _to_dict(
-            record, filename=record.filename, is_processed=record.is_processed
+            record,
+            filename=record.filename,
+            title=record.title,
+            original_filename=record.original_filename,
+            is_processed=record.is_processed,
         )
 
-    # -- users ------------------------------------------------------------
-
-    def create_user(self, email: str, password_hash: str) -> dict:
-        """Do create user."""
-        with self._session_factory() as session, session.begin():
-            user = User(email=email, password_hash=password_hash)
-            session.add(user)
-            session.flush()
-            return {"id": user.id, "email": user.email}
-
-    def get_user_by_email(self, email: str) -> dict | None:
-        """Do get user by email."""
-        with self._session_factory() as session:
-            user = session.scalars(select(User).where(User.email == email)).first()
-            if not user:
-                return None
-            return {
-                "id": user.id,
-                "email": user.email,
-                "password_hash": user.password_hash,
-            }
-
-    # -- user settings ----------------------------------------------------
+    # -- app settings -----------------------------------------------------
 
     @staticmethod
-    def _settings_dict(record: UserSetting) -> dict:
+    def _app_settings_dict(record: "AppSettings") -> dict:
         return {
-            "user_id": record.user_id,
+            "id": record.id,
             "provider": record.provider,
             "model": record.model,
             "encrypted_api_key": record.encrypted_api_key,
@@ -259,28 +250,36 @@ class Repository:
             ),
         }
 
-    def get_user_settings(self, user_id: str) -> dict | None:
-        """Do get user settings."""
+    @staticmethod
+    def _app_settings_row(session) -> "AppSettings | None":
+        """Fetch the singleton row, handling legacy PKs."""
+        record = session.get(AppSettings, APP_SETTINGS_ID)
+        if record is None:
+            record = session.scalars(select(AppSettings).limit(1)).first()
+        return record
+
+    def get_app_settings(self) -> dict | None:
+        """Return the global app settings row, or None if not yet configured."""
         with self._session_factory() as session:
-            record = session.get(UserSetting, user_id)
+            record = self._app_settings_row(session)
             if not record:
                 return None
-            return self._settings_dict(record)
+            return self._app_settings_dict(record)
 
-    def upsert_user_settings(
-        self, user_id: str, provider: str, model: str, encrypted_api_key: str
+    def upsert_app_settings(
+        self, provider: str, model: str, encrypted_api_key: str
     ) -> dict:
-        """Do upsert user settings."""
+        """Create or update the singleton app settings row."""
         with self._session_factory() as session, session.begin():
-            record = session.get(UserSetting, user_id)
+            record = self._app_settings_row(session)
             if record is None:
-                record = UserSetting(user_id=user_id)
+                record = AppSettings(id=APP_SETTINGS_ID)
                 session.add(record)
             record.provider = provider
             record.model = model
             record.encrypted_api_key = encrypted_api_key
             session.flush()
-            return self._settings_dict(record)
+            return self._app_settings_dict(record)
 
     # -- conversations ----------------------------------------------------
 

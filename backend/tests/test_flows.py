@@ -21,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import Services, create_app
-from db import Base, Repository, User, UserSetting
+from db import Base, Repository, AppSettings
 from services.accounts.secrets_service import encrypt_api_key
 from services.llm.base import ChatCredentials
 from services.parsing.document_parser import Chunk
@@ -38,20 +38,10 @@ def repo():
     )
     Base.metadata.create_all(engine)
     repository = Repository(sessionmaker(bind=engine))
-    # Demo mode resolves chat to the seeded demo user, whose settings the
-    # chat route requires before it will answer.
-    with repository._session_factory() as session, session.begin():
-        demo = User(email="demo@papermind.local", password_hash="x")
-        session.add(demo)
-        session.flush()
-        session.add(
-            UserSetting(
-                user_id=demo.id,
-                provider="groq",
-                model="openai/gpt-oss-120b",
-                encrypted_api_key=encrypt_api_key("sk-test-chat-key"),
-            )
-        )
+    # Global app settings row is required before chat will answer.
+    repository.upsert_app_settings(
+        "groq", "openai/gpt-oss-120b", encrypt_api_key("sk-test-chat-key")
+    )
     return repository
 
 
@@ -410,9 +400,9 @@ def test_provider_failure_surfaces_without_fallback():
 
 
 def test_chat_without_settings_asks_user_to_configure(client, repo):
-    """A user with no saved settings gets a settings-oriented 400, not an LLM call."""
+    """No saved global settings yields a settings-oriented 400, not an LLM call."""
     with repo._session_factory() as session, session.begin():
-        session.query(UserSetting).delete(synchronize_session=False)
+        session.query(AppSettings).delete(synchronize_session=False)
 
     filename = upload(client).get_json()["file"]["name"]
     response = client.post("/response", json={"query": "what?", "filename": filename})

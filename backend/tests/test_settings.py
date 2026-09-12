@@ -8,8 +8,8 @@ import providers
 import settings as settings_module
 from settings import (
     Settings,
+    app_secret_warning,
     get_settings,
-    jwt_secret_warning,
     validate,
 )
 
@@ -47,8 +47,7 @@ def test_defaults_cover_every_group(monkeypatch):
         "RERANK_MODEL",
         "RERANK",
         "USE_DOCLING",
-        "JWT_SECRET",
-        "DEMO_MODE",
+        "APP_SECRET",
         monkeypatch=monkeypatch,
     )
     monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
@@ -65,8 +64,7 @@ def test_defaults_cover_every_group(monkeypatch):
     assert s.rerank.rerank_model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
     assert s.rerank.enabled is False
     assert s.parsing.use_docling == "auto"
-    assert s.auth.jwt_secret is None
-    assert s.auth.demo_mode is False
+    assert s.auth.app_secret is None
 
 
 def test_env_overrides_bind_to_groups(monkeypatch):
@@ -76,8 +74,7 @@ def test_env_overrides_bind_to_groups(monkeypatch):
     monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
     monkeypatch.setenv("CHUNK_SIZE_TOKENS", "256")
     monkeypatch.setenv("RERANK", "true")
-    monkeypatch.setenv("JWT_SECRET", "s3cret")
-    monkeypatch.setenv("DEMO_MODE", "TRUE")
+    monkeypatch.setenv("APP_SECRET", "s3cret")
 
     s = Settings()
 
@@ -85,8 +82,7 @@ def test_env_overrides_bind_to_groups(monkeypatch):
     assert s.vector.qdrant_url == "http://qdrant:6333"
     assert s.chunking.chunk_size_tokens == 256
     assert s.rerank.enabled is True
-    assert s.auth.jwt_secret == "s3cret"
-    assert s.auth.demo_mode is True
+    assert s.auth.app_secret == "s3cret"
 
 
 def test_building_settings_never_raises_without_env(monkeypatch):
@@ -118,43 +114,36 @@ def test_validate_exits_with_named_variable_in_message(capsys, monkeypatch):
     assert "Traceback" not in stderr
 
 
-def test_validate_warns_when_jwt_secret_unset_outside_demo(capsys, monkeypatch):
-    """Do test validate warns when jwt secret unset outside demo."""
+def test_validate_warns_when_app_secret_unset(capsys, monkeypatch):
+    """Do test validate warns when app secret unset."""
     monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
-    monkeypatch.setenv("DEMO_MODE", "false")
-    _clear("JWT_SECRET", monkeypatch=monkeypatch)
+    _clear("APP_SECRET", monkeypatch=monkeypatch)
 
     validate()
 
     stderr = capsys.readouterr().err
-    assert "JWT_SECRET is unset" in stderr
+    assert "APP_SECRET" in stderr
 
 
-def test_validate_is_quiet_in_demo_mode_without_secret(capsys, monkeypatch):
-    """Do test validate is quiet in demo mode without secret."""
+def test_validate_is_quiet_when_app_secret_set(capsys, monkeypatch):
+    """Do test validate is quiet when app secret set."""
     monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
-    monkeypatch.setenv("DEMO_MODE", "true")
-    _clear("JWT_SECRET", monkeypatch=monkeypatch)
+    monkeypatch.setenv("APP_SECRET", "s3cret")
 
     validate()
 
     assert capsys.readouterr().err == ""
 
 
-def test_jwt_secret_warning_helper(monkeypatch):
-    """Do test jwt secret warning helper."""
+def test_app_secret_warning_helper(monkeypatch):
+    """Do test app secret warning helper."""
     monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
 
-    monkeypatch.setenv("DEMO_MODE", "false")
-    _clear("JWT_SECRET", monkeypatch=monkeypatch)
-    assert "JWT_SECRET" in jwt_secret_warning(Settings())
+    _clear("APP_SECRET", monkeypatch=monkeypatch)
+    assert "APP_SECRET" in app_secret_warning(Settings())
 
-    monkeypatch.setenv("JWT_SECRET", "s3cret")
-    assert jwt_secret_warning(Settings()) is None
-
-    monkeypatch.delenv("JWT_SECRET", raising=False)
-    monkeypatch.setenv("DEMO_MODE", "true")
-    assert jwt_secret_warning(Settings()) is None
+    monkeypatch.setenv("APP_SECRET", "s3cret")
+    assert app_secret_warning(Settings()) is None
 
 
 def test_accessor_returns_process_wide_instance(monkeypatch):
@@ -190,7 +179,7 @@ def test_booting_without_env_exits_readably(capsys, monkeypatch):
     backend_dir = pathlib.Path(__file__).resolve().parent.parent
     # Empty-string values shadow any local .env (dotenv does not override
     # existing vars) and count as missing to the validator.
-    # Provider keys are per-user settings now; only DATABASE_URL is required.
+    # Provider keys are app-settings-backed now; only DATABASE_URL is required.
     result = subprocess.run(
         [sys.executable, "-c", "from app import create_app; create_app()"],
         capture_output=True,

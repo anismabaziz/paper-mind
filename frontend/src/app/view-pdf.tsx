@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { checkIsProcessed, deleteFile } from "@/services/files";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { displayTitle } from "@/types/db";
 
 export default function ViewPDF() {
   const { file } = usePdfStore();
@@ -34,7 +35,7 @@ export default function ViewPDF() {
         <div className="flex items-center gap-2">
           <File size={16} className="text-slate-600" />
           <h3 className="font-semibold text-xs uppercase tracking-wider text-slate-700 truncate max-w-[200px]">
-            {file ? file.name.replace(/\.[^/.]+$/, "") : "Document Viewer"}
+            {file ? displayTitle(file) : "Document Viewer"}
           </h3>
         </div>
 
@@ -74,7 +75,7 @@ export default function ViewPDF() {
             <iframe
               src={`${file.url}#toolbar=0&navpanes=0&scrollbar=0`}
               className="w-full h-full border-none bg-white"
-              title={file.name}
+              title={displayTitle(file)}
             ></iframe>
           </div>
         ) : (
