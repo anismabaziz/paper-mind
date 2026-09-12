@@ -3,7 +3,6 @@ import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import type { File as FileType } from "@/types/db";
-import { cn } from "@/lib/utils";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -125,19 +124,14 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
         const isFlashed = flashedPage === n;
         const shouldRenderPage = isInWindow || isFlashed;
         return (
-          <div
-            key={n}
-            id={`page-${n}`}
-            data-page={n}
-            className={cn("scroll-mt-2 bg-white flex justify-center", isFlashed && "flash-cite")}
-          >
+          <div key={n} id={`page-${n}`} data-page={n} className="scroll-mt-2 bg-white flex justify-center">
             {shouldRenderPage ? (
               <Page
                 pageNumber={n}
                 width={pageWidth}
                 renderTextLayer
                 renderAnnotationLayer
-                className={cn("mx-auto bg-white block", isFlashed && "mark-cited")}
+                className="mx-auto bg-white block"
               />
             ) : (
               <div
