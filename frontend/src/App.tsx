@@ -12,7 +12,7 @@ export default function App() {
       <div className="hidden lg:flex lg:w-64 lg:shrink-0">
         <LibraryRail />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <ReaderPane />
       </div>
       <div className="hidden lg:flex lg:w-[26rem] lg:shrink-0">
