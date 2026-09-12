@@ -44,7 +44,7 @@ TEST_SETTINGS = Settings(
     chunking=ChunkingSettings(),
     rerank=RerankSettings(),
     parsing=ParsingSettings(),
-    auth=AuthSettings(jwt_secret="test-jwt-secret", demo_mode=True),
+    auth=AuthSettings(app_secret="test-app-secret"),
 )
 
 

@@ -142,21 +142,19 @@ class ParsingSettings(BaseSettings):
 
 class AuthSettings(BaseSettings):
     """
-    JWT signing and demo mode.
+    App secret for encrypting stored provider API keys.
 
-    The JWT secret also derives the Fernet key that encrypts stored user
-    API keys, so changing it invalidates those keys.
+    The Fernet key is derived from ``APP_SECRET`` (SHA-256, urlsafe base64).
+    ``JWT_SECRET`` is accepted as a legacy alias so existing deployments
+    keep working, but ``APP_SECRET`` is the documented name.
+    Changing it invalidates previously encrypted keys.
     """
 
     model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
-    jwt_secret: str | None = Field(default=None, validation_alias="JWT_SECRET")
-    demo_mode: bool = Field(default=False, validation_alias="DEMO_MODE")
-
-    @field_validator("demo_mode", mode="before")
-    @classmethod
-    def _coerce(cls, value):
-        return _parse_bool(value)
+    app_secret: str | None = Field(
+        default=None, validation_alias=AliasChoices("APP_SECRET", "JWT_SECRET")
+    )
 
 
 class Settings(BaseSettings):
@@ -195,14 +193,21 @@ def set_settings(settings: Settings | None) -> None:
     _settings = settings
 
 
-def jwt_secret_warning(settings: Settings) -> str | None:
-    """Return the warning message when the JWT secret is unset outside demo mode."""
-    if settings.auth.demo_mode or settings.auth.jwt_secret:
+def app_secret_warning(settings: Settings) -> str | None:
+    """Return a warning when APP_SECRET is unset (keys won't survive restarts)."""
+    if settings.auth.app_secret:
         return None
     return (
-        "Warning: DEMO_MODE is off but JWT_SECRET is unset; issued tokens "
-        "will stop working after a restart. Set JWT_SECRET in .env."
+        "Warning: APP_SECRET is unset; stored provider keys are encrypted "
+        "with a per-process fallback and will not decrypt after a restart. "
+        "Set APP_SECRET in .env."
     )
+
+
+# Backwards compatibility: older imports reference jwt_secret_warning.
+def jwt_secret_warning(settings: Settings) -> str | None:
+    """Legacy alias for app_secret_warning."""
+    return app_secret_warning(settings)
 
 
 def validate(settings: Settings | None = None) -> None:
@@ -222,6 +227,6 @@ def validate(settings: Settings | None = None) -> None:
         )
         sys.exit(1)
 
-    warning = jwt_secret_warning(settings)
+    warning = app_secret_warning(settings)
     if warning:
         print(warning, file=sys.stderr)

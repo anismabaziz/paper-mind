@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from flask import (
     Flask,
     Response,
-    g,
     jsonify,
     request,
     send_from_directory,
@@ -29,15 +28,7 @@ from flask_cors import CORS
 import settings
 from db import Repository
 from providers import get_vector_index
-from services.accounts.auth_service import (
-    hash_password,
-    is_demo_mode,
-    issue_token,
-    require_auth,
-    verify_password,
-)
 from services.accounts.chat_settings_service import (
-    DEMO_EMAIL,
     SUPPORTED_MODELS,
     SettingsError,
     mask_key,
@@ -169,50 +160,11 @@ def _register_routes(app: Flask, services: Services) -> None:
         # the value directly in an iframe pointed at the API host.
         return f"{request.host_url.rstrip('/')}{storage.url(filename)}"
 
-    def current_user():
-        """
-        Resolve the user whose settings this request touches.
-
-        Demo mode has no token, so every request operates on the seeded demo
-        user; authenticated requests use the token's subject email.
-        """
-        email = DEMO_EMAIL if is_demo_mode() else getattr(g, "user_email", None)
-        if not email:
-            return None
-        return repository.get_user_by_email(email)
-
     @app.route("/health", methods=["GET"])
     def get_health():
         return jsonify({"response": "OK"}), 200
 
-    @app.route("/auth/register", methods=["POST"])
-    def register():
-        data = request.get_json() or {}
-        email = (data.get("email") or "").strip().lower()
-        password = data.get("password") or ""
-        if not email or not password:
-            return jsonify({"error": "Email and password are required"}), 400
-
-        if repository.get_user_by_email(email):
-            return jsonify({"error": "Email is already registered"}), 409
-
-        user = repository.create_user(email, hash_password(password))
-        return jsonify({"message": "User registered", "token": issue_token(email)}), 201
-
-    @app.route("/auth/login", methods=["POST"])
-    def login():
-        data = request.get_json() or {}
-        email = (data.get("email") or "").strip().lower()
-        password = data.get("password") or ""
-
-        user = repository.get_user_by_email(email)
-        if not user or not verify_password(password, user["password_hash"]):
-            return jsonify({"error": "Invalid email or password"}), 401
-
-        return jsonify({"token": issue_token(email)}), 200
-
     @app.route("/files/<path:filename>/meta", methods=["GET"])
-    @require_auth
     def get_file_meta(filename):
         # Exists check first so unknown names are 404, not 500 from storage.
         if not storage.exists(filename):
@@ -240,12 +192,10 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": str(e)}), 500
 
     @app.route("/storage/<path:filename>", methods=["GET"])
-    @require_auth
     def download_file(filename):
         return send_from_directory(storage_dir, filename)
 
     @app.route("/upload", methods=["POST"])
-    @require_auth
     def upload_file():
         if "file" not in request.files:
             return jsonify({"error": "No File Provided"}), 400
@@ -275,7 +225,6 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": str(e)}), 500
 
     @app.route("/file/is-processed", methods=["POST"])
-    @require_auth
     def check_processed():
         data = request.get_json()
         filename = data.get("filename")
@@ -289,7 +238,6 @@ def _register_routes(app: Flask, services: Services) -> None:
         return jsonify({"is_processed": file["is_processed"]})
 
     @app.route("/process-file", methods=["POST"])
-    @require_auth
     def process_file():
         try:
             data = request.get_json()
@@ -348,7 +296,6 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": str(e)}), 500
 
     @app.route("/response", methods=["POST"])
-    @require_auth
     def get_response():
         data = request.get_json() or {}
         query = data.get("query")
@@ -357,12 +304,8 @@ def _register_routes(app: Flask, services: Services) -> None:
         if not query or not filename:
             return jsonify({"error": "Query and Filename are required"}), 400
 
-        # Chat runs on the requester's own provider settings; without saved
-        # settings there is no key to answer with, so the turn is refused here.
-        user = current_user()
-        if not user:
-            return jsonify({"error": "User not found"}), 401
-        stored = repository.get_user_settings(user["id"])
+        # Chat runs against the global app settings row.
+        stored = repository.get_app_settings()
         if not stored:
             return jsonify(
                 {"error": "No chat provider configured. Add a provider and API key in Settings."}
@@ -370,7 +313,7 @@ def _register_routes(app: Flask, services: Services) -> None:
         try:
             api_key = decrypt_api_key(stored["encrypted_api_key"])
         except Exception as e:
-            print(f"/response decrypt error for user {user['id']}: {e}")
+            print(f"/response decrypt error: {e}")
             return jsonify(
                 {
                     "error": "Stored API key could not be decrypted. "
@@ -383,7 +326,7 @@ def _register_routes(app: Flask, services: Services) -> None:
             )
             chat_provider = chat_provider_factory(credentials)
         except ValueError as e:
-            print(f"/response provider error for user {user['id']}: {e}")
+            print(f"/response provider error: {e}")
             return jsonify({"error": str(e)}), 500
 
         file_record = repository.get_file(filename)
@@ -441,7 +384,6 @@ def _register_routes(app: Flask, services: Services) -> None:
         )
 
     @app.route("/messages", methods=["GET"])
-    @require_auth
     def get_messages():
         try:
             filename = request.args.get("filename")
@@ -462,7 +404,6 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": str(e)}), 500
 
     @app.route("/files", methods=["GET"])
-    @require_auth
     def get_files():
         try:
             db_files = repository.list_files()
@@ -491,7 +432,6 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": str(e)}), 500
 
     @app.route("/files/remove", methods=["DELETE"])
-    @require_auth
     def remove_file():
         try:
             filename = request.args.get("path")
@@ -516,19 +456,13 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": str(e)}), 500
 
     @app.route("/delete-embeddings", methods=["POST"])
-    @require_auth
     def delete_embeddings():
         vector_service.delete_all()
         return jsonify({"message": "Embeddings Deleted"}), 200
 
     @app.route("/settings", methods=["GET"])
-    @require_auth
     def get_settings_route():
-        user = current_user()
-        if not user:
-            return jsonify({"error": "User not found"}), 401
-
-        stored = repository.get_user_settings(user["id"])
+        stored = repository.get_app_settings()
         try:
             payload = _settings_payload(stored)
         except Exception as e:
@@ -536,12 +470,7 @@ def _register_routes(app: Flask, services: Services) -> None:
         return jsonify(payload), 200
 
     @app.route("/settings", methods=["PUT"])
-    @require_auth
     def save_settings():
-        user = current_user()
-        if not user:
-            return jsonify({"error": "User not found"}), 401
-
         data = request.get_json() or {}
         provider = (data.get("provider") or "").strip().lower()
         model = (data.get("model") or "").strip()
@@ -554,9 +483,7 @@ def _register_routes(app: Flask, services: Services) -> None:
         except SettingsError as e:
             return jsonify({"error": str(e)}), 400
 
-        repository.upsert_user_settings(
-            user["id"], provider, model, encrypt_api_key(api_key)
-        )
+        repository.upsert_app_settings(provider, model, encrypt_api_key(api_key))
         return jsonify(
             {
                 "provider": provider,
@@ -567,13 +494,8 @@ def _register_routes(app: Flask, services: Services) -> None:
         ), 200
 
     @app.route("/settings/verify", methods=["POST"])
-    @require_auth
     def verify_settings():
-        user = current_user()
-        if not user:
-            return jsonify({"error": "User not found"}), 401
-
-        stored = repository.get_user_settings(user["id"])
+        stored = repository.get_app_settings()
         if not stored:
             return jsonify({"error": "No chat settings saved yet"}), 400
 
