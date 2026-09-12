@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getFiles, uploadFile, deleteFile, processFile } from "@/services/files";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
+import useMobileUi from "@/store/mobile-ui";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -21,6 +22,7 @@ export function LibraryRail() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openSettings = useSettingsUi((s) => s.open);
+  const setLibraryOpen = useMobileUi((s) => s.setLibraryOpen);
   const filesQuery = useQuery({
     queryKey: ["files"],
     queryFn: getFiles,
@@ -202,7 +204,12 @@ export function LibraryRail() {
                   >
                     <button
                       type="button"
-                      onClick={() => !isProcessing && setFile(item)}
+                      onClick={() => {
+                        if (!isProcessing) {
+                          setFile(item);
+                          setLibraryOpen(false);
+                        }
+                      }}
                       className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isProcessing && "cursor-default")}
                     >
                       <span className="flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden font-mono text-[0.58rem] text-ink-faint">
@@ -274,23 +281,16 @@ export function LibraryRail() {
         )}
       </nav>
 
-      <footer className="border-t border-rule px-5 py-4">
-        <div className="flex items-center gap-3">
-          <span className="grid size-8 place-items-center rounded-full bg-canvas font-mono text-[0.6rem] font-bold">AT</span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium">Aris Thorne</p>
-            <p className="text-[0.62rem] text-ink-faint">Portfolio prototype</p>
-          </div>
-          <button
-            type="button"
-            onClick={openSettings}
-            aria-label="Open settings"
-            className="grid size-7 place-items-center border border-rule bg-paper text-ink-faint hover:border-ink hover:text-ink"
-            title="Settings"
-          >
-            <Settings className="size-3.5" />
-          </button>
-        </div>
+      <footer className="flex justify-end border-t border-rule px-5 py-3">
+        <button
+          type="button"
+          onClick={openSettings}
+          aria-label="Open settings"
+          className="grid size-7 place-items-center border border-rule bg-paper text-ink-faint hover:border-ink hover:text-ink"
+          title="Settings"
+        >
+          <Settings className="size-3.5" />
+        </button>
       </footer>
     </aside>
   );

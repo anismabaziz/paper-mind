@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, isValidElement, type ComponentPropsWithoutRef } from "react";
-import { ArrowUp, ChevronDown, CornerDownLeft, Filter, Loader2, Settings, Copy, Check, FileText } from "lucide-react";
+import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, Settings, Copy, Check, FileText } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -230,17 +230,11 @@ export function ChatPane() {
 
   return (
     <section className="flex w-[26rem] shrink-0 flex-col border-l border-rule bg-background">
-      <header className="flex h-14 items-center justify-between border-b border-rule px-5">
+      <header className="flex h-14 items-center border-b border-rule px-5">
         <div>
           <p className="text-[0.82rem] font-medium">Reading companion</p>
           <p className="label-meta">Answers cite this paper only</p>
         </div>
-        <button
-          type="button"
-          className="flex items-center gap-1.5 rounded-sm border border-rule px-2 py-1 text-[0.7rem] text-ink-soft hover:border-ink hover:text-ink"
-        >
-          <Filter className="size-3" /> Scope
-        </button>
       </header>
 
       <div className="scroll-slim flex-1 space-y-7 overflow-y-auto px-5 py-6">

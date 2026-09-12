@@ -255,19 +255,6 @@
   scrollbar-color: color-mix(in oklab, var(--ink) 18%, transparent) transparent;
 }
 
-/* react-pdf TextLayer selection and typography inherits editorial tokens */
-.react-pdf__Page__textContent ::selection {
-  background: var(--marker-soft);
-}
-.react-pdf__Page__textContent ::-moz-selection {
-  background: var(--marker-soft);
-}
-.react-pdf__Page__textContent span::selection {
-  background: var(--marker-soft);
-}
-.react-pdf__Page__textContent span::-moz-selection {
-  background: var(--marker-soft);
-}
 .react-pdf__Page__textContent span {
   font-family: inherit;
 }
