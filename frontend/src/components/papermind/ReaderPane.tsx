@@ -265,25 +265,6 @@ export function ReaderPane() {
       {/* Toolbar */}
       <header className="flex h-14 items-center justify-between gap-2 sm:gap-4 border-b border-rule bg-background/80 px-3 sm:px-5 backdrop-blur">
         <div className="flex min-w-0 items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setLibraryOpen(true)}
-            className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink lg:hidden"
-            aria-label="Open library"
-          >
-            <PanelLeft className="size-3.5" />
-          </button>
-          <div className="min-w-0">
-            <p className="truncate font-serif text-[0.95rem] leading-tight">
-              {file ? displayTitle(file) : "Document Viewer"}
-            </p>
-            <p className="label-meta truncate">
-              {file ? `${file.metadata.content_type} · ${isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 sm:gap-4">
           {file && (
             <button
               type="button"
@@ -298,6 +279,25 @@ export function ReaderPane() {
               <List className="size-3.5" />
             </button>
           )}
+          <div className="min-w-0">
+            <p className="truncate font-serif text-[0.95rem] leading-tight">
+              {file ? displayTitle(file) : "Document Viewer"}
+            </p>
+            <p className="label-meta truncate">
+              {file ? `${file.metadata.content_type} · ${isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 sm:gap-4">
+          <button
+            type="button"
+            onClick={() => setLibraryOpen(true)}
+            className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink lg:hidden"
+            aria-label="Open library"
+          >
+            <PanelLeft className="size-3.5" />
+          </button>
           {file && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
