@@ -5,6 +5,7 @@ The app only knows the interface below; swapping local disk for a bucket
 service means implementing the same five methods.
 """
 
+import threading
 from pathlib import Path
 
 from settings import get_settings
@@ -56,12 +57,15 @@ class LocalStorage:
 
 
 _storage = None
+_storage_lock = threading.RLock()
 
 
 def get_storage() -> LocalStorage:
     """Build the process-wide store once, from Settings."""
     global _storage
     if _storage is None:
-        _storage = LocalStorage(get_settings().storage.storage_dir)
+        with _storage_lock:
+            if _storage is None:
+                _storage = LocalStorage(get_settings().storage.storage_dir)
     return _storage
 

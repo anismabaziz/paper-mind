@@ -14,6 +14,7 @@ name the variable to set.
 """
 
 import sys
+import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -173,20 +174,24 @@ class Settings(BaseSettings):
 
 
 _settings: Settings | None = None
+_settings_lock = threading.RLock()
 
 
 def get_settings() -> Settings:
     """Return the process-wide settings instance, building it once."""
     global _settings
     if _settings is None:
-        _settings = Settings()
+        with _settings_lock:
+            if _settings is None:
+                _settings = Settings()
     return _settings
 
 
 def set_settings(settings: Settings | None) -> None:
     """Install or clear the process-wide instance (app boot and tests)."""
     global _settings
-    _settings = settings
+    with _settings_lock:
+        _settings = settings
 
 
 def app_secret_warning(settings: Settings) -> str | None:

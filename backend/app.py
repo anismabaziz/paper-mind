@@ -41,6 +41,7 @@ from services.embeddings.local_embeddings import LocalEmbeddingService
 from services.llm.base import ChatCredentials, LLMProvider
 from services.llm.factory import build_chat_provider
 from services.parsing.document_parser import DocumentIngestor
+from services.retrieval.base import VectorDimensionError
 from services.retrieval.reranker import RerankerService
 from services.retrieval.vector_service import VectorService
 from services.titles import derive_title, is_hex_like_title
@@ -280,9 +281,10 @@ def _register_routes(app: Flask, services: Services) -> None:
 
     @app.route("/process-file", methods=["POST"])
     def process_file():
+        filename = None
         try:
             data = request.get_json()
-            filename = data.get("filename")
+            filename = data.get("filename") if data else None
             if not filename:
                 return jsonify({"error": "Filename is required"}), 400
 
@@ -329,11 +331,18 @@ def _register_routes(app: Flask, services: Services) -> None:
             )
 
             return jsonify({"message": "PDF processed"}), 200
+        except VectorDimensionError as e:
+            # Fail fast — do not wipe collection or caches. Surface a 400 with
+            # remediation hint pointing at the embeddings deletion endpoint.
+            msg = str(e)
+            hint = "Delete embeddings via POST /delete-embeddings and re-ingest your Documents."
+            log.warning("/process-file dimension mismatch for %s: %s", filename or "?", e)
+            return jsonify({"error": msg, "hint": hint}), 400
         except Exception as e:
             import traceback
 
             traceback.print_exc()
-            print(f"/process-file failed for {locals().get('filename', '?')}: {e}")
+            log.exception("/process-file failed for %s", filename or "?")
             return jsonify({"error": str(e)}), 500
 
     @app.route("/response", methods=["POST"])

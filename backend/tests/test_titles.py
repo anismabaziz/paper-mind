@@ -1,4 +1,4 @@
-"""Title derivation and surfacing tests for ticket 03."""
+"""Title derivation and surfacing tests."""
 
 # ruff: noqa: D100, D101, D102, D103, D104, D105, D107
 
