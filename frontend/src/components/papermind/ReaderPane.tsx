@@ -390,7 +390,7 @@ export function ReaderPane() {
             </div>
           )}
 
-          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x snap-mandatory">
+          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             <span className="label-meta shrink-0 pr-1">Pages</span>
             {!thumbnailFileData || numPages == null ? (
               <ThumbnailPlaceholder count={numPages ?? 4} />
@@ -406,7 +406,7 @@ export function ReaderPane() {
                         scrollToPage(n);
                       }}
                       className={cn(
-                        "group relative flex h-28 shrink-0 snap-start aspect-[3/4] items-center justify-center overflow-hidden rounded-[2px] border bg-paper transition-all",
+                        "group relative flex h-28 shrink-0 aspect-[3/4] items-center justify-center overflow-hidden rounded-[2px] border bg-paper transition-all",
                         page === n ? "border-marker shadow-sheet" : "border-rule opacity-70 hover:opacity-100",
                       )}
                     >
