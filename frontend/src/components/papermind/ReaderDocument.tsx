@@ -43,7 +43,7 @@ function PdfError({ message }: { message: string }) {
   );
 }
 
-export default function ReaderDocument({ file, zoom, onLoadSuccess, data: externalData, activePage, flashedPage }: Props) {
+export default function ReaderDocument({ file, zoom, onLoadSuccess, data: externalData }: Props) {
   const [internalData, setInternalData] = useState<Uint8Array | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -91,8 +91,6 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
   const canvasPadding = 24; // p-3 *2
   const borderCompensation = 2;
   const pageWidth = Math.max(320, sheetWidth - canvasPadding - borderCompensation);
-  // Visual height preserves scroll position for virtualized placeholders
-  const placeholderHeight = Math.round(pageWidth * 1.414);
 
   function handleLoadSuccess({ numPages: n }: { numPages: number }) {
     setNumPages(n);
@@ -100,14 +98,6 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
   }
 
   const pagesToRender = numPages ?? 1;
-
-  // Virtualization: render ±2 pages around active viewport so 100+ page docs
-  // do not mount every canvas. Wrappers for all pages remain to preserve
-  // scroll height and IntersectionObserver tracking. Flashed citation target
-  // is always rendered even if outside the window so the jump lands on a real canvas.
-  const activeSafe = activePage != null && Number.isFinite(activePage) ? activePage : 1;
-  const windowStart = numPages ? Math.max(1, activeSafe - 2) : 1;
-  const windowEnd = numPages ? Math.min(numPages, activeSafe + 2) : 1;
 
   return (
     <Document
@@ -120,22 +110,15 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
     >
       {Array.from({ length: pagesToRender }, (_, i) => {
         const n = i + 1;
-        const isInWindow = n >= windowStart && n <= windowEnd;
-        const isFlashed = flashedPage === n;
-        const shouldRenderPage = isInWindow || isFlashed;
         return (
           <div key={n} id={`page-${n}`} data-page={n} className="scroll-mt-2 bg-white flex justify-center">
-            {shouldRenderPage ? (
-              <Page
-                pageNumber={n}
-                width={pageWidth}
-                renderTextLayer
-                renderAnnotationLayer={false}
-                className="mx-auto bg-white block"
-              />
-            ) : (
-              <div style={{ height: placeholderHeight }} className="bg-canvas/30" aria-hidden />
-            )}
+            <Page
+              pageNumber={n}
+              width={pageWidth}
+              renderTextLayer
+              renderAnnotationLayer={false}
+              className="mx-auto bg-white block"
+            />
             {n < pagesToRender && <div className="h-3 bg-canvas" />}
           </div>
         );
