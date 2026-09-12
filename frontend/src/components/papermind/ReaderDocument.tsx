@@ -87,15 +87,13 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
 
   // Width of the white sheet minus canvas padding (p-3 = 12px each side) and border.
   // Keep in sync with ReaderPane outer width 7.6*zoom cap 880. At 100% => 760px.
-  // Divide by scale so effective width (pageWidth * scale) fits the outer wrapper
-  // without triggering a horizontal scrollbar.
+  // sheetWidth already encodes zoom, so pageWidth is the inner white width directly.
   const sheetWidth = Math.min(880, 7.6 * zoom);
   const canvasPadding = 24; // p-3 *2
   const borderCompensation = 2;
-  const scale = zoom / 100;
-  const pageWidth = Math.max(320, (sheetWidth - canvasPadding - borderCompensation) / scale);
+  const pageWidth = Math.max(320, sheetWidth - canvasPadding - borderCompensation);
   // Visual height preserves scroll position for virtualized placeholders
-  const placeholderHeight = Math.round((sheetWidth - canvasPadding - borderCompensation) * 1.414);
+  const placeholderHeight = Math.round(pageWidth * 1.414);
 
   function handleLoadSuccess({ numPages: n }: { numPages: number }) {
     setNumPages(n);
@@ -131,16 +129,15 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
             key={n}
             id={`page-${n}`}
             data-page={n}
-            className={cn("scroll-mt-2 bg-white", isFlashed && "flash-cite")}
+            className={cn("scroll-mt-2 bg-white flex justify-center", isFlashed && "flash-cite")}
           >
             {shouldRenderPage ? (
               <Page
                 pageNumber={n}
                 width={pageWidth}
-                scale={scale}
                 renderTextLayer
                 renderAnnotationLayer
-                className={cn("bg-white [&_canvas]:mx-auto [&_canvas]:block", isFlashed && "mark-cited")}
+                className={cn("mx-auto bg-white block", isFlashed && "mark-cited")}
               />
             ) : (
               <div
