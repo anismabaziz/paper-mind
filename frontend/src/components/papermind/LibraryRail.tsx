@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import type { File as DbFile } from "@/types/db";
+import { displayTitle } from "@/types/db";
 
 export function LibraryRail() {
   const queryClient = useQueryClient();
@@ -46,7 +47,7 @@ export function LibraryRail() {
   const filtered = useMemo(() => {
     const v = query.trim().toLowerCase();
     if (!v) return files;
-    return files.filter((f) => f.name.toLowerCase().includes(v));
+    return files.filter((f) => displayTitle(f).toLowerCase().includes(v));
   }, [files, query]);
 
   const uploadMutation = useMutation({
@@ -218,7 +219,7 @@ export function LibraryRail() {
                         </span>
                       </span>
                       <span className={cn("block text-[0.78rem] leading-snug line-clamp-2", active ? "font-medium text-ink" : "text-ink-soft group-hover:text-ink")}>
-                        {item.name.replace(/\.[^/.]+$/, "")}
+                        {displayTitle(item)}
                       </span>
                       <span className="block truncate text-[0.65rem] text-ink-faint">
                         {item.metadata.content_type.split("/").pop()?.toUpperCase() ?? "PDF"} ·{" "}

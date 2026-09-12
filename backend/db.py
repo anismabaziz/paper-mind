@@ -199,13 +199,29 @@ class Repository:
 
     # -- files ----------------------------------------------------------
 
-    def create_file(self, filename: str) -> dict:
+    def create_file(
+        self,
+        filename: str,
+        title: str | None = None,
+        original_filename: str | None = None,
+    ) -> dict:
         """Do create file."""
         with self._session_factory() as session, session.begin():
-            record = FileRecord(filename=filename)
+            record = FileRecord(
+                filename=filename, title=title, original_filename=original_filename
+            )
             session.add(record)
             session.flush()
             return self._file_dict(record)
+
+    def set_file_title(self, filename: str, title: str) -> None:
+        """Persist a derived title for the file identified by storage filename."""
+        with self._session_factory() as session, session.begin():
+            record = session.scalars(
+                select(FileRecord).where(FileRecord.filename == filename)
+            ).first()
+            if record:
+                record.title = title
 
     def get_file(self, filename: str) -> dict | None:
         """Do get file."""

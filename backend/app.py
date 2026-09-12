@@ -9,6 +9,7 @@ passing fakes through the factory's parameters instead of patching modules.
 
 import io
 import json
+import logging
 import os
 import time
 import uuid
@@ -42,10 +43,43 @@ from services.llm.factory import build_chat_provider
 from services.parsing.document_parser import DocumentIngestor
 from services.retrieval.reranker import RerankerService
 from services.retrieval.vector_service import VectorService
+from services.titles import derive_title, is_hex_like_title
 from storage import LocalStorage, get_storage
 
 CredentialsCallable = Callable[[ChatCredentials], LLMProvider]
 VerifyCallable = Callable[[ChatCredentials], tuple[bool, str | None]]
+
+log = logging.getLogger(__name__)
+
+
+def _needs_title_backfill(title: str | None) -> bool:
+    """Return True when the stored title is missing or looks like a hex filename."""
+    return title is None or is_hex_like_title(title)
+
+
+def _backfill_title(
+    storage, repository, filename: str, title: str | None, original_filename: str | None
+) -> str | None:
+    """Derive a human title from storage bytes and persist it; return updated title."""
+    if not _needs_title_backfill(title):
+        return title
+    try:
+        raw = storage.open(filename)
+    except Exception as exc:
+        log.warning("backfill read failed for %s: %s", filename, exc)
+        return title
+    try:
+        derived = derive_title(raw, original_filename)
+    except Exception as exc:
+        log.warning("backfill derive failed for %s: %s", filename, exc)
+        return title
+    if derived and derived != title:
+        try:
+            repository.set_file_title(filename, derived)
+        except Exception as exc:
+            log.warning("backfill persist failed for %s: %s", filename, exc)
+        return derived
+    return title
 
 
 @dataclass(frozen=True)
@@ -201,14 +235,19 @@ def _register_routes(app: Flask, services: Services) -> None:
             return jsonify({"error": "No File Provided"}), 400
 
         file = request.files["file"]
-        file_ext = os.path.splitext(file.filename)[1]
+        raw_original = (file.filename or "").strip()
+        original_filename = raw_original or None
+        file_ext = os.path.splitext(raw_original)[1] if raw_original else ""
         unique_filename = f"{uuid.uuid4().hex}{file_ext}"
         file_content = file.read()
+        title = derive_title(file_content, original_filename)
 
         try:
             # Store the bytes, then create the DB record
             storage.save(unique_filename, file_content)
-            file_record = repository.create_file(unique_filename)
+            file_record = repository.create_file(
+                unique_filename, title=title, original_filename=original_filename
+            )
 
             return jsonify(
                 {
@@ -216,6 +255,8 @@ def _register_routes(app: Flask, services: Services) -> None:
                     "file": {
                         "id": file_record["id"],
                         "name": unique_filename,
+                        "title": file_record["title"],
+                        "original_filename": file_record["original_filename"],
                         "url": file_url(unique_filename),
                     },
                 }
@@ -413,6 +454,10 @@ def _register_routes(app: Flask, services: Services) -> None:
             enriched_files = []
             for db_file in db_files:
                 filename = db_file["filename"]
+                title = _backfill_title(
+                    storage, repository, filename, db_file["title"], db_file["original_filename"]
+                )
+                original_filename = db_file["original_filename"]
                 storage_item = storage_map.get(filename)
 
                 size = storage_item["size"] if storage_item else 0
@@ -421,6 +466,8 @@ def _register_routes(app: Flask, services: Services) -> None:
                     {
                         "id": db_file["id"],
                         "name": filename,
+                        "title": title,
+                        "original_filename": original_filename,
                         "url": file_url(filename),
                         "is_processed": db_file["is_processed"],
                         "metadata": {"size": size, "content_type": "application/pdf"},

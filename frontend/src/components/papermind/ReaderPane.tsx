@@ -19,6 +19,7 @@ import { checkIsProcessed, deleteFile, getFileMeta } from "@/services/files";
 import { getToken } from "@/services/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { displayTitle } from "@/types/db";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -250,7 +251,7 @@ export function ReaderPane() {
           </button>
           <div className="min-w-0">
             <p className="truncate font-serif text-[0.95rem] leading-tight">
-              {file ? file.name.replace(/\.[^/.]+$/, "") : "Document Viewer"}
+              {file ? displayTitle(file) : "Document Viewer"}
             </p>
             <p className="label-meta truncate">
               {file ? `${file.metadata.content_type} · ${isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
@@ -424,7 +425,7 @@ export function ReaderPane() {
             {file && (
               <div className="mt-6 border-t border-rule pt-4">
                 <p className="label-meta pb-2">Document</p>
-                <p className="font-serif text-xs leading-snug">{file.name}</p>
+                <p className="font-serif text-xs leading-snug">{displayTitle(file)}</p>
                 <p className="mt-1 font-mono text-[0.62rem] text-ink-faint">
                   {(file.metadata.size / 1024).toFixed(0)} KB · {file.metadata.content_type}
                 </p>
@@ -465,7 +466,7 @@ export function ReaderPane() {
               <article className="paper-grain mb-6 bg-paper px-10 pt-10 pb-8 shadow-sheet">
                 <p className="label-meta">Research paper · {file.metadata.content_type}</p>
                 <h1 className="mt-3 font-serif text-[1.7rem] leading-[1.15] font-medium text-balance">
-                  {file.name.replace(/\.[^/.]+$/, "")}
+                  {displayTitle(file)}
                 </h1>
                 <div className="mt-5 flex items-center gap-3 border-y border-rule py-4">
                   <span

@@ -10,8 +10,22 @@ Priority:
 
 import io
 import os
+import re
 
 MAX_TITLE_LEN = 200
+
+_HEX_TITLE_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+
+
+def is_hex_like_title(title: str | None) -> bool:
+    """Return True when title looks like a storage hex name, not a human title."""
+    if not title:
+        return False
+    stripped = title.strip()
+    if _HEX_TITLE_RE.match(stripped):
+        return True
+    base, _ = os.path.splitext(stripped)
+    return bool(_HEX_TITLE_RE.match(base))
 
 
 def _normalize_pdf_bytes(pdf_bytes: bytes | None) -> bytes | None:
