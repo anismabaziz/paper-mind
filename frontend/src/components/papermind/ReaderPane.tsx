@@ -16,7 +16,6 @@ import {
 import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
 import { checkIsProcessed, deleteFile, getFileMeta } from "@/services/files";
-import { getToken } from "@/services/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { displayTitle } from "@/types/db";
@@ -80,10 +79,7 @@ function usePdfFileData(file: { url: string } | null) {
     async function load() {
       setData(null);
       try {
-        const token = getToken();
-        const headers: Record<string, string> = {};
-        if (token) headers.Authorization = `Bearer ${token}`;
-        const res = await fetch(url, { headers, signal: controller.signal });
+        const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(`Failed to load PDF (${res.status})`);
         const buf = await res.arrayBuffer();
         if (!cancelled) setData(new Uint8Array(buf));

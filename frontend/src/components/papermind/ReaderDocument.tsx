@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
-import { getToken } from "@/services/auth";
 import type { File as FileType } from "@/types/db";
 import { cn } from "@/lib/utils";
 
@@ -66,10 +65,7 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
       setInternalData(null);
       setFetchError(null);
       try {
-        const token = getToken();
-        const headers: Record<string, string> = {};
-        if (token) headers.Authorization = `Bearer ${token}`;
-        const res = await fetch(file.url, { headers, signal: controller.signal });
+        const res = await fetch(file.url, { signal: controller.signal });
         if (!res.ok) throw new Error(`Failed to load PDF (${res.status})`);
         const buf = await res.arrayBuffer();
         if (!cancelled) setInternalData(new Uint8Array(buf));
