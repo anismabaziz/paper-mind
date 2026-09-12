@@ -3,7 +3,6 @@ import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import type { File as FileType } from "@/types/db";
-import { cn } from "@/lib/utils";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -44,7 +43,7 @@ function PdfError({ message }: { message: string }) {
   );
 }
 
-export default function ReaderDocument({ file, zoom, onLoadSuccess, data: externalData, activePage, flashedPage }: Props) {
+export default function ReaderDocument({ file, zoom, onLoadSuccess, data: externalData }: Props) {
   const [internalData, setInternalData] = useState<Uint8Array | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
@@ -87,15 +86,11 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
 
   // Width of the white sheet minus canvas padding (p-3 = 12px each side) and border.
   // Keep in sync with ReaderPane outer width 7.6*zoom cap 880. At 100% => 760px.
-  // Divide by scale so effective width (pageWidth * scale) fits the outer wrapper
-  // without triggering a horizontal scrollbar.
+  // sheetWidth already encodes zoom, so pageWidth is the inner white width directly.
   const sheetWidth = Math.min(880, 7.6 * zoom);
   const canvasPadding = 24; // p-3 *2
   const borderCompensation = 2;
-  const scale = zoom / 100;
-  const pageWidth = Math.max(320, (sheetWidth - canvasPadding - borderCompensation) / scale);
-  // Visual height preserves scroll position for virtualized placeholders
-  const placeholderHeight = Math.round((sheetWidth - canvasPadding - borderCompensation) * 1.414);
+  const pageWidth = Math.max(320, sheetWidth - canvasPadding - borderCompensation);
 
   function handleLoadSuccess({ numPages: n }: { numPages: number }) {
     setNumPages(n);
@@ -103,14 +98,6 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
   }
 
   const pagesToRender = numPages ?? 1;
-
-  // Virtualization: render ±2 pages around active viewport so 100+ page docs
-  // do not mount every canvas. Wrappers for all pages remain to preserve
-  // scroll height and IntersectionObserver tracking. Flashed citation target
-  // is always rendered even if outside the window so the jump lands on a real canvas.
-  const activeSafe = activePage != null && Number.isFinite(activePage) ? activePage : 1;
-  const windowStart = numPages ? Math.max(1, activeSafe - 2) : 1;
-  const windowEnd = numPages ? Math.min(numPages, activeSafe + 2) : 1;
 
   return (
     <Document
@@ -123,34 +110,15 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
     >
       {Array.from({ length: pagesToRender }, (_, i) => {
         const n = i + 1;
-        const isInWindow = n >= windowStart && n <= windowEnd;
-        const isFlashed = flashedPage === n;
-        const shouldRenderPage = isInWindow || isFlashed;
         return (
-          <div
-            key={n}
-            id={`page-${n}`}
-            data-page={n}
-            className={cn("scroll-mt-2 bg-white", isFlashed && "flash-cite")}
-          >
-            {shouldRenderPage ? (
-              <Page
-                pageNumber={n}
-                width={pageWidth}
-                scale={scale}
-                renderTextLayer
-                renderAnnotationLayer
-                className={cn("bg-white [&_canvas]:mx-auto [&_canvas]:block", isFlashed && "mark-cited")}
-              />
-            ) : (
-              <div
-                style={{ height: placeholderHeight }}
-                className="grid place-items-center border border-dashed border-rule bg-canvas/30"
-                aria-hidden
-              >
-                <span className="font-mono text-[0.58rem] text-ink-faint">Page {n} · off-screen</span>
-              </div>
-            )}
+          <div key={n} id={`page-${n}`} data-page={n} className="scroll-mt-2 bg-white flex justify-center">
+            <Page
+              pageNumber={n}
+              width={pageWidth}
+              renderTextLayer
+              renderAnnotationLayer={false}
+              className="mx-auto bg-white block"
+            />
             {n < pagesToRender && <div className="h-3 bg-canvas" />}
           </div>
         );
