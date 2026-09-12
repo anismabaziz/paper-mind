@@ -265,20 +265,14 @@ export function ReaderPane() {
       {/* Toolbar */}
       <header className="flex h-14 items-center justify-between gap-2 sm:gap-4 border-b border-rule bg-background/80 px-3 sm:px-5 backdrop-blur">
         <div className="flex min-w-0 items-center gap-3">
-          {file && (
-            <button
-              type="button"
-              onClick={() => setShowOutline((v) => !v)}
-              className={cn(
-                "flex size-7 items-center justify-center rounded-sm border transition-colors",
-                showOutline ? "border-ink bg-ink text-paper" : "border-rule text-ink-soft hover:border-ink",
-              )}
-              aria-label={showOutline ? "Hide pages overview" : "Show pages overview"}
-              title={showOutline ? "Hide pages overview" : "Show pages overview"}
-            >
-              <List className="size-3.5" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setLibraryOpen(true)}
+            className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink lg:hidden"
+            aria-label="Open library"
+          >
+            <PanelLeft className="size-3.5" />
+          </button>
           <div className="min-w-0">
             <p className="truncate font-serif text-[0.95rem] leading-tight">
               {file ? displayTitle(file) : "Document Viewer"}
@@ -290,20 +284,14 @@ export function ReaderPane() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
-          <button
-            type="button"
-            onClick={() => setLibraryOpen(true)}
-            className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink lg:hidden"
-            aria-label="Open library"
-          >
-            <PanelLeft className="size-3.5" />
-          </button>
           {file && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
                   className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink"
+                  aria-label="Delete document"
+                  title="Delete document"
                 >
                   <MoreHorizontal className="size-3.5" />
                 </button>
@@ -317,6 +305,20 @@ export function ReaderPane() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+          )}
+          {file && (
+            <button
+              type="button"
+              onClick={() => setShowOutline((v) => !v)}
+              className={cn(
+                "flex size-7 items-center justify-center rounded-sm border transition-colors",
+                showOutline ? "border-ink bg-ink text-paper" : "border-rule text-ink-soft hover:border-ink",
+              )}
+              aria-label={showOutline ? "Hide pages overview" : "Show pages overview"}
+              title={showOutline ? "Hide pages overview" : "Show pages overview"}
+            >
+              <List className="size-3.5" />
+            </button>
           )}
 
           <div className="flex items-center gap-1 border-l border-rule pl-2 sm:pl-4">
