@@ -64,7 +64,8 @@ SAMPLE_DOCS_DIR = Path(__file__).parent / "sample_docs"
 
 # Retrieval is fetched generously and scored at k; the index top_k also
 # goes through source shaping, which needs headroom to dedupe.
-FETCH_K = 10
+# Aligned with production VectorService.FETCH_K=50 so eval numbers describe prod.
+FETCH_K = 50
 DEFAULT_K = 5
 
 

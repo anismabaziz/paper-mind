@@ -96,7 +96,7 @@ flow tests in `tests/test_flows.py` run against fakes and in-memory sqlite.
 ground-truth fixture (`evaluation/fixture.json`): ten questions over two
 sample documents in `evaluation/sample_docs/` — one authored in-repo
 (CC0), one published paper (CC BY 4.0). The evaluator reports
-`hit@5`/`recall@5` (k=5, 10 candidates fetched internally) + per-question breakdown and
+`hit@5`/`recall@5` (k=5, 50 candidates fetched internally) + per-question breakdown and
 ingest `sec/PDF` (parse/embed/upsert wall time via `evaluation/evaluator.py`;
 `POST /process-file` also logs `parse/embed/upsert/total` per file).
 `uv run pytest` exercises the scoring on deterministic fakes and stays

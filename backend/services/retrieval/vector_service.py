@@ -24,12 +24,17 @@ def shape_sources(sources, limit=MAX_RETRIEVED_SOURCES):
     Dedupe by content, order by score, and bound the result.
 
         The returned order is the order the LLM receives as context and the
-    order the Sources panel shows, so both always agree.
+    order the Sources panel shows, so both always agree. Dedupe uses raw
+    ``content`` without stripping so whitespace variants are treated as
+    distinct Passages.
     """
-    shaped = {}
+    shaped: dict[str, dict] = {}
     for source in sorted(sources, key=lambda s: s["score"], reverse=True):
-        key = source["content"].strip()
-        if key and key not in shaped:
+        content = source.get("content", "")
+        if not content or not content.strip():
+            continue
+        key = content
+        if key not in shaped:
             shaped[key] = source
     return list(shaped.values())[:limit]
 
