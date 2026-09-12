@@ -112,7 +112,7 @@ export function ReaderPane() {
   const flashTimeoutRef = useRef<number | null>(null);
   const fileData = usePdfFileData(file);
 
-  const thumbnailFileData = useMemo(() => (fileData ? { data: fileData.slice() } : null), [fileData]);
+  const thumbnailFileData = useMemo(() => (fileData ? { data: fileData.slice() } : null), [fileData, showOutline]);
   const isProgrammaticRef = useRef(false);
   const programmaticTimeoutRef = useRef<number | null>(null);
 
@@ -417,7 +417,7 @@ export function ReaderPane() {
             {!thumbnailFileData || numPages == null ? (
               <ThumbnailPlaceholder count={numPages ?? 4} />
             ) : (
-              <Document file={thumbnailFileData} options={thumbnailOptions} loading={<ThumbnailPlaceholder count={numPages} />}>
+              <Document key={`${file.id}-thumbs-${showOutline ? "open" : "closed"}`} file={thumbnailFileData} options={thumbnailOptions} loading={<ThumbnailPlaceholder count={numPages} />} error={<ThumbnailPlaceholder count={numPages} />}>
                 <div className="flex gap-2">
                   {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
                     <button
