@@ -5,7 +5,7 @@ import SettingsDialog from "./app/settings-dialog";
 
 export default function App() {
   return (
-    <div className="flex h-screen min-h-[680px] w-full overflow-hidden bg-background text-foreground">
+    <div className="flex h-screen max-w-full min-h-[680px] w-full min-w-0 overflow-hidden overflow-x-hidden bg-background text-foreground">
       <LibraryRail />
       <ReaderPane />
       <ChatPane />
