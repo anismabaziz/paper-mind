@@ -134,13 +134,7 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
                 className="mx-auto bg-white block"
               />
             ) : (
-              <div
-                style={{ height: placeholderHeight }}
-                className="grid place-items-center border border-dashed border-rule bg-canvas/30"
-                aria-hidden
-              >
-                <span className="font-mono text-[0.58rem] text-ink-faint">Page {n} · off-screen</span>
-              </div>
+              <div style={{ height: placeholderHeight }} className="bg-canvas/30" aria-hidden />
             )}
             {n < pagesToRender && <div className="h-3 bg-canvas" />}
           </div>
