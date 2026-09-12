@@ -130,7 +130,7 @@ export default function ReaderDocument({ file, zoom, onLoadSuccess, data: extern
                 pageNumber={n}
                 width={pageWidth}
                 renderTextLayer
-                renderAnnotationLayer
+                renderAnnotationLayer={false}
                 className="mx-auto bg-white block"
               />
             ) : (
