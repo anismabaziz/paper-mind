@@ -101,6 +101,8 @@ export function ReaderPane() {
   const { file, citationTarget } = usePdfStore();
   const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const outlineStripRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(100);
   const [showOutline, setShowOutline] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -157,7 +159,13 @@ export function ReaderPane() {
     setPage(1);
     setNumPages(null);
     setProgress(0);
+    if (stripRef.current) stripRef.current.scrollLeft = 0;
+    if (outlineStripRef.current) outlineStripRef.current.scrollLeft = 0;
   }, [file?.id]);
+
+  useEffect(() => {
+    if (stripRef.current) stripRef.current.scrollLeft = 0;
+  }, [numPages]);
 
   useEffect(() => {
     if (numPages && page > numPages) setPage(numPages);
@@ -351,7 +359,7 @@ export function ReaderPane() {
         <div className="shrink-0 border-b border-rule bg-background/50">
           {showOutline && (
             <div className="border-b border-rule/60">
-              <div className="flex items-center gap-2 overflow-x-auto px-4 py-2 [scrollbar-width:thin]">
+              <div ref={outlineStripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 <span className="label-meta shrink-0 pr-2">Contents</span>
                 {outline.length === 0 ? (
                   <span className="font-mono text-[0.68rem] text-ink-faint">
@@ -382,7 +390,7 @@ export function ReaderPane() {
             </div>
           )}
 
-          <div className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:thin] snap-x snap-mandatory">
+          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x snap-mandatory">
             <span className="label-meta shrink-0 pr-1">Pages</span>
             {!thumbnailFileData || numPages == null ? (
               <ThumbnailPlaceholder count={numPages ?? 4} />
