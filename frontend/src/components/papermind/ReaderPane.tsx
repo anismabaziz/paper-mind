@@ -135,6 +135,7 @@ export function ReaderPane() {
 
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
   const outline = metaQuery.data?.outline ?? [];
+  const metaPageCount = metaQuery.data?.pageCount ?? null;
   const { setLibraryOpen, setChatOpen } = useMobileUi();
 
   const scrollToPage = useCallback((pageNum: number) => {
@@ -414,12 +415,21 @@ export function ReaderPane() {
 
           <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-px-4">
             <span className="label-meta shrink-0 pr-1">Pages</span>
-            {!thumbnailFileData || numPages == null ? (
-              <ThumbnailPlaceholder count={numPages ?? 4} />
-            ) : (
-              <Document key={`${file.id}-thumbs-${showOutline ? "open" : "closed"}`} file={thumbnailFileData} options={thumbnailOptions} loading={<ThumbnailPlaceholder count={numPages} />} error={<ThumbnailPlaceholder count={numPages} />}>
-                <div className="flex gap-2">
-                  {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
+            {(() => {
+              const stripCount = metaPageCount ?? numPages;
+              if (!thumbnailFileData || stripCount == null) {
+                return <ThumbnailPlaceholder count={stripCount ?? 4} />;
+              }
+              return (
+                <Document
+                  key={`${file.id}-thumbs-${showOutline ? "open" : "closed"}`}
+                  file={thumbnailFileData}
+                  options={thumbnailOptions}
+                  loading={<ThumbnailPlaceholder count={stripCount} />}
+                  error={<ThumbnailPlaceholder count={stripCount} />}
+                >
+                  <div className="flex gap-2">
+                    {Array.from({ length: stripCount }, (_, i) => i + 1).map((n) => (
                     <button
                       key={n}
                       type="button"
@@ -446,8 +456,9 @@ export function ReaderPane() {
                     </button>
                   ))}
                 </div>
-              </Document>
-            )}
+                </Document>
+              );
+            })()}
           </div>
         </div>
       )}
