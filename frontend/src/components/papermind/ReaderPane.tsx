@@ -2,19 +2,18 @@ import { lazy, Suspense, useRef, useState, useEffect, useMemo, useCallback } fro
 import {
   ChevronLeft,
   ChevronRight,
-  Highlighter,
   List,
   Minus,
   Plus,
-  Quote,
-  StickyNote,
   UploadIcon,
   Trash2,
   MoreHorizontal,
-  Columns2,
+  PanelLeft,
+  MessageSquare,
 } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
+import useMobileUi from "@/store/mobile-ui";
 import { checkIsProcessed, deleteFile, getFileMeta } from "@/services/files";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -37,22 +36,9 @@ const thumbnailOptions = {
   standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
 };
 
-// Rail layout is the single source for thumbnail sizing. w-56 = 224px, px-4*2 = 32px,
-// gap-1.5 = 6px. One thumbnail column = (224 - 32 - 6) / 2 = 93px.
-// Minus 1px border each side and a small anti-rounding slack keeps the 2-col
-// grid inside the rail without triggering overflow-x on any page count.
-const RAIL_WIDTH_PX = 224;
-const RAIL_HORIZONTAL_PADDING_PX = 32;
-const THUMB_GRID_GAP_PX = 6;
-const THUMB_CELL_BORDER_PX = 2;
-const THUMB_SAFETY_PX = 5;
-const THUMBNAIL_PAGE_WIDTH = Math.floor((RAIL_WIDTH_PX - RAIL_HORIZONTAL_PADDING_PX - THUMB_GRID_GAP_PX) / 2) - THUMB_CELL_BORDER_PX - THUMB_SAFETY_PX; // 86
-
-// Shared clamp utilities — one fix for horizontal overflow, reused instead of
-// copying the same Tailwind cluster across 6+ nodes (see Standards review).
+// Page strip sizing: fixed strip height, horizontal scroll with snap
+const STRIP_THUMB_WIDTH = 84;
 const CLAMP = "box-border max-w-full min-w-0 overflow-hidden";
-const GRID_CLAMP = `box-border grid max-w-full min-w-0 grid-cols-2 gap-1.5 overflow-hidden`;
-const RAIL_CLAMP = `scroll-slim box-border hidden w-56 max-w-full min-w-0 shrink-0 overflow-x-hidden overflow-y-auto border-r border-rule bg-background/50 px-4 py-5 xl:block`;
 
 const ReaderDocument = lazy(() => import("./ReaderDocument"));
 
@@ -68,9 +54,9 @@ function FakePageBars() {
 
 function ThumbnailPlaceholder({ count }: { count: number }) {
   return (
-    <div className={GRID_CLAMP}>
+    <div className="flex gap-2 overflow-hidden">
       {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
-        <div key={n} className={`relative aspect-[3/4] rounded-[2px] border border-rule bg-paper p-1.5 opacity-40 ${CLAMP}`}>
+        <div key={n} className={`relative h-28 shrink-0 aspect-[3/4] rounded-[2px] border border-rule bg-paper p-1.5 opacity-40 ${CLAMP}`}>
           <FakePageBars />
           <span className="absolute right-1 bottom-1 font-mono text-[0.55rem] text-ink-faint">{n}</span>
         </div>
@@ -147,6 +133,7 @@ export function ReaderPane() {
 
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
   const outline = metaQuery.data?.outline ?? [];
+  const { setLibraryOpen, setChatOpen } = useMobileUi();
 
   const scrollToPage = useCallback((pageNum: number) => {
     const container = scrollRef.current;
@@ -246,8 +233,16 @@ export function ReaderPane() {
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-canvas">
       {/* Toolbar */}
-      <header className="flex h-14 items-center justify-between gap-4 border-b border-rule bg-background/80 px-5 backdrop-blur">
+      <header className="flex h-14 items-center justify-between gap-2 sm:gap-4 border-b border-rule bg-background/80 px-3 sm:px-5 backdrop-blur">
         <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setLibraryOpen(true)}
+            className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink lg:hidden"
+            aria-label="Open library"
+          >
+            <PanelLeft className="size-3.5" />
+          </button>
           <button
             type="button"
             onClick={() => setShowOutline((v) => !v)}
@@ -269,28 +264,7 @@ export function ReaderPane() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="hidden items-center gap-1.5 lg:flex">
-            <button
-              type="button"
-              className="flex items-center gap-1.5 rounded-sm border border-rule px-2 py-1 text-[0.72rem] text-ink-soft transition-colors hover:border-ink hover:text-ink"
-            >
-              <Highlighter className="size-3" /> Highlight
-            </button>
-            <button
-              type="button"
-              className="flex items-center gap-1.5 rounded-sm border border-rule px-2 py-1 text-[0.72rem] text-ink-soft transition-colors hover:border-ink hover:text-ink"
-            >
-              <StickyNote className="size-3" /> Note
-            </button>
-            <button
-              type="button"
-              className="flex items-center gap-1.5 rounded-sm border border-rule px-2 py-1 text-[0.72rem] text-ink-soft transition-colors hover:border-ink hover:text-ink"
-            >
-              <Quote className="size-3" /> Ask
-            </button>
-          </div>
-
+        <div className="flex items-center gap-2 sm:gap-4">
           {file && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -312,7 +286,7 @@ export function ReaderPane() {
             </DropdownMenu>
           )}
 
-          <div className="flex items-center gap-1 border-l border-rule pl-4">
+          <div className="flex items-center gap-1 border-l border-rule pl-2 sm:pl-4">
             <button
               type="button"
               onClick={() => setZoom((z) => Math.max(80, z - 10))}
@@ -332,7 +306,7 @@ export function ReaderPane() {
             </button>
           </div>
 
-          <div className="flex items-center gap-1 border-l border-rule pl-4">
+          <div className="flex items-center gap-1 border-l border-rule pl-2 sm:pl-4">
             <button
               type="button"
               onClick={() => {
@@ -361,48 +335,60 @@ export function ReaderPane() {
               <ChevronRight className="size-3.5" />
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => setChatOpen(true)}
+            className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink lg:hidden"
+            aria-label="Open chat"
+          >
+            <MessageSquare className="size-3.5" />
+          </button>
         </div>
       </header>
 
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        {/* Outline + thumbnails */}
-        {showOutline && (
-          <div className={RAIL_CLAMP}>
-            <p className="label-meta pb-3">Contents</p>
-            {outline.length === 0 ? (
-              <p className="py-2 font-mono text-[0.68rem] text-ink-faint">
-                {metaQuery.isLoading ? "Loading outline…" : "No outline available"}
-              </p>
-            ) : (
-              <ul className={`space-y-1 ${CLAMP}`}>
-                {outline.map((o, idx) => (
-                  <li key={`${o.title}-${o.page}-${idx}`} className={CLAMP}>
+      {/* Page strip — horizontally scrollable, above the sheet */}
+      {file && (
+        <div className="shrink-0 border-b border-rule bg-background/50">
+          {showOutline && (
+            <div className="border-b border-rule/60">
+              <div className="flex items-center gap-2 overflow-x-auto px-4 py-2 [scrollbar-width:thin]">
+                <span className="label-meta shrink-0 pr-2">Contents</span>
+                {outline.length === 0 ? (
+                  <span className="font-mono text-[0.68rem] text-ink-faint">
+                    {metaQuery.isLoading ? "Loading outline…" : "No outline"}
+                  </span>
+                ) : (
+                  outline.map((o, idx) => (
                     <button
+                      key={`${o.title}-${o.page}-${idx}`}
                       type="button"
                       onClick={() => {
                         setPage(o.page);
                         scrollToPage(o.page);
                       }}
                       className={cn(
-                        `flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left text-[0.8rem] leading-snug break-words transition-colors ${CLAMP}`,
-                        page === o.page ? "bg-marker-soft text-ink" : "text-ink-soft hover:bg-paper hover:text-ink",
+                        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs leading-none transition-colors",
+                        page === o.page
+                          ? "border-marker bg-marker-soft text-marker"
+                          : "border-rule bg-paper text-ink-soft hover:border-ink hover:text-ink",
                       )}
-                      style={{ paddingLeft: `${8 + Math.max(0, o.level - 1) * 12}px` }}
                     >
-                      <span className="shrink-0 font-mono text-[0.62rem] text-ink-faint">{o.page}</span>
-                      <span className="min-w-0 flex-1 break-words">{o.title}</span>
+                      <span className="font-mono text-[0.62rem] text-ink-faint">{o.page}</span>
+                      <span className="max-w-[18ch] truncate">{o.title}</span>
                     </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+                  ))
+                )}
+              </div>
+            </div>
+          )}
 
-            <p className="label-meta pt-6 pb-3">Pages</p>
-            {!file || !thumbnailFileData || numPages == null ? (
+          <div className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:thin] snap-x snap-mandatory">
+            <span className="label-meta shrink-0 pr-1">Pages</span>
+            {!thumbnailFileData || numPages == null ? (
               <ThumbnailPlaceholder count={numPages ?? 4} />
             ) : (
               <Document file={thumbnailFileData} options={thumbnailOptions} loading={<ThumbnailPlaceholder count={numPages} />}>
-                <div className={GRID_CLAMP}>
+                <div className="flex gap-2">
                   {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
                     <button
                       key={n}
@@ -412,16 +398,16 @@ export function ReaderPane() {
                         scrollToPage(n);
                       }}
                       className={cn(
-                        `group relative aspect-[3/4] rounded-[2px] border bg-paper transition-all ${CLAMP}`,
+                        "group relative flex h-28 shrink-0 snap-start aspect-[3/4] items-center justify-center overflow-hidden rounded-[2px] border bg-paper transition-all",
                         page === n ? "border-marker shadow-sheet" : "border-rule opacity-70 hover:opacity-100",
                       )}
                     >
                       <Page
-                        width={THUMBNAIL_PAGE_WIDTH}
+                        width={STRIP_THUMB_WIDTH}
                         pageNumber={n}
                         renderTextLayer={false}
                         renderAnnotationLayer={false}
-                        className="max-w-full bg-paper [&_canvas]:mx-auto [&_canvas]:block [&_canvas]:max-w-full"
+                        className="bg-paper [&_canvas]:mx-auto [&_canvas]:block [&_canvas]:max-w-full"
                       />
                       <span className="pointer-events-none absolute right-1 bottom-1 rounded-sm bg-paper/80 px-0.5 font-mono text-[0.55rem] text-ink-faint">
                         {n}
@@ -431,29 +417,13 @@ export function ReaderPane() {
                 </div>
               </Document>
             )}
-
-            {file && (
-              <div className="mt-6 border-t border-rule pt-4">
-                <p className="label-meta pb-2">Document</p>
-                <p className="font-serif text-xs leading-snug">{displayTitle(file)}</p>
-                <p className="mt-1 font-mono text-[0.62rem] text-ink-faint">
-                  {(file.metadata.size / 1024).toFixed(0)} KB · {file.metadata.content_type}
-                </p>
-                <span
-                  className={cn(
-                    "mt-2 inline-flex border px-2 py-0.5 font-mono text-[0.6rem] uppercase tracking-wider",
-                    isProcessed ? "border-ink bg-ink text-paper" : "border-rule bg-paper text-ink-faint",
-                  )}
-                >
-                  {isProcessed ? "Indexed" : "Indexing"}
-                </span>
-              </div>
-            )}
           </div>
-        )}
+        </div>
+      )}
 
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         {/* Reading sheet */}
-        <div ref={scrollRef} onScroll={handleScroll} className="flex min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 sm:px-6 py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {!file ? (
             <div className="mx-auto flex min-h-[520px] max-w-[560px] flex-col items-center justify-center">
               <div className="paper-grain w-full bg-paper px-10 py-16 text-center shadow-sheet">
@@ -473,7 +443,7 @@ export function ReaderPane() {
               style={{ width: `${Math.min(880, 7.6 * zoom)}px`, maxWidth: "100%" }}
             >
               {/* Title sheet */}
-              <article className="paper-grain mb-6 bg-paper px-10 pt-10 pb-8 shadow-sheet">
+              <article className="paper-grain mb-6 bg-paper px-6 sm:px-10 pt-10 pb-8 shadow-sheet">
                 <p className="label-meta">Research paper · {file.metadata.content_type}</p>
                 <h1 className="mt-3 font-serif text-[1.7rem] leading-[1.15] font-medium text-balance">
                   {displayTitle(file)}
@@ -487,9 +457,7 @@ export function ReaderPane() {
                   >
                     {isProcessed ? "Ready for questions" : "Indexing… answers paused"}
                   </span>
-                  <span className="font-mono text-[0.62rem] text-ink-faint">
-                    Page {String(page).padStart(2, "0")} · {file.name}
-                  </span>
+                  <span className="font-mono text-[0.62rem] text-ink-faint">Page {String(page).padStart(2, "0")}</span>
                 </div>
                 <p className="mt-4 font-serif text-[0.95rem] leading-[1.7] text-ink-soft italic">
                   <span className="mr-2 font-mono text-[0.62rem] tracking-[0.14em] text-marker not-italic uppercase">Abstract</span>
@@ -502,9 +470,7 @@ export function ReaderPane() {
                 <div className="flex items-center justify-between border-b border-rule px-6 py-3">
                   <span className="label-meta">Page {String(page).padStart(2, "0")}</span>
                   <span className="h-px flex-1 mx-3 bg-rule" />
-                  <span className="label-meta">
-                    {file.name} · p. {page}
-                  </span>
+                  <span className="label-meta">p. {page}</span>
                 </div>
                 <div className="relative bg-canvas p-3">
                   <div className="overflow-hidden border border-rule bg-white">
@@ -535,24 +501,10 @@ export function ReaderPane() {
                   )}
                 </div>
                 <div className="flex items-center justify-between border-t border-rule px-10 py-4">
-                  <span className="label-meta">{file.name}</span>
+                  <span className="label-meta">p. {String(page).padStart(2, "0")}</span>
                   <span className="label-meta">{String(page).padStart(2, "0")}</span>
                 </div>
               </div>
-
-              {/* Figure caption mock to keep editorial rhythm */}
-              <figure className="mt-6 border-y border-rule bg-paper/60 px-6 py-5">
-                <div className="grid aspect-[16/7] place-items-center border border-dashed border-rule bg-canvas/50">
-                  <div className="flex flex-col items-center gap-2 opacity-60">
-                    <Columns2 className="size-5 text-ink-faint" />
-                    <span className="label-meta">Diagram</span>
-                  </div>
-                </div>
-                <figcaption className="mt-3 flex gap-2 text-[0.78rem] leading-snug text-ink-soft">
-                  <span className="font-mono text-[0.68rem] whitespace-nowrap text-marker">Fig. 1</span>
-                  Workspace layout: library, reading sheet, and grounded companion stay aligned by page and citation.
-                </figcaption>
-              </figure>
             </div>
           )}
         </div>
