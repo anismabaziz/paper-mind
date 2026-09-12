@@ -167,6 +167,20 @@ export function ReaderPane() {
     if (stripRef.current) stripRef.current.scrollLeft = 0;
   }, [numPages]);
 
+  // Keep the active page thumbnail visible as the sheet scrolls
+  useEffect(() => {
+    const container = stripRef.current;
+    if (!container || numPages == null) return;
+    const target = container.querySelector<HTMLElement>(`[data-strip-page="${page}"]`);
+    if (!target) return;
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const isVisible = targetRect.left >= containerRect.left && targetRect.right <= containerRect.right;
+    if (!isVisible) {
+      target.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
+    }
+  }, [page, numPages]);
+
   useEffect(() => {
     if (numPages && page > numPages) setPage(numPages);
   }, [numPages, page]);
@@ -401,6 +415,7 @@ export function ReaderPane() {
                     <button
                       key={n}
                       type="button"
+                      data-strip-page={n}
                       onClick={() => {
                         setPage(n);
                         scrollToPage(n);
