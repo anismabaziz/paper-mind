@@ -31,9 +31,8 @@ from settings import (
     VectorSettings,
 )
 
-# Pinned offline-safe settings: sqlite in memory, deterministic secret, demo
-# on so flow tests exercise business logic (auth tests override demo_mode
-# explicitly). Every group is explicit so a real .env cannot leak through.
+# Pinned offline-safe settings: sqlite in memory, deterministic secret.
+# Every group is explicit so a real .env cannot leak through.
 TEST_SETTINGS = Settings(
     database=DatabaseSettings(database_url="sqlite:///:memory:"),
     storage=StorageSettings(
@@ -44,7 +43,7 @@ TEST_SETTINGS = Settings(
     chunking=ChunkingSettings(),
     rerank=RerankSettings(),
     parsing=ParsingSettings(),
-    auth=AuthSettings(jwt_secret="test-jwt-secret", demo_mode=True),
+    auth=AuthSettings(app_secret="test-app-secret"),
 )
 
 

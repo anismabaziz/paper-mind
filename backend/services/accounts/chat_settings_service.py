@@ -1,14 +1,13 @@
 """
-Per-user chat settings.
+Global chat settings.
 
 Supported model catalog, validation, key masking, and stored-key
-verification. Routes stay thin; the catalog and provider calls live here
-so adding a model means editing one map.
+verification for the singleton ``app_settings`` row. Routes stay thin;
+the catalog and provider calls live here so adding a model means editing
+one map.
 """
 
 from services.llm.base import ChatCredentials
-
-DEMO_EMAIL = "demo@papermind.local"
 
 SUPPORTED_MODELS = {
     "google": ["gemini-2.0-flash", "gemini-2.5-flash"],

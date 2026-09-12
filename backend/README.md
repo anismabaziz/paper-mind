@@ -1,7 +1,7 @@
 # PaperMind Backend
 
-Flask API for RAG chat over uploaded PDFs. Defaults to free local components
-(Qdrant + BGE-M3) so a reviewer can run without creating any account.
+Flask API for RAG chat over uploaded PDFs. Single-instance, no auth — one
+`app_settings` row holds the BYO provider key.
 
 ## Free local vs keys
 
@@ -16,8 +16,6 @@ Same table as the top-level README (kept here so env docs stay local):
 
 ## Setup (one command, from a clean clone)
 
-Free local (no keys):
-
 ```bash
 # from the repo root — start infra
 docker compose -f backend/compose.yaml up -d
@@ -25,19 +23,24 @@ docker compose -f backend/compose.yaml up -d
 cd backend
 uv sync
 uv run alembic upgrade head
-DEMO_MODE=true uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
+uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
 ```
 
-Keys path (opt-in):
+The only required env vars are `DATABASE_URL` and `QDRANT_URL` (defaults to
+`http://localhost:6333`). Optional: `APP_SECRET` — the Fernet root that
+encrypts the stored provider key. Set it in any persistent deployment;
+changing it invalidates previously stored keys. With no `APP_SECRET`, a
+per-process fallback is used and a warning is printed. After boot, open
+Settings in the app and paste your provider key.
 
-Either path boots Postgres and Qdrant. The backend
-runs locally via `uv run python app.py` and serves the API on `http://127.0.0.1:3000`
-(`GET /health` to check) after `uv run alembic upgrade head`.
+Keys path: provider, model, and API key are stored as a single global
+`app_settings` row (encrypted with `APP_SECRET`), configured through the
+app's Settings dialog — not in the environment.
 
 ## Chat provider settings
 
-There are no provider env vars. Chat provider, model, and API key are per-user
-settings stored encrypted in Postgres and configured through the app's
+There are no provider env vars. Chat provider, model, and API key are global
+app settings stored encrypted in Postgres and configured through the app's
 Settings dialog:
 
 - `GET /settings` — current settings (masked key) plus the supported
@@ -46,11 +49,11 @@ Settings dialog:
 - `POST /settings/verify` — one-token completion against the chosen
   provider/model with the stored key
 
-All three are authenticated; in demo mode they operate on the seeded demo
-user's record. Chat runs on the requester's own settings — a user with no
-saved settings gets a clear "configure a provider in Settings" error, and the
-backend boots fine with no keys at all. Retrieval-only evaluation
-(`evaluation.cli --live --no-judge`) needs no chat key either.
+All three are open (no auth) and operate on the single `app_settings` row.
+Chat runs on those global settings — a workspace with no saved settings gets
+a clear "configure a provider in Settings" error, and the backend boots fine
+with no keys at all. Retrieval-only evaluation (`evaluation.cli --live
+--no-judge`) needs no chat key either.
 
 ## Setup (manual, without Docker)
 
@@ -76,16 +79,6 @@ traceback.
 ```bash
 uv run python app.py
 ```
-
-## Auth
-
-With `DEMO_MODE=false`, user-facing endpoints require a JWT: register with
-`POST /auth/register` (`{"email", "password"}`), log in with
-`POST /auth/login`, and send the returned token as
-`Authorization: Bearer <token>`. Passwords are bcrypt-hashed. Setting
-`DEMO_MODE=true` disables the checks so the app is fully usable without
-logging in. `JWT_SECRET` signs tokens; unset, a per-process random secret is
-used (fine for demos, set it for shared deployments).
 
 ## Tests
 
@@ -128,4 +121,3 @@ index and deletes them afterwards. The index lives at `http://localhost:6333`
 (compose exposes 6333→6333 and
 6334→6334);
 no chat key is required for retrieval-only (`--no-judge`).
-

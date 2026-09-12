@@ -1,10 +1,10 @@
 """
-Symmetric encryption for user-supplied API keys.
+Symmetric encryption for provider API keys.
 
 Keys are encrypted with Fernet; the encryption key is derived from
-``JWT_SECRET`` (SHA-256, urlsafe base64), so no extra secret is stored or
-configured. The derivation is lazy: importing this module without
-``JWT_SECRET`` is fine, only an actual encrypt/decrypt call fails.
+``APP_SECRET`` (SHA-256, urlsafe base64). The derivation is lazy: importing
+this module without ``APP_SECRET`` is fine, only an actual encrypt/decrypt
+call fails.
 """
 
 import base64
@@ -22,10 +22,10 @@ class SecretsError(Exception):
 
 
 def _fernet() -> Fernet:
-    secret = get_settings().auth.jwt_secret
+    secret = get_settings().auth.app_secret
     if not secret:
         raise SecretsError(
-            "JWT_SECRET is required to encrypt stored API keys; set it in backend/.env"
+            "APP_SECRET is required to encrypt stored API keys; set it in backend/.env"
         )
     digest = hashlib.sha256(secret.encode()).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
@@ -43,5 +43,5 @@ def decrypt_api_key(ciphertext: str) -> str:
     except InvalidToken:
         raise SecretsError(
             "Stored API key could not be decrypted; was it encrypted with a "
-            "different JWT_SECRET?"
+            "different APP_SECRET?"
         )

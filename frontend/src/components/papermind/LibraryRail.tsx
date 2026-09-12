@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import type { File as DbFile } from "@/types/db";
+import { displayTitle } from "@/types/db";
 
 export function LibraryRail() {
   const queryClient = useQueryClient();
@@ -46,7 +47,7 @@ export function LibraryRail() {
   const filtered = useMemo(() => {
     const v = query.trim().toLowerCase();
     if (!v) return files;
-    return files.filter((f) => f.name.toLowerCase().includes(v));
+    return files.filter((f) => displayTitle(f).toLowerCase().includes(v));
   }, [files, query]);
 
   const uploadMutation = useMutation({
@@ -91,7 +92,7 @@ export function LibraryRail() {
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-rule bg-sidebar">
+    <aside className="flex w-64 max-w-full min-w-0 shrink-0 flex-col overflow-x-hidden border-r border-rule bg-sidebar">
       <header className="flex h-16 items-center justify-between border-b border-rule px-5">
         <div className="flex items-center gap-3">
           <span className="grid size-8 place-items-center bg-ink font-mono text-[0.7rem] font-bold text-paper">PM</span>
@@ -125,7 +126,7 @@ export function LibraryRail() {
         </label>
       </div>
 
-      <nav className="scroll-slim flex-1 overflow-y-auto px-3 py-4">
+      <nav className="scroll-slim flex-1 overflow-x-hidden overflow-y-auto min-w-0 max-w-full px-3 py-4">
         <p className="label-meta px-2 pb-2">Workspace</p>
         <ul className="mb-6 space-y-0.5">
           {(
@@ -183,7 +184,7 @@ export function LibraryRail() {
             </button>
           </div>
         ) : (
-          <ul className="space-y-px">
+          <ul className="min-w-0 max-w-full space-y-px overflow-hidden">
             {filtered.map((item, index) => {
               const active = selectedFile?.id === item.id;
               const isRemoving = deleteMutation.isPending && (deleteMutation.variables as DbFile | undefined)?.id === item.id;
@@ -191,10 +192,10 @@ export function LibraryRail() {
               const isProcessing = !item.is_processed;
 
               return (
-                <li key={item.id}>
+                <li key={item.id} className="min-w-0 max-w-full overflow-hidden">
                   <div
                     className={cn(
-                      "group relative flex items-center gap-0 border-l-2 text-left transition-colors",
+                      "group relative flex min-w-0 max-w-full items-center gap-0 overflow-hidden border-l-2 text-left transition-colors",
                       active ? "border-marker bg-paper" : "border-transparent hover:border-rule hover:bg-paper/70",
                       isRemoving && "opacity-50 pointer-events-none",
                     )}
@@ -202,9 +203,9 @@ export function LibraryRail() {
                     <button
                       type="button"
                       onClick={() => !isProcessing && setFile(item)}
-                      className={cn("flex flex-1 flex-col gap-1 px-3 py-3 text-left", isProcessing && "cursor-default")}
+                      className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isProcessing && "cursor-default")}
                     >
-                      <span className="flex w-full items-center justify-between font-mono text-[0.58rem] text-ink-faint">
+                      <span className="flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden font-mono text-[0.58rem] text-ink-faint">
                         <span>0{index + 1}</span>
                         <span className="flex items-center gap-1.5">
                           {isProcessing ? (
@@ -217,10 +218,10 @@ export function LibraryRail() {
                           )}
                         </span>
                       </span>
-                      <span className={cn("block text-[0.78rem] leading-snug line-clamp-2", active ? "font-medium text-ink" : "text-ink-soft group-hover:text-ink")}>
-                        {item.name.replace(/\.[^/.]+$/, "")}
+                      <span className={cn("block min-w-0 max-w-full overflow-hidden text-[0.78rem] leading-snug break-words line-clamp-2", active ? "font-medium text-ink" : "text-ink-soft group-hover:text-ink")}>
+                        {displayTitle(item)}
                       </span>
-                      <span className="block truncate text-[0.65rem] text-ink-faint">
+                      <span className="block min-w-0 max-w-full truncate overflow-hidden text-[0.65rem] text-ink-faint">
                         {item.metadata.content_type.split("/").pop()?.toUpperCase() ?? "PDF"} ·{" "}
                         {isProcessing ? "Queued for indexing" : "Indexed"}
                       </span>
