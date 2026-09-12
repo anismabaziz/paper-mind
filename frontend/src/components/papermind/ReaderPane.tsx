@@ -37,6 +37,23 @@ const thumbnailOptions = {
   standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
 };
 
+// Rail layout is the single source for thumbnail sizing. w-56 = 224px, px-4*2 = 32px,
+// gap-1.5 = 6px. One thumbnail column = (224 - 32 - 6) / 2 = 93px.
+// Minus 1px border each side and a small anti-rounding slack keeps the 2-col
+// grid inside the rail without triggering overflow-x on any page count.
+const RAIL_WIDTH_PX = 224;
+const RAIL_HORIZONTAL_PADDING_PX = 32;
+const THUMB_GRID_GAP_PX = 6;
+const THUMB_CELL_BORDER_PX = 2;
+const THUMB_SAFETY_PX = 5;
+const THUMBNAIL_PAGE_WIDTH = Math.floor((RAIL_WIDTH_PX - RAIL_HORIZONTAL_PADDING_PX - THUMB_GRID_GAP_PX) / 2) - THUMB_CELL_BORDER_PX - THUMB_SAFETY_PX; // 86
+
+// Shared clamp utilities — one fix for horizontal overflow, reused instead of
+// copying the same Tailwind cluster across 6+ nodes (see Standards review).
+const CLAMP = "box-border max-w-full min-w-0 overflow-hidden";
+const GRID_CLAMP = `box-border grid max-w-full min-w-0 grid-cols-2 gap-1.5 overflow-hidden`;
+const RAIL_CLAMP = `scroll-slim box-border hidden w-56 max-w-full min-w-0 shrink-0 overflow-x-hidden overflow-y-auto border-r border-rule bg-background/50 px-4 py-5 xl:block`;
+
 const ReaderDocument = lazy(() => import("./ReaderDocument"));
 
 function FakePageBars() {
@@ -51,12 +68,9 @@ function FakePageBars() {
 
 function ThumbnailPlaceholder({ count }: { count: number }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className={GRID_CLAMP}>
       {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
-        <div
-          key={n}
-          className="relative aspect-[3/4] overflow-hidden rounded-[2px] border border-rule bg-paper p-1.5 opacity-40"
-        >
+        <div key={n} className={`relative aspect-[3/4] rounded-[2px] border border-rule bg-paper p-1.5 opacity-40 ${CLAMP}`}>
           <FakePageBars />
           <span className="absolute right-1 bottom-1 font-mono text-[0.55rem] text-ink-faint">{n}</span>
         </div>
@@ -350,19 +364,19 @@ export function ReaderPane() {
         </div>
       </header>
 
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         {/* Outline + thumbnails */}
         {showOutline && (
-          <div className="scroll-slim hidden w-56 shrink-0 overflow-y-auto border-r border-rule bg-background/50 px-4 py-5 xl:block">
+          <div className={RAIL_CLAMP}>
             <p className="label-meta pb-3">Contents</p>
             {outline.length === 0 ? (
               <p className="py-2 font-mono text-[0.68rem] text-ink-faint">
                 {metaQuery.isLoading ? "Loading outline…" : "No outline available"}
               </p>
             ) : (
-              <ul className="space-y-1">
+              <ul className={`space-y-1 ${CLAMP}`}>
                 {outline.map((o, idx) => (
-                  <li key={`${o.title}-${o.page}-${idx}`}>
+                  <li key={`${o.title}-${o.page}-${idx}`} className={CLAMP}>
                     <button
                       type="button"
                       onClick={() => {
@@ -370,13 +384,13 @@ export function ReaderPane() {
                         scrollToPage(o.page);
                       }}
                       className={cn(
-                        "flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left text-[0.8rem] leading-snug transition-colors",
+                        `flex w-full items-baseline gap-2 rounded-sm px-2 py-1.5 text-left text-[0.8rem] leading-snug break-words transition-colors ${CLAMP}`,
                         page === o.page ? "bg-marker-soft text-ink" : "text-ink-soft hover:bg-paper hover:text-ink",
                       )}
                       style={{ paddingLeft: `${8 + Math.max(0, o.level - 1) * 12}px` }}
                     >
-                      <span className="font-mono text-[0.62rem] text-ink-faint">{o.page}</span>
-                      {o.title}
+                      <span className="shrink-0 font-mono text-[0.62rem] text-ink-faint">{o.page}</span>
+                      <span className="min-w-0 flex-1 break-words">{o.title}</span>
                     </button>
                   </li>
                 ))}
@@ -388,7 +402,7 @@ export function ReaderPane() {
               <ThumbnailPlaceholder count={numPages ?? 4} />
             ) : (
               <Document file={thumbnailFileData} options={thumbnailOptions} loading={<ThumbnailPlaceholder count={numPages} />}>
-                <div className="grid grid-cols-2 gap-2">
+                <div className={GRID_CLAMP}>
                   {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
                     <button
                       key={n}
@@ -398,16 +412,16 @@ export function ReaderPane() {
                         scrollToPage(n);
                       }}
                       className={cn(
-                        "group relative aspect-[3/4] overflow-hidden rounded-[2px] border bg-paper transition-all",
+                        `group relative aspect-[3/4] rounded-[2px] border bg-paper transition-all ${CLAMP}`,
                         page === n ? "border-marker shadow-sheet" : "border-rule opacity-70 hover:opacity-100",
                       )}
                     >
                       <Page
-                        width={90}
+                        width={THUMBNAIL_PAGE_WIDTH}
                         pageNumber={n}
                         renderTextLayer={false}
                         renderAnnotationLayer={false}
-                        className="bg-paper [&_canvas]:mx-auto [&_canvas]:block"
+                        className="max-w-full bg-paper [&_canvas]:mx-auto [&_canvas]:block [&_canvas]:max-w-full"
                       />
                       <span className="pointer-events-none absolute right-1 bottom-1 rounded-sm bg-paper/80 px-0.5 font-mono text-[0.55rem] text-ink-faint">
                         {n}
@@ -439,7 +453,7 @@ export function ReaderPane() {
         )}
 
         {/* Reading sheet */}
-        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-6 py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {!file ? (
             <div className="mx-auto flex min-h-[520px] max-w-[560px] flex-col items-center justify-center">
               <div className="paper-grain w-full bg-paper px-10 py-16 text-center shadow-sheet">
