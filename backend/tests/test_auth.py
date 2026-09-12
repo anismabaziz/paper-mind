@@ -48,12 +48,6 @@ def fake_repo():
         def get_file(self, filename):
             return None
 
-        def get_user_by_email(self, email):
-            return None
-
-        def create_user(self, email, pw):
-            return {"id": "u1", "email": email}
-
     return _Repo()
 
 

@@ -118,35 +118,6 @@ class Source(Base):
     page: Mapped[int | None] = mapped_column(Integer, default=None, nullable=True)
 
 
-class User(Base):
-    """User."""
-
-    __tablename__ = "users"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
-    email: Mapped[str] = mapped_column(String(255), unique=True)
-    password_hash: Mapped[str] = mapped_column(String(128))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-
-class UserSetting(Base):
-    """UserSetting."""
-
-    __tablename__ = "user_settings"
-
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
-    )
-    provider: Mapped[str] = mapped_column(String(32))
-    model: Mapped[str] = mapped_column(String(128))
-    encrypted_api_key: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-
 def _engine_kwargs(url: str):
     # Tests may use sqlite; only the in-memory variant needs special care.
     if url.startswith("sqlite"):
@@ -264,65 +235,6 @@ class Repository:
             original_filename=record.original_filename,
             is_processed=record.is_processed,
         )
-
-    # -- users ------------------------------------------------------------
-
-    def create_user(self, email: str, password_hash: str) -> dict:
-        """Do create user."""
-        with self._session_factory() as session, session.begin():
-            user = User(email=email, password_hash=password_hash)
-            session.add(user)
-            session.flush()
-            return {"id": user.id, "email": user.email}
-
-    def get_user_by_email(self, email: str) -> dict | None:
-        """Do get user by email."""
-        with self._session_factory() as session:
-            user = session.scalars(select(User).where(User.email == email)).first()
-            if not user:
-                return None
-            return {
-                "id": user.id,
-                "email": user.email,
-                "password_hash": user.password_hash,
-            }
-
-    # -- user settings ----------------------------------------------------
-
-    @staticmethod
-    def _settings_dict(record: UserSetting) -> dict:
-        return {
-            "user_id": record.user_id,
-            "provider": record.provider,
-            "model": record.model,
-            "encrypted_api_key": record.encrypted_api_key,
-            "updated_at": (
-                record.updated_at.isoformat() if record.updated_at else None
-            ),
-        }
-
-    def get_user_settings(self, user_id: str) -> dict | None:
-        """Do get user settings."""
-        with self._session_factory() as session:
-            record = session.get(UserSetting, user_id)
-            if not record:
-                return None
-            return self._settings_dict(record)
-
-    def upsert_user_settings(
-        self, user_id: str, provider: str, model: str, encrypted_api_key: str
-    ) -> dict:
-        """Do upsert user settings."""
-        with self._session_factory() as session, session.begin():
-            record = session.get(UserSetting, user_id)
-            if record is None:
-                record = UserSetting(user_id=user_id)
-                session.add(record)
-            record.provider = provider
-            record.model = model
-            record.encrypted_api_key = encrypted_api_key
-            session.flush()
-            return self._settings_dict(record)
 
     # -- app settings -----------------------------------------------------
 

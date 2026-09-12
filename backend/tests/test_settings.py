@@ -48,7 +48,6 @@ def test_defaults_cover_every_group(monkeypatch):
         "RERANK",
         "USE_DOCLING",
         "APP_SECRET",
-        "JWT_SECRET",
         monkeypatch=monkeypatch,
     )
     monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
@@ -86,16 +85,6 @@ def test_env_overrides_bind_to_groups(monkeypatch):
     assert s.auth.app_secret == "s3cret"
 
 
-def test_jwt_secret_alias_still_maps_to_app_secret(monkeypatch):
-    """Legacy JWT_SECRET env var still populates APP_SECRET."""
-    _clear("APP_SECRET", monkeypatch=monkeypatch)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
-    monkeypatch.setenv("JWT_SECRET", "legacy-secret")
-
-    s = Settings()
-    assert s.auth.app_secret == "legacy-secret"
-
-
 def test_building_settings_never_raises_without_env(monkeypatch):
     """Imports stay side-effect free: an empty env yields an empty URL."""
     _clear("DATABASE_URL", monkeypatch=monkeypatch)
@@ -128,7 +117,7 @@ def test_validate_exits_with_named_variable_in_message(capsys, monkeypatch):
 def test_validate_warns_when_app_secret_unset(capsys, monkeypatch):
     """Do test validate warns when app secret unset."""
     monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
-    _clear("APP_SECRET", "JWT_SECRET", monkeypatch=monkeypatch)
+    _clear("APP_SECRET", monkeypatch=monkeypatch)
 
     validate()
 
@@ -150,7 +139,7 @@ def test_app_secret_warning_helper(monkeypatch):
     """Do test app secret warning helper."""
     monkeypatch.setenv("DATABASE_URL", "postgresql://papermind")
 
-    _clear("APP_SECRET", "JWT_SECRET", monkeypatch=monkeypatch)
+    _clear("APP_SECRET", monkeypatch=monkeypatch)
     assert "APP_SECRET" in app_secret_warning(Settings())
 
     monkeypatch.setenv("APP_SECRET", "s3cret")

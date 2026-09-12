@@ -2,10 +2,9 @@
 Symmetric encryption for provider API keys.
 
 Keys are encrypted with Fernet; the encryption key is derived from
-``APP_SECRET`` (SHA-256, urlsafe base64). ``JWT_SECRET`` is still accepted
-as a legacy env alias via Settings, but the derivation always reads
-``APP_SECRET``. The derivation is lazy: importing this module without
-``APP_SECRET`` is fine, only an actual encrypt/decrypt call fails.
+``APP_SECRET`` (SHA-256, urlsafe base64). The derivation is lazy: importing
+this module without ``APP_SECRET`` is fine, only an actual encrypt/decrypt
+call fails.
 """
 
 import base64

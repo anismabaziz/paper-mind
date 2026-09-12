@@ -7,23 +7,23 @@ retrieved chunks of your document with the sources shown inline.
 This is a portfolio project built to run locally. It is PDF-only by design:
 the parser currently registers exactly one parser, for `.pdf`. There is
 no hosted deployment and no multi-tenant story. What it does, it does on your
-machine.
+machine. The app runs as a single-instance workspace — no accounts, no login —
+and stores one global set of provider settings.
 
 ## Features
 
 - PDF upload, parsing, chunking, and indexing into a vector store
 - Streaming chat over the indexed document (SSE), with retrieved sources
   attached to each answer
-- Per-user chat settings: bring your own provider (Google or Groq), model, and
-  API key via the Settings dialog — stored encrypted, never returned in
-  plaintext
-- JWT auth with a demo mode for frictionless local use
+- Single-instance BYO provider: bring your own provider (Google or Groq),
+  model, and API key via the Settings dialog — stored encrypted, never
+  returned in plaintext
+- Human titles derived from the PDF itself (metadata Title → original filename
+  → first heading) while the stable uuid filename stays on disk and in Qdrant
 - Retrieval evaluator with a committed ground-truth fixture
 - Postgres for persistence, local filesystem for uploaded files
 
 ## Quick start
-
-Free local path (no keys) — default:
 
 ```bash
 # Start infra (Postgres + Qdrant) — backend is not a compose service
@@ -32,7 +32,7 @@ docker compose -f backend/compose.yaml up -d
 cd backend
 uv sync
 uv run alembic upgrade head
-DEMO_MODE=true uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
+uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
 ```
 
 The frontend is a Vite app and runs separately:
@@ -47,18 +47,25 @@ Then open the printed localhost URL. Environment variables for the frontend
 are documented in [frontend/.env.example](frontend/.env.example), and the
 backend's in [backend/.env.example](backend/.env.example).
 
+Required env vars: `DATABASE_URL` (e.g. `postgresql+psycopg://papermind:papermind@localhost:5432/papermind`)
+and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional: `APP_SECRET`
+— the Fernet root that encrypts the stored provider key. Set it in any
+persistent deployment; changing it invalidates previously stored keys. With no
+`APP_SECRET`, a per-process fallback is used and a warning is printed. After
+boot, open Settings in the app and paste your provider key — no login step.
+
 ## Configuring a chat provider
 
 There are no provider keys in the environment. Open the Settings dialog in the
 app, pick a provider (Google or Groq) and a model from the curated list, paste
 your own API key, and hit "Test connection" to verify before saving. Keys are
-stored encrypted per user and applied to new chats immediately. In demo mode
-the dialog configures the seeded demo user, so a recruiter can run the whole
-flow without an account — the only thing they still need is one API key of
-their own.
+stored encrypted in the single `app_settings` row and applied to new chats
+immediately. The app boots with no provider key present; asking a question
+before saving settings returns a clear error pointing at Settings rather than
+a crash or an env default.
 
 Everything below runs free and local — no API keys anywhere in the pipeline
-except the chat LLM, which each user configures in the app:
+except the chat LLM, which is configured once in Settings:
 
 | Concern | Detail |
 |---|---|
@@ -67,7 +74,8 @@ except the chat LLM, which each user configures in the app:
 | Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
 | Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata |
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
-| Chat LLM | Per-user Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest |
+| Chat LLM | Single-instance Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest via `APP_SECRET` |
+| Document title | Derived from PDF metadata Title → original filename (without extension) → first heading; stored alongside the uuid `filename` |
 | Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no chat key); `--live` with the LLM-as-judge needs a key |
 
 All free-path knobs live in `backend/.env.example`:
@@ -98,8 +106,7 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 ┌──────────────┐  Vite dev   ┌───────────────────────────────────────┐
 │   Frontend   │────────────▶│              Backend (Flask)          │
 └──────────────┘             │                                       │
-                             │  auth ── JWT (bcrypt) or demo bypass  │
-                             │  settings ── per-user provider config │
+                             │  settings ── single global app_settings│
                              │  chat ── SSE stream, answers + sources│
                              │  eval ── retrieval/answer evaluator   │
                              │                                       │
@@ -111,7 +118,8 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
                              │  Postgres  │ │ Qdrant    │ │ Chat LLM │
                              │ (metadata, │ │ (vectors, │ │ (Google  │
                              │  messages, │ │  only)    │ │ or Groq, │
-                             │  settings) │ │           │ │ per user)│
+                             │  app       │ │           │ │  single  │
+                             │  settings) │ │           │ │  key)    │
                              └────────────┘ └───────────┘ └──────────┘
 ```
 
@@ -132,12 +140,18 @@ that preserves tables as Markdown and reading order for two-column / scanned
 / borderless-table PDFs. The heuristic in `backend/services/parsing/pdf_heuristics.py`
 routes only those PDFs to Docling; everything else stays on `pymupdf`.
 
-**Vendor-neutral auth.** Auth is plain JWT with bcrypt-hashed passwords,
-implemented in `backend/services/accounts/auth_service.py`. `DEMO_MODE=true` disables
-the checks entirely, which keeps the app usable for a demo or a code review
-without handing out accounts. Token signing falls back to a per-process
-random secret when `JWT_SECRET` is unset, which is fine for a laptop and
-documented as not fine for anything shared.
+**Single-instance, no auth.** The app has no users, no JWT, and no login
+screen — every endpoint is open. A single `app_settings` row (provider, model,
+`encrypted_api_key`) holds the BYO key, encrypted with Fernet derived from
+`APP_SECRET` (see [docs/adr/0005-single-instance-no-auth.md](docs/adr/0005-single-instance-no-auth.md)).
+`APP_SECRET` is optional locally but should be set in any persistent
+deployment; changing it invalidates previously stored keys.
+
+**Document title from context.** Storage keeps the uuid hex `filename` for
+stable Qdrant and filesystem paths; the display `title` is derived from the
+file's own context (PDF metadata Title → original filename → first heading)
+and surfaced in the library, reader toolbar, and metadata (see
+[docs/adr/0006-document-title-derived-from-context.md](docs/adr/0006-document-title-derived-from-context.md)).
 
 **Streaming with persisted sources.** Answers stream token by token over SSE
 rather than arriving as one block, because a retrieval answer can take long
@@ -146,16 +160,14 @@ stream completes and stored alongside the answer, so the conversation survives
 a reload. If the chosen provider fails mid-stream, the backend does not
 silently answer through a different one; it surfaces the failure so the user
 can fix their own key or quota. That no-fallback rule is deliberate — with
-user-supplied keys, a silent switch would bill someone else's account
+a single BYO key, a silent switch would hide the billing owner's error
 (see [docs/adr/0001-per-user-byo-provider-keys.md](docs/adr/0001-per-user-byo-provider-keys.md)).
 
-**Per-user BYO keys.** Provider, model, and API key are per-user settings
-configured in the Settings dialog, not server environment variables. Keys are
-encrypted at rest with Fernet and only ever returned masked. The app boots
-with no provider key present; a user who has not saved settings gets a clear
-error pointing at Settings rather than a crash or an env default. Demo mode
-maps anonymous requests to a seeded demo user whose settings are edited
-through the same dialog.
+**Single-instance BYO keys.** Provider, model, and API key are global app
+settings configured in the Settings dialog, not server environment variables.
+Keys are encrypted at rest with Fernet and only ever returned masked. The app
+boots with no provider key present; a workspace with no saved settings gets
+a clear error pointing at Settings rather than a crash or an env default.
 
 **Retrieval evaluation.** `backend/evaluation/` measures the retrieval
 pipeline against a committed ground-truth fixture: ten questions over two
@@ -189,6 +201,6 @@ The evaluator (`backend/evaluation/`) measures retrieval against
 - Database: Postgres
 - Vector store: Qdrant (local, `http://localhost:6333`)
 - Embeddings: BGE-M3 local via `sentence-transformers` (CPU, 1024d, no key)
-- LLM: Google Gemini or Groq, per user via the Settings dialog (BYO key, encrypted at rest)
+- LLM: Google Gemini or Groq, single-instance via the Settings dialog (BYO key, encrypted at rest)
 - Chunking: `tiktoken` `cl100k_base`, `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50`
 - Retrieval: hybrid dense + BM25 (`rank-bm25`) with RRF, gated local cross-encoder reranker

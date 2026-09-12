@@ -145,16 +145,12 @@ class AuthSettings(BaseSettings):
     App secret for encrypting stored provider API keys.
 
     The Fernet key is derived from ``APP_SECRET`` (SHA-256, urlsafe base64).
-    ``JWT_SECRET`` is accepted as a legacy alias so existing deployments
-    keep working, but ``APP_SECRET`` is the documented name.
     Changing it invalidates previously encrypted keys.
     """
 
     model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
-    app_secret: str | None = Field(
-        default=None, validation_alias=AliasChoices("APP_SECRET", "JWT_SECRET")
-    )
+    app_secret: str | None = Field(default=None, validation_alias="APP_SECRET")
 
 
 class Settings(BaseSettings):
