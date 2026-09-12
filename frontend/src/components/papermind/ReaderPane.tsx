@@ -454,7 +454,7 @@ export function ReaderPane() {
 
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {/* Reading sheet */}
-        <div ref={scrollRef} onScroll={handleScroll} className="flex min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 sm:px-6 py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 sm:px-6 py-8 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {!file ? (
             <div className="mx-auto flex min-h-[520px] max-w-[560px] flex-col items-center justify-center">
               <div className="paper-grain w-full bg-paper px-10 py-16 text-center shadow-sheet">
