@@ -167,17 +167,24 @@ export function ReaderPane() {
     if (stripRef.current) stripRef.current.scrollLeft = 0;
   }, [numPages]);
 
-  // Keep the active page thumbnail visible as the sheet scrolls
+  // Keep the active page thumbnail visible as the sheet scrolls, with breathing room at the edges
   useEffect(() => {
     const container = stripRef.current;
     if (!container || numPages == null) return;
     const target = container.querySelector<HTMLElement>(`[data-strip-page="${page}"]`);
     if (!target) return;
+    const PADDING = 16;
     const containerRect = container.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
-    const isVisible = targetRect.left >= containerRect.left && targetRect.right <= containerRect.right;
-    if (!isVisible) {
-      target.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
+    const isFullyVisible = targetRect.left >= containerRect.left + PADDING && targetRect.right <= containerRect.right - PADDING;
+    if (!isFullyVisible) {
+      const offsetLeft = target.offsetLeft;
+      const targetWidth = target.offsetWidth;
+      const containerWidth = container.clientWidth;
+      const desired = offsetLeft - containerWidth / 2 + targetWidth / 2;
+      const maxScroll = container.scrollWidth - containerWidth;
+      const clamped = Math.max(0, Math.min(maxScroll, desired));
+      container.scrollTo({ left: clamped, behavior: "smooth" });
     }
   }, [page, numPages]);
 
@@ -404,7 +411,7 @@ export function ReaderPane() {
             </div>
           )}
 
-          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-px-4">
             <span className="label-meta shrink-0 pr-1">Pages</span>
             {!thumbnailFileData || numPages == null ? (
               <ThumbnailPlaceholder count={numPages ?? 4} />
