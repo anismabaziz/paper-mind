@@ -154,6 +154,30 @@ class AuthSettings(BaseSettings):
     app_secret: str | None = Field(default=None, validation_alias="APP_SECRET")
 
 
+class UploadSettings(BaseSettings):
+    """Upload limits and allowed content types."""
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    max_upload_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        validation_alias=AliasChoices("MAX_UPLOAD_BYTES", "MAX_CONTENT_LENGTH"),
+    )
+    allowed_extensions: set[str] = {".pdf"}
+    allowed_mime_types: set[str] = {"application/pdf"}
+
+
+class FrontendSettings(BaseSettings):
+    """Frontend origin for CORS allowlist."""
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    frontend_origin: str = Field(
+        default="http://localhost:5173",
+        validation_alias=AliasChoices("FRONTEND_ORIGIN", "FRONTEND_URL", "CORS_ALLOWED_ORIGINS"),
+    )
+
+
 class Settings(BaseSettings):
     """Every environment variable the backend consumes, validated at build."""
 
@@ -171,6 +195,8 @@ class Settings(BaseSettings):
     )
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    upload: UploadSettings = Field(default_factory=UploadSettings)
+    frontend: FrontendSettings = Field(default_factory=FrontendSettings)
 
 
 _settings: Settings | None = None

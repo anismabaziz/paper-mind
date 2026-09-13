@@ -14,6 +14,11 @@ from services.llm.base import LLMProvider
 from services.prompts import SYSTEM_INSTRUCTION
 
 
+def clear_cache() -> None:
+    """Evict all cached Groq clients (called when keys rotate or tests reset)."""
+    _client.cache_clear()
+
+
 @lru_cache(maxsize=32)
 def _client(api_key: str) -> Groq:
     """Do client."""

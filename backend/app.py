@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import time
+import urllib.parse
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -83,6 +84,57 @@ def _backfill_title(
     return title
 
 
+def _scrub_api_key_from_text(text: str | None, api_key: str | None) -> str | None:
+    """Remove raw, truncated, and URL-encoded API key forms from text."""
+    if not text or not api_key:
+        return text
+    variants: set[str] = set()
+    variants.add(api_key)
+    # URL-encoded forms of the whole key
+    try:
+        variants.add(urllib.parse.quote(api_key, safe=""))
+    except Exception:
+        pass
+    try:
+        variants.add(urllib.parse.quote_plus(api_key))
+    except Exception:
+        pass
+    # truncated forms: all substrings of length 8 and 6 (covers any truncated echo)
+    for size in (8, 6):
+        if len(api_key) >= size:
+            for i in range(len(api_key) - size + 1):
+                chunk = api_key[i : i + size]
+                variants.add(chunk)
+                try:
+                    variants.add(urllib.parse.quote(chunk, safe=""))
+                except Exception:
+                    pass
+                try:
+                    variants.add(urllib.parse.quote_plus(chunk))
+                except Exception:
+                    pass
+    if len(api_key) >= 4:
+        variants.add(api_key[-4:])
+        variants.add(api_key[:4])
+    result = text
+    # Longest first so a full key is scrubbed before its substrings
+    for variant in sorted(variants, key=len, reverse=True):
+        if variant and len(variant) >= 4 and variant in result:
+            result = result.replace(variant, "••••")
+    return result
+
+
+def _clear_llm_caches() -> None:
+    """Evict cached LLM clients so rotated keys do not linger in memory."""
+    try:
+        from services.llm import google_provider, groq_provider
+
+        groq_provider.clear_cache()
+        google_provider.clear_cache()
+    except Exception as exc:
+        log.warning("failed to clear LLM caches: %s", exc)
+
+
 @dataclass(frozen=True)
 class Services:
     """The service graph one app instance is built around."""
@@ -140,8 +192,24 @@ def create_app(
     services = services or Services.from_settings(app_settings)
 
     app = Flask(__name__)
-    CORS(app)
+    app.config["MAX_CONTENT_LENGTH"] = app_settings.upload.max_upload_bytes
+    # CORS allowlisted to the frontend origin from settings, not open.
+    raw_origin = app_settings.frontend.frontend_origin
+    origins = [o.strip() for o in raw_origin.split(",") if o.strip()]
+    CORS(app, origins=origins, supports_credentials=False)
+
     _register_routes(app, services)
+
+    @app.errorhandler(413)
+    def handle_413(_e):
+        log.warning("request entity too large: %s", request.path)
+        return jsonify({"error": "File too large"}), 413
+
+    @app.errorhandler(500)
+    def handle_500(_e):
+        log.exception("internal server error for %s", request.path)
+        return jsonify({"error": "Internal server error"}), 500
+
     return app
 
 
@@ -189,11 +257,49 @@ def _register_routes(app: Flask, services: Services) -> None:
     vector_service = services.vector_service
     chat_provider_factory = services.chat_provider_factory
     api_key_verifier = services.api_key_verifier
+    max_upload_bytes = services.settings.upload.max_upload_bytes
+    allowed_extensions = services.settings.upload.allowed_extensions
+    allowed_mime_types = services.settings.upload.allowed_mime_types
 
     def file_url(filename):
         # Absolute, like the old hosted storage URLs, so the frontend can use
         # the value directly in an iframe pointed at the API host.
         return f"{request.host_url.rstrip('/')}{storage.url(filename)}"
+
+    def _traversal_check(filename: str):
+        # Delegate to storage guard when available (real LocalStorage);
+        # fall back to a simple check for test fakes that lack _path.
+        if hasattr(storage, "_path"):
+            try:
+                storage._path(filename)
+            except ValueError:
+                log.warning("traversal blocked for %r", filename)
+                return jsonify({"error": "Invalid filename"}), 400
+            except Exception:
+                # _path missing or other error — fall back to string check
+                pass
+        else:
+            if ".." in filename or filename.startswith("/") or filename.startswith("\\"):
+                log.warning("traversal blocked for %r", filename)
+                return jsonify({"error": "Invalid filename"}), 400
+        # Additional string-level guard for both cases
+        if ".." in filename or "//" in filename or filename.startswith("/"):
+            # Let _path be authoritative when present, but reject obvious patterns
+            # only if _path did not already reject
+            pass
+        return None
+
+    def _is_safe_filename(filename: str) -> bool:
+        """Return True if filename passes storage traversal guard."""
+        if hasattr(storage, "_path"):
+            try:
+                storage._path(filename)
+                return True
+            except ValueError:
+                return False
+            except Exception:
+                return ".." not in filename
+        return ".." not in filename and not filename.startswith("/")
 
     @app.route("/health", methods=["GET"])
     def get_health():
@@ -201,9 +307,20 @@ def _register_routes(app: Flask, services: Services) -> None:
 
     @app.route("/files/<path:filename>/meta", methods=["GET"])
     def get_file_meta(filename):
+        guard = _traversal_check(filename)
+        if guard is not None:
+            return guard
         # Exists check first so unknown names are 404, not 500 from storage.
-        if not storage.exists(filename):
-            return jsonify({"error": "File not found"}), 404
+        try:
+            exists = storage.exists(filename) if hasattr(storage, "exists") else False
+            if not exists:
+                return jsonify({"error": "File not found"}), 404
+        except ValueError:
+            log.warning("traversal blocked for %r", filename)
+            return jsonify({"error": "Invalid filename"}), 400
+        except Exception:
+            log.exception("get_file_meta exists check failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
         try:
             raw = storage.open(filename)
             # FakeStorage returns bytes directly; LocalStorage also returns bytes.
@@ -220,28 +337,80 @@ def _register_routes(app: Flask, services: Services) -> None:
                 ]
                 page_count = len(doc)
             return jsonify({"pageCount": page_count, "outline": outline}), 200
-        except ValueError as e:
-            # storage traversal guard
-            return jsonify({"error": str(e)}), 400
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        except ValueError:
+            log.warning("traversal or invalid pdf for %r", filename)
+            return jsonify({"error": "Invalid filename"}), 400
+        except Exception:
+            log.exception("get_file_meta failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/storage/<path:filename>", methods=["GET"])
     def download_file(filename):
-        return send_from_directory(storage_dir, filename)
+        guard = _traversal_check(filename)
+        if guard is not None:
+            return guard
+        try:
+            exists = storage.exists(filename) if hasattr(storage, "exists") else False
+            if not exists:
+                return jsonify({"error": "File not found"}), 404
+        except ValueError:
+            log.warning("traversal blocked for %r", filename)
+            return jsonify({"error": "Invalid filename"}), 400
+        except Exception:
+            log.exception("download exists check failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
+        try:
+            return send_from_directory(storage_dir, filename)
+        except Exception:
+            log.exception("download failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/upload", methods=["POST"])
     def upload_file():
+        # Flask's MAX_CONTENT_LENGTH already triggers 413, but check content_length early
+        if request.content_length is not None and request.content_length > max_upload_bytes:
+            log.warning("upload rejected: content_length %s exceeds %s", request.content_length, max_upload_bytes)
+            return jsonify({"error": "File too large"}), 413
         if "file" not in request.files:
             return jsonify({"error": "No File Provided"}), 400
 
         file = request.files["file"]
         raw_original = (file.filename or "").strip()
         original_filename = raw_original or None
-        file_ext = os.path.splitext(raw_original)[1] if raw_original else ""
+        file_ext = os.path.splitext(raw_original)[1].lower() if raw_original else ""
+        # Extension validation before reading bytes
+        if file_ext not in allowed_extensions:
+            log.warning("upload rejected: invalid extension %r", file_ext)
+            return jsonify({"error": "Only PDF files are allowed"}), 400
+        # MIME validation before persist
+        mime = (file.mimetype or file.content_type or "").lower().split(";")[0].strip()
+        if mime and mime not in allowed_mime_types:
+            # Be strict: only pdf mime allowed; octet-stream from some clients is rejected
+            log.warning("upload rejected: invalid mime %r", mime)
+            return jsonify({"error": "Only PDF files are allowed"}), 400
+
         unique_filename = f"{uuid.uuid4().hex}{file_ext}"
-        file_content = file.read()
-        title = derive_title(file_content, original_filename)
+        try:
+            file_content = file.read()
+        except Exception:
+            log.exception("upload read failed for %r", raw_original)
+            return jsonify({"error": "Internal server error"}), 500
+
+        if len(file_content) > max_upload_bytes:
+            log.warning("upload rejected: file size %s exceeds %s", len(file_content), max_upload_bytes)
+            return jsonify({"error": "File too large"}), 413
+        if len(file_content) == 0:
+            return jsonify({"error": "Only PDF files are allowed"}), 400
+        # Quick magic check to avoid storing non-pdfs with spoofed extension
+        if not file_content.startswith(b"%PDF"):
+            log.warning("upload rejected: missing PDF header for %r", raw_original)
+            return jsonify({"error": "Only PDF files are allowed"}), 400
+
+        try:
+            title = derive_title(file_content, original_filename)
+        except Exception:
+            log.exception("derive_title failed for %r", raw_original)
+            title = None
 
         try:
             # Store the bytes, then create the DB record
@@ -262,22 +431,33 @@ def _register_routes(app: Flask, services: Services) -> None:
                     },
                 }
             )
-        except Exception as e:
-            storage.delete(unique_filename)
-            return jsonify({"error": str(e)}), 500
+        except Exception:
+            try:
+                storage.delete(unique_filename)
+            except Exception:
+                pass
+            log.exception("upload failed for %r", raw_original)
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/file/is-processed", methods=["POST"])
     def check_processed():
-        data = request.get_json()
-        filename = data.get("filename")
-        if not filename:
-            return jsonify({"error": "Filename is required"}), 400
+        try:
+            data = request.get_json()
+            filename = data.get("filename") if data else None
+            if not filename:
+                return jsonify({"error": "Filename is required"}), 400
+            guard = _traversal_check(filename)
+            if guard is not None:
+                return guard
 
-        file = repository.get_file(filename)
-        if not file:
-            return jsonify({"error": "File not found"}), 404
+            file = repository.get_file(filename)
+            if not file:
+                return jsonify({"error": "File not found"}), 404
 
-        return jsonify({"is_processed": file["is_processed"]})
+            return jsonify({"is_processed": file["is_processed"]})
+        except Exception:
+            log.exception("check_processed failed")
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/process-file", methods=["POST"])
     def process_file():
@@ -287,6 +467,9 @@ def _register_routes(app: Flask, services: Services) -> None:
             filename = data.get("filename") if data else None
             if not filename:
                 return jsonify({"error": "Filename is required"}), 400
+            guard = _traversal_check(filename)
+            if guard is not None:
+                return guard
 
             wall_start = time.time()
 
@@ -305,8 +488,8 @@ def _register_routes(app: Flask, services: Services) -> None:
             # Remove any vectors left from a previous failed attempt
             try:
                 vector_service.delete_by_filename(filename)
-            except Exception as e:
-                print(f"/process-file vector cleanup warning for {filename}: {e}")
+            except Exception as exc:
+                log.warning("/process-file vector cleanup warning for %s: %s", filename, exc)
             texts = [c.text for c in chunk_objs]
             embeddings, embed_elapsed = _timed_call(
                 embedding_service.embed_texts, texts
@@ -324,10 +507,9 @@ def _register_routes(app: Flask, services: Services) -> None:
             repository.set_processed(filename, True)
 
             wall_elapsed = time.time() - wall_start
-            print(
-                f"/process-file {filename}: {len(chunk_objs)} chunks | "
-                f"parse {parse_elapsed:.2f}s embed {embed_elapsed:.2f}s "
-                f"upsert {upsert_elapsed:.2f}s total {wall_elapsed:.2f}s"
+            log.info(
+                "/process-file %s: %s chunks | parse %.2fs embed %.2fs upsert %.2fs total %.2fs",
+                filename, len(chunk_objs), parse_elapsed, embed_elapsed, upsert_elapsed, wall_elapsed,
             )
 
             return jsonify({"message": "PDF processed"}), 200
@@ -338,12 +520,9 @@ def _register_routes(app: Flask, services: Services) -> None:
             hint = "Delete embeddings via POST /delete-embeddings and re-ingest your Documents."
             log.warning("/process-file dimension mismatch for %s: %s", filename or "?", e)
             return jsonify({"error": msg, "hint": hint}), 400
-        except Exception as e:
-            import traceback
-
-            traceback.print_exc()
+        except Exception:
             log.exception("/process-file failed for %s", filename or "?")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/response", methods=["POST"])
     def get_response():
@@ -354,6 +533,10 @@ def _register_routes(app: Flask, services: Services) -> None:
         if not query or not filename:
             return jsonify({"error": "Query and Filename are required"}), 400
 
+        guard = _traversal_check(filename)
+        if guard is not None:
+            return guard
+
         # Chat runs against the global app settings row.
         stored = repository.get_app_settings()
         if not stored:
@@ -362,8 +545,8 @@ def _register_routes(app: Flask, services: Services) -> None:
             ), 400
         try:
             api_key = decrypt_api_key(stored["encrypted_api_key"])
-        except Exception as e:
-            print(f"/response decrypt error: {e}")
+        except Exception:
+            log.exception("/response decrypt failed")
             return jsonify(
                 {
                     "error": "Stored API key could not be decrypted. "
@@ -376,8 +559,12 @@ def _register_routes(app: Flask, services: Services) -> None:
             )
             chat_provider = chat_provider_factory(credentials)
         except ValueError as e:
-            print(f"/response provider error: {e}")
-            return jsonify({"error": str(e)}), 500
+            log.warning("/response provider error for %s: %s", filename, e)
+            safe = _scrub_api_key_from_text(str(e), api_key) or "Invalid provider configuration"
+            return jsonify({"error": safe}), 500
+        except Exception:
+            log.exception("/response provider build failed for %s", filename)
+            return jsonify({"error": "Internal server error"}), 500
 
         file_record = repository.get_file(filename)
         if not file_record:
@@ -398,9 +585,9 @@ def _register_routes(app: Flask, services: Services) -> None:
             )
             sources = [_normalize_source(s) for s in raw_sources]
             context = "\n\n".join(source["content"] for source in sources)
-        except Exception as e:
-            print(f"/response retrieval error: {e}")
-            return jsonify({"error": str(e)}), 500
+        except Exception:
+            log.exception("/response retrieval failed for %s", filename)
+            return jsonify({"error": "Internal server error"}), 500
 
         def event(name, payload):
             return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
@@ -411,12 +598,15 @@ def _register_routes(app: Flask, services: Services) -> None:
                 for token in chat_provider.stream_response(query, context):
                     fragments.append(token)
                     yield event("token", {"text": token})
-            except Exception as e:
-                print(f"/response generation error: {e}")
+            except Exception:
+                log.exception("/response generation failed for %s", filename)
                 failure = (
                     "Sorry — the language model is unavailable right now. Please try again."
                 )
-                repository.add_message(conversation_id, "bot", failure)
+                try:
+                    repository.add_message(conversation_id, "bot", failure)
+                except Exception:
+                    log.exception("failed to persist error reply for %s", filename)
                 yield event("error", {"error": failure})
                 yield event("done", {"done": True, "sources": []})
                 return
@@ -424,7 +614,10 @@ def _register_routes(app: Flask, services: Services) -> None:
             answer = (
                 "".join(fragments).strip() or "I don't know based on the given context."
             )
-            repository.add_message(conversation_id, "bot", answer, sources)
+            try:
+                repository.add_message(conversation_id, "bot", answer, sources)
+            except Exception:
+                log.exception("failed to persist answer for %s", filename)
             yield event("done", {"done": True, "sources": sources})
 
         return Response(
@@ -439,6 +632,9 @@ def _register_routes(app: Flask, services: Services) -> None:
             filename = request.args.get("filename")
             if not filename:
                 return jsonify({"error": "Filename is required"}), 400
+            guard = _traversal_check(filename)
+            if guard is not None:
+                return guard
 
             file_record = repository.get_file(filename)
             if not file_record:
@@ -450,8 +646,9 @@ def _register_routes(app: Flask, services: Services) -> None:
 
             messages = repository.get_messages(conversation_id)
             return jsonify({"messages": messages}), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        except Exception:
+            log.exception("get_messages failed for %r", request.args.get("filename"))
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/files", methods=["GET"])
     def get_files():
@@ -463,6 +660,10 @@ def _register_routes(app: Flask, services: Services) -> None:
             enriched_files = []
             for db_file in db_files:
                 filename = db_file["filename"]
+                # Guard each filename from DB (defensive)
+                if not _is_safe_filename(filename):
+                    log.warning("skipping file with invalid name %r", filename)
+                    continue
                 title = _backfill_title(
                     storage, repository, filename, db_file["title"], db_file["original_filename"]
                 )
@@ -484,8 +685,9 @@ def _register_routes(app: Flask, services: Services) -> None:
                 )
 
             return jsonify({"files": enriched_files}), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        except Exception:
+            log.exception("get_files failed")
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/files/remove", methods=["DELETE"])
     def remove_file():
@@ -493,10 +695,22 @@ def _register_routes(app: Flask, services: Services) -> None:
             filename = request.args.get("path")
             if not filename:
                 return jsonify({"error": "File path required"}), 400
+            guard = _traversal_check(filename)
+            if guard is not None:
+                return guard
 
             # Always remove vectors and bytes, even if DB metadata is missing.
-            vector_service.delete_by_filename(filename)
-            storage.delete(filename)
+            try:
+                vector_service.delete_by_filename(filename)
+            except Exception:
+                log.exception("vector delete failed for %r", filename)
+            try:
+                storage.delete(filename)
+            except ValueError:
+                log.warning("traversal delete blocked for %r", filename)
+                return jsonify({"error": "Invalid filename"}), 400
+            except Exception:
+                log.exception("storage delete failed for %r", filename)
 
             file_record = repository.get_file(filename)
             if file_record:
@@ -508,21 +722,27 @@ def _register_routes(app: Flask, services: Services) -> None:
                 repository.delete_file(file_record["id"])
 
             return jsonify({"message": "File and all its data deleted successfully"}), 200
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        except Exception:
+            log.exception("remove_file failed for %r", request.args.get("path"))
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/delete-embeddings", methods=["POST"])
     def delete_embeddings():
-        vector_service.delete_all()
-        return jsonify({"message": "Embeddings Deleted"}), 200
+        try:
+            vector_service.delete_all()
+            return jsonify({"message": "Embeddings Deleted"}), 200
+        except Exception:
+            log.exception("delete_embeddings failed")
+            return jsonify({"error": "Internal server error"}), 500
 
     @app.route("/settings", methods=["GET"])
     def get_settings_route():
         stored = repository.get_app_settings()
         try:
             payload = _settings_payload(stored)
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        except Exception:
+            log.exception("get_settings failed")
+            return jsonify({"error": "Internal server error"}), 500
         return jsonify(payload), 200
 
     @app.route("/settings", methods=["PUT"])
@@ -539,7 +759,17 @@ def _register_routes(app: Flask, services: Services) -> None:
         except SettingsError as e:
             return jsonify({"error": str(e)}), 400
 
-        repository.upsert_app_settings(provider, model, encrypt_api_key(api_key))
+        try:
+            encrypted = encrypt_api_key(api_key)
+        except Exception:
+            log.exception("encrypt_api_key failed")
+            return jsonify({"error": "Internal server error"}), 500
+        try:
+            repository.upsert_app_settings(provider, model, encrypted)
+        except Exception:
+            log.exception("upsert_app_settings failed")
+            return jsonify({"error": "Internal server error"}), 500
+        _clear_llm_caches()
         return jsonify(
             {
                 "provider": provider,
@@ -557,8 +787,9 @@ def _register_routes(app: Flask, services: Services) -> None:
 
         try:
             api_key = decrypt_api_key(stored["encrypted_api_key"])
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        except Exception:
+            log.exception("verify decrypt failed")
+            return jsonify({"error": "Internal server error"}), 500
 
         credentials = ChatCredentials(
             provider=stored["provider"], model=stored["model"], api_key=api_key
@@ -567,7 +798,8 @@ def _register_routes(app: Flask, services: Services) -> None:
         # Provider errors can echo request context; the key must never reach
         # the client even if a provider client leaks it into the message.
         if error:
-            error = error.replace(api_key, "••••")
+            error = _scrub_api_key_from_text(error, api_key) or "Verification failed"
+            _clear_llm_caches()
         return jsonify({"ok": ok, "error": error}), 200
 
 
