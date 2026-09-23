@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, isValidElement, type ComponentPropsWithoutRef } from "react";
-import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, Settings, Copy, Check, FileText } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { checkIsProcessed, chatStream, getMessages, type ISource } from "@/services/files";
+import { useEffect, useRef, useState } from "react";
+import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, Settings, FileText } from "lucide-react";
+import { chatStream, type ISource } from "@/services/files";
+import { useFileStatus, useFileMessages } from "@/hooks/useFiles";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
 import { cn } from "@/lib/utils";
@@ -93,58 +92,6 @@ function OpenSettingsLink() {
   );
 }
 
-function CodeBlock({ code, lang }: { code: string; lang: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="my-2 overflow-hidden rounded-sm border border-rule bg-canvas font-mono text-[0.72rem] leading-relaxed">
-      <div className="flex items-center justify-between border-b border-rule bg-paper px-3 py-1.5 font-sans text-[0.62rem] uppercase tracking-wider text-ink-faint">
-        <span>{lang || "code"}</span>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(code);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-          }}
-          className="flex items-center gap-1 text-ink-faint hover:text-ink"
-        >
-          {copied ? <Check className="size-3 text-marker" /> : <Copy className="size-3" />}
-          <span>{copied ? "Copied" : "Copy"}</span>
-        </button>
-      </div>
-      <pre className="overflow-x-auto p-3 text-ink">
-        <code>{code}</code>
-      </pre>
-    </div>
-  );
-}
-
-function MarkdownPre({ children }: ComponentPropsWithoutRef<"pre">) {
-  if (isValidElement<ComponentPropsWithoutRef<"code">>(children)) {
-    const { className, children: code } = children.props;
-    const lang = /language-(\S+)/.exec(className ?? "")?.[1] ?? "";
-    return <CodeBlock code={String(code).replace(/\n$/, "")} lang={lang} />;
-  }
-  return <pre>{children}</pre>;
-}
-
-function MarkdownInlineCode({ children, ...props }: ComponentPropsWithoutRef<"code">) {
-  return (
-    <code className="rounded-sm border border-rule bg-canvas px-1.5 py-0.5 font-mono text-[0.68rem] text-ink mx-0.5" {...props}>
-      {children}
-    </code>
-  );
-}
-
-function MarkdownRenderer({ text }: { text: string }) {
-  return (
-    <div className="font-serif text-[0.94rem] leading-[1.65] text-pretty [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:leading-relaxed [&_strong]:font-semibold [&_a]:text-marker [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-rule [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-ink-soft [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: MarkdownPre, code: MarkdownInlineCode }}>
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
-}
-
 export function ChatPane() {
   const { file } = usePdfStore();
   const [value, setValue] = useState("");
@@ -152,19 +99,21 @@ export function ChatPane() {
   const [thinking, setThinking] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const streamControllerRef = useRef<AbortController | null>(null);
 
-  const checkProcessedQuery = useQuery({
-    queryKey: [file?.name, "is-processed"],
-    queryFn: () => checkIsProcessed(file!),
-    enabled: !!file,
-    refetchInterval: (q) => (q.state.data?.is_processed ? false : 3000),
-  });
+  const checkProcessedQuery = useFileStatus(file);
+  const messagesQuery = useFileMessages(file, checkProcessedQuery.data?.is_processed === true);
 
-  const messagesQuery = useQuery({
-    queryKey: [file?.name, "messages"],
-    queryFn: () => getMessages(file!.name),
-    enabled: !!file && checkProcessedQuery.data?.is_processed === true,
-  });
+  useEffect(() => {
+    return () => {
+      streamControllerRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    streamControllerRef.current?.abort();
+    streamControllerRef.current = null;
+  }, [file?.id]);
 
   useEffect(() => {
     if (file) {
@@ -194,18 +143,32 @@ export function ChatPane() {
     const botId = crypto.randomUUID();
     setMessages((m) => [...m, { id: crypto.randomUUID(), text: body, sender: "user" }, { id: botId, text: "", sender: "bot" }]);
 
+    streamControllerRef.current?.abort();
+    const controller = new AbortController();
+    streamControllerRef.current = controller;
+
     try {
-      await chatStream(body, file.name, {
-        onToken: (t) => setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, text: msg.text + t } : msg))),
-        onError: (message) =>
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === botId ? { ...msg, text: message, failed: true, needsSettings: isSettingsError(message) } : msg,
+      await chatStream(
+        body,
+        file.name,
+        {
+          onToken: (t) => setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, text: msg.text + t } : msg))),
+          onError: (message) =>
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botId ? { ...msg, text: message, failed: true, needsSettings: isSettingsError(message) } : msg,
+              ),
             ),
-          ),
-        onDone: (sources) => setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources } : msg))),
-      });
+          onDone: (sources) => setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources } : msg))),
+        },
+        { signal: controller.signal },
+      );
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setMessages((prev) => prev.filter((msg) => msg.id !== botId || msg.text !== ""));
+        setThinking(false);
+        return;
+      }
       const message = e instanceof Error ? e.message : "";
       setMessages((prev) =>
         prev.map((msg) =>

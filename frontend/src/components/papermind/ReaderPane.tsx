@@ -14,8 +14,7 @@ import {
 import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
 import useMobileUi from "@/store/mobile-ui";
-import { checkIsProcessed, deleteFile, getFileMeta } from "@/services/files";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useFileStatus, useFileMeta, useDeleteFile } from "@/hooks/useFiles";
 import { cn } from "@/lib/utils";
 import { displayTitle } from "@/types/db";
 import {
@@ -99,7 +98,6 @@ function usePdfFileData(file: { url: string } | null) {
 
 export function ReaderPane() {
   const { file, citationTarget } = usePdfStore();
-  const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const outlineStripRef = useRef<HTMLDivElement>(null);
@@ -116,22 +114,11 @@ export function ReaderPane() {
   const isProgrammaticRef = useRef(false);
   const programmaticTimeoutRef = useRef<number | null>(null);
 
-  const checkProcessedQuery = useQuery({
-    queryKey: [file?.name, "is-processed"],
-    queryFn: () => checkIsProcessed(file!),
-    enabled: !!file,
-  });
+  const checkProcessedQuery = useFileStatus(file);
 
-  const metaQuery = useQuery({
-    queryKey: [file?.name, "meta"],
-    queryFn: () => getFileMeta(file!.name),
-    enabled: !!file,
-  });
+  const metaQuery = useFileMeta(file);
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteFile,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
-  });
+  const deleteMutation = useDeleteFile();
 
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
   const outline = metaQuery.data?.outline ?? [];
