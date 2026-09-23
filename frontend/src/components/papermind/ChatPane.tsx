@@ -98,11 +98,22 @@ export function ChatPane() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [thinking, setThinking] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamControllerRef = useRef<AbortController | null>(null);
+  // Identity of the document a stream was started for. Late tokens from a
+  // previous document are ignored so they never land in the wrong
+  // conversation, even if the abort races the next chunk.
+  const fileIdRef = useRef<string | null>(null);
 
   const checkProcessedQuery = useFileStatus(file);
   const messagesQuery = useFileMessages(file, checkProcessedQuery.data?.is_processed === true);
+  const watchedFileId = file?.id ?? null;
+
+  useEffect(() => {
+    fileIdRef.current = watchedFileId;
+  }, [watchedFileId]);
 
   useEffect(() => {
     return () => {
@@ -113,22 +124,23 @@ export function ChatPane() {
   useEffect(() => {
     streamControllerRef.current?.abort();
     streamControllerRef.current = null;
-  }, [file?.id]);
+  }, [watchedFileId]);
+
+  // Drop the previous conversation the moment the document changes instead
+  // of flashing its history until the new query resolves.
+  useEffect(() => {
+    setMessages([]);
+    stickToBottomRef.current = true;
+  }, [watchedFileId]);
 
   useEffect(() => {
-    if (file) {
-      if (messagesQuery.data?.messages) {
-        setMessages(messagesQuery.data.messages.map((m) => ({ id: m.id, text: m.text, sender: m.sender, sources: m.sources })));
-      } else if (!messagesQuery.isFetching) {
-        setMessages([]);
-      }
-    } else {
-      setMessages([]);
+    if (watchedFileId && messagesQuery.data?.messages) {
+      setMessages(messagesQuery.data.messages.map((m) => ({ id: m.id, text: m.text, sender: m.sender, sources: m.sources })));
     }
-  }, [file, messagesQuery.data, messagesQuery.isFetching]);
+  }, [watchedFileId, messagesQuery.data]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (stickToBottomRef.current) endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, thinking]);
 
   useEffect(() => {
@@ -146,26 +158,42 @@ export function ChatPane() {
     streamControllerRef.current?.abort();
     const controller = new AbortController();
     streamControllerRef.current = controller;
+    const activeFileId = file.id;
+    // Late chunks from a superseded stream are dropped so tokens never land
+    // in the wrong conversation, even if the abort races the next chunk.
+    const isStale = () => fileIdRef.current !== activeFileId || controller.signal.aborted;
 
     try {
       await chatStream(
         body,
         file.name,
         {
-          onToken: (t) => setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, text: msg.text + t } : msg))),
-          onError: (message) =>
+          onToken: (t) => {
+            if (isStale()) return;
+            setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, text: msg.text + t } : msg)));
+          },
+          onError: (message) => {
+            if (isStale()) return;
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === botId ? { ...msg, text: message, failed: true, needsSettings: isSettingsError(message) } : msg,
               ),
-            ),
-          onDone: (sources) => setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources } : msg))),
+            );
+          },
+          onDone: (sources) => {
+            if (isStale()) return;
+            setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources } : msg)));
+          },
         },
         { signal: controller.signal },
       );
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         setMessages((prev) => prev.filter((msg) => msg.id !== botId || msg.text !== ""));
+        setThinking(false);
+        return;
+      }
+      if (isStale()) {
         setThinking(false);
         return;
       }
@@ -200,7 +228,15 @@ export function ChatPane() {
         </div>
       </header>
 
-      <div className="scroll-slim flex-1 space-y-7 overflow-y-auto px-5 py-6">
+      <div
+        ref={scrollContainerRef}
+        onScroll={() => {
+          const el = scrollContainerRef.current;
+          if (!el) return;
+          stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+        className="scroll-slim flex-1 space-y-7 overflow-y-auto px-5 py-6"
+      >
         {!file && (
           <div className="flex flex-col items-center py-16 text-center">
             <div className="grid size-10 place-items-center border border-rule bg-paper text-ink-faint">

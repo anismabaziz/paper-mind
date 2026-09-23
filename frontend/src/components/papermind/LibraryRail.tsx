@@ -55,8 +55,8 @@ export function LibraryRail() {
         console.error("Indexing failed:", err);
         alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
+        // ["files"] prefix covers the per-document status/messages/meta keys.
         queryClient.invalidateQueries({ queryKey: ["files"] });
-        queryClient.invalidateQueries({ queryKey: [data.file.name, "is-processed"] });
       }
     },
     onError: (err) => {

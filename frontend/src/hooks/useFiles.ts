@@ -10,6 +10,16 @@ import {
 } from "@/services/files";
 import type { File as DbFile } from "@/types/db";
 
+// All per-document keys live under the "files" prefix so a single
+// invalidateQueries({ queryKey: ["files"] }) after upload/delete/process
+// drops every derived entry instead of leaving stale status/messages/meta
+// behind. The filename is the backend identity for these routes.
+export const fileKeys = {
+  status: (name: string) => ["files", name, "is-processed"] as const,
+  messages: (name: string) => ["files", name, "messages"] as const,
+  meta: (name: string) => ["files", name, "meta"] as const,
+};
+
 export function useFiles() {
   return useQuery({
     queryKey: ["files"],
@@ -21,9 +31,13 @@ export function useFiles() {
   });
 }
 
+// All per-document keys live under the "files" prefix so a single
+// invalidateQueries({ queryKey: ["files"] }) after upload/delete/process
+// drops every derived entry instead of leaving stale status/messages/meta
+// behind. The filename is the backend identity for these routes.
 export function useFileStatus(file: Pick<DbFile, "name"> | null | undefined) {
   return useQuery({
-    queryKey: [file?.name, "is-processed"],
+    queryKey: fileKeys.status(file?.name ?? ""),
     queryFn: () => checkIsProcessed(file as DbFile),
     enabled: !!file,
     refetchInterval: (q) => (q.state.data?.is_processed ? false : 3000),
@@ -32,7 +46,7 @@ export function useFileStatus(file: Pick<DbFile, "name"> | null | undefined) {
 
 export function useFileMessages(file: Pick<DbFile, "name"> | null | undefined, enabled: boolean) {
   return useQuery({
-    queryKey: [file?.name, "messages"],
+    queryKey: fileKeys.messages(file?.name ?? ""),
     queryFn: () => getMessages((file as DbFile).name),
     enabled: !!file && enabled,
   });
@@ -40,7 +54,7 @@ export function useFileMessages(file: Pick<DbFile, "name"> | null | undefined, e
 
 export function useFileMeta(file: Pick<DbFile, "name"> | null | undefined) {
   return useQuery({
-    queryKey: [file?.name, "meta"],
+    queryKey: fileKeys.meta(file?.name ?? ""),
     queryFn: () => getFileMeta((file as DbFile).name),
     enabled: !!file,
   });
