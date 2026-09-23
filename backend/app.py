@@ -37,7 +37,11 @@ from services.accounts.chat_settings_service import (
     validate,
     verify_api_key,
 )
-from services.accounts.secrets_service import decrypt_api_key, encrypt_api_key
+from services.accounts.secrets_service import (
+    SecretsResaveRequiredError,
+    decrypt_api_key,
+    encrypt_api_key,
+)
 from services.embeddings.local_embeddings import LocalEmbeddingService
 from services.llm.base import ChatCredentials, LLMProvider
 from services.llm.factory import build_chat_provider
@@ -586,6 +590,9 @@ def _register_routes(app: Flask, services: Services) -> None:
             ), 400
         try:
             api_key = decrypt_api_key(stored["encrypted_api_key"])
+        except SecretsResaveRequiredError as e:
+            log.warning("/response stale key derivation")
+            return jsonify({"error": str(e)}), 400
         except Exception:
             log.exception("/response decrypt failed")
             return jsonify(
@@ -792,6 +799,9 @@ def _register_routes(app: Flask, services: Services) -> None:
         stored = repository.get_app_settings()
         try:
             payload = _settings_payload(stored)
+        except SecretsResaveRequiredError as e:
+            log.warning("get_settings stale key derivation")
+            return jsonify({"error": str(e)}), 400
         except Exception:
             log.exception("get_settings failed")
             return jsonify({"error": "Internal server error"}), 500
@@ -839,6 +849,9 @@ def _register_routes(app: Flask, services: Services) -> None:
 
         try:
             api_key = decrypt_api_key(stored["encrypted_api_key"])
+        except SecretsResaveRequiredError as e:
+            log.warning("verify stale key derivation")
+            return jsonify({"error": str(e)}), 400
         except Exception:
             log.exception("verify decrypt failed")
             return jsonify({"error": "Internal server error"}), 500

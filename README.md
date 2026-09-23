@@ -51,8 +51,8 @@ Required env vars: `DATABASE_URL` (e.g. `postgresql+psycopg://papermind:papermin
 and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional: `APP_SECRET`
 — the Fernet root that encrypts the stored provider key. Set it in any
 persistent deployment; changing it invalidates previously stored keys. With no
-`APP_SECRET`, a per-process fallback is used and a warning is printed. After
-boot, open Settings in the app and paste your provider key — no login step.
+`APP_SECRET`, a warning is printed and stored keys cannot be encrypted or
+decrypted. After boot, open Settings in the app and paste your provider key — no login step.
 
 ## Configuring a chat provider
 

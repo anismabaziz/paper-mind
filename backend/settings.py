@@ -145,8 +145,9 @@ class AuthSettings(BaseSettings):
     """
     App secret for encrypting stored provider API keys.
 
-    The Fernet key is derived from ``APP_SECRET`` (SHA-256, urlsafe base64).
-    Changing it invalidates previously encrypted keys.
+    The Fernet key is derived from ``APP_SECRET`` via HKDF-SHA256 with a
+    versioned info string (urlsafe base64). Changing it invalidates
+    previously encrypted keys.
     """
 
     model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
@@ -221,13 +222,12 @@ def set_settings(settings: Settings | None) -> None:
 
 
 def app_secret_warning(settings: Settings) -> str | None:
-    """Return a warning when APP_SECRET is unset (keys won't survive restarts)."""
+    """Return a warning when APP_SECRET is unset (keys need it to decrypt)."""
     if settings.auth.app_secret:
         return None
     return (
-        "Warning: APP_SECRET is unset; stored provider keys are encrypted "
-        "with a per-process fallback and will not decrypt after a restart. "
-        "Set APP_SECRET in .env."
+        "Warning: APP_SECRET is unset; stored provider keys cannot be "
+        "encrypted or decrypted without it. Set APP_SECRET in .env."
     )
 
 

@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app import Services, create_app
 from db import Base, Repository
-from services.accounts.secrets_service import decrypt_api_key
+from services.accounts.secrets_service import RESAVE_MESSAGE, decrypt_api_key
 from services.llm.base import ChatCredentials
 
 
@@ -203,6 +203,62 @@ def test_verify_error_never_contains_the_key(repo, app_secret, settings_obj):
         )
         body = client.post("/settings/verify").get_json()
     assert secret not in body["error"]
+
+
+def _legacy_encrypt(plaintext: str, secret: str) -> str:
+    """Encrypt with the pre-HKDF SHA-256 derivation (old rows on disk)."""
+    import base64
+    import hashlib
+
+    from cryptography.fernet import Fernet
+
+    digest = hashlib.sha256(secret.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(digest)).encrypt(plaintext.encode()).decode()
+
+
+def _seed_legacy_row(repo, secret):
+    """Store an old-derivation row; returns the plaintext (never persisted)."""
+    plaintext = "sk-legacy-row-1234567890"
+    repo.upsert_app_settings(
+        "groq", "llama-3.3-70b-versatile", _legacy_encrypt(plaintext, secret)
+    )
+    return plaintext
+
+
+def test_get_settings_old_row_returns_resave_400(repo, app_secret, settings_obj):
+    """GET /settings on an old row returns 400 with a re-save message."""
+    application = make_app(repo, settings_obj)
+    plaintext = _seed_legacy_row(repo, app_secret)
+    with application.test_client() as client:
+        response = client.get("/settings")
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["error"] == RESAVE_MESSAGE
+    assert plaintext not in body["error"]
+
+
+def test_verify_old_row_returns_resave_400(repo, app_secret, settings_obj):
+    """POST /settings/verify on an old row returns 400 with a re-save message."""
+    application = make_app(repo, settings_obj)
+    plaintext = _seed_legacy_row(repo, app_secret)
+    with application.test_client() as client:
+        response = client.post("/settings/verify")
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["error"] == RESAVE_MESSAGE
+    assert plaintext not in body["error"]
+
+
+def test_response_old_row_returns_resave_400(repo, app_secret, settings_obj):
+    """POST /response on an old row returns 400 with a re-save message."""
+    application = make_app(repo, settings_obj)
+    plaintext = _seed_legacy_row(repo, app_secret)
+    with application.test_client() as client:
+        response = client.post("/response", json={"query": "hi", "filename": "doc.pdf"})
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["error"] == RESAVE_MESSAGE
+    assert plaintext not in body["error"]
 
 
 def test_put_is_idempotent_and_global(repo, app_secret, settings_obj):
