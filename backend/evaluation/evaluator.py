@@ -19,9 +19,7 @@ parse/embed/upsert wall time). Free local path uses Qdrant on
 ``http://localhost:6333`` with no API keys (retrieval-only ``--no-judge``).
 """
 
-import hashlib
 import json
-import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -29,7 +27,11 @@ from evaluation import judge as judge_module
 from evaluation.metrics import RetrievalReport, hit_at_k, recall_at_k, summarize
 from services.parsing.document_parser import DocumentIngestor
 from services.retrieval.reranker import RerankerService
-from services.retrieval.vector_service import matches_to_sources, shape_sources
+from services.retrieval.vector_service import (
+    build_vectors_from_chunks,
+    matches_to_sources,
+    shape_sources,
+)
 
 
 def _is_rerank_enabled() -> bool:
@@ -111,32 +113,11 @@ def index_document(
         for gate reports (sec/PDF).
     """
     raw = read_document(filename, docs_dir)
-    chunks, page_numbers = _ingestor().get_chunks(filename, raw)
-    embeddings = embed_fn(chunks)
-    # Build BM25 sparse vectors (hash-based TF) for hybrid indexing
-    try:
-        from services.retrieval.hybrid import build_sparse_vectors
-    except Exception:
-        build_sparse_vectors = None  # type: ignore
-    if build_sparse_vectors is not None:
-        sparse_vectors = build_sparse_vectors(chunks)
-    else:
-        sparse_vectors = [{"indices": [], "values": []} for _ in chunks]
-    vectors = [
-        {
-            "id": str(uuid.uuid4()),
-            "values": embeddings[i],
-            "sparse_vector": sparse_vectors[i],
-            "metadata": {
-                "content": chunks[i],
-                "pdf_name": pdf_name or filename,
-                "chunk_index": i,
-                "page_no": page_numbers[i],
-                "content_hash": hashlib.sha256(chunks[i].encode("utf-8")).hexdigest(),
-            },
-        }
-        for i in range(len(chunks))
-    ]
+    chunks = _ingestor().get_chunk_objects(filename, raw)
+    embeddings = embed_fn([chunk.text for chunk in chunks])
+    vectors = build_vectors_from_chunks(
+        embeddings, chunks, pdf_name or filename
+    )
     index.upsert(vectors)
     return len(chunks)
 

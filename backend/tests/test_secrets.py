@@ -90,11 +90,12 @@ def test_new_ciphertext_uses_hkdf_not_legacy_sha256(app_secret):
 
 
 def test_app_settings_upsert_round_trip(app_secret):
-    """Global app settings round-trip via repository."""
+    """Global app settings round-trip through its repository."""
     from sqlalchemy import create_engine
     from sqlalchemy.pool import StaticPool
     from sqlalchemy.orm import sessionmaker
-    from db import Base, Repository
+    from db import Base
+    from repositories import AppSettingsRepository
 
     engine = create_engine(
         "sqlite://",
@@ -102,7 +103,7 @@ def test_app_settings_upsert_round_trip(app_secret):
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    repo = Repository(sessionmaker(bind=engine))
+    repo = AppSettingsRepository(sessionmaker(bind=engine))
 
     assert repo.get_app_settings() is None
 

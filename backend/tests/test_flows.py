@@ -7,6 +7,7 @@ repository runs against an in-memory sqlite. No test touches a vector
 store, an LLM provider, a real Postgres, or the real upload dir.
 """
 
+import ast
 import io
 import json
 import os
@@ -20,8 +21,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import Services, create_app
-from db import Base, Repository, AppSettings
+from app import create_app
+from composition import Services
+from db import AppSettings, Base
+from repositories import build_repositories
 from services.accounts.secrets_service import encrypt_api_key
 from services.llm.base import ChatCredentials
 from services.parsing.document_parser import Chunk
@@ -29,20 +32,19 @@ from services.retrieval.vector_service import TOP_K, shape_sources
 
 
 @pytest.fixture
-def repo():
-    """Do repo."""
+def repositories():
+    """Build all aggregate repositories over one in-memory database."""
     engine = create_engine(
         "sqlite://",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    repository = Repository(sessionmaker(bind=engine))
-    # Global app settings row is required before chat will answer.
-    repository.upsert_app_settings(
+    repositories = build_repositories(sessionmaker(bind=engine))
+    repositories.app_settings.upsert_app_settings(
         "groq", "openai/gpt-oss-120b", encrypt_api_key("sk-test-chat-key")
     )
-    return repository
+    return repositories
 
 
 class FakeStorage:
@@ -229,13 +231,18 @@ def fake_chat():
 
 @pytest.fixture
 def app(
-    repo, fake_storage, fake_vectors, fake_parser, fake_embeddings, fake_chat,
+    repositories,
+    fake_storage,
+    fake_vectors,
+    fake_parser,
+    fake_embeddings,
+    fake_chat,
     settings_obj,
 ):
     """Compose the app like production, with fakes wired through the factory."""
     services = replace(
         Services.from_settings(settings_obj),
-        repository=repo,
+        repositories=repositories,
         storage=fake_storage,
         parser=fake_parser,
         embedding_service=fake_embeddings,
@@ -274,7 +281,7 @@ def upload(client, name="doc.pdf"):
     return client.post("/upload", data=data, content_type="multipart/form-data")
 
 
-def test_upload_stores_bytes_and_creates_record(client, fake_storage, repo):
+def test_upload_stores_bytes_and_creates_record(client, fake_storage):
     """Do test upload stores bytes and creates record."""
     response = upload(client)
 
@@ -399,9 +406,9 @@ def test_provider_failure_surfaces_without_fallback():
         list(provider.stream_response("q", "ctx"))
 
 
-def test_chat_without_settings_asks_user_to_configure(client, repo):
+def test_chat_without_settings_asks_user_to_configure(client, repositories):
     """No saved global settings yields a settings-oriented 400, not an LLM call."""
-    with repo._session_factory() as session, session.begin():
+    with repositories.app_settings._session_factory() as session, session.begin():
         session.query(AppSettings).delete(synchronize_session=False)
 
     filename = upload(client).get_json()["file"]["name"]
@@ -474,7 +481,7 @@ def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fak
 
 
 def test_delete_removes_everything_with_no_orphans(
-    client, fake_storage, fake_vectors, repo
+    client, fake_storage, fake_vectors, repositories
 ):
     """Do test delete removes everything with no orphans."""
     filename = upload(client).get_json()["file"]["name"]
@@ -489,13 +496,13 @@ def test_delete_removes_everything_with_no_orphans(
     # appears once from that cleanup plus once from the explicit delete.
     assert filename in fake_vectors.deleted
     assert fake_vectors.deleted.count(filename) >= 1
-    assert repo.list_files() == []
+    assert repositories.files.list_files() == []
     assert client.get(f"/messages?filename={filename}").get_json()["messages"] == []
     assert client.get("/files").get_json()["files"] == []
 
 
 def test_process_embed_failure_compensates_with_no_orphans(
-    client, fake_vectors, fake_embeddings, repo
+    client, fake_vectors, fake_embeddings
 ):
     """An embed failure removes this doc's vectors and leaves it not processed."""
     filename = upload(client).get_json()["file"]["name"]
@@ -520,7 +527,7 @@ def test_process_embed_failure_compensates_with_no_orphans(
 
 
 def test_process_upsert_failure_compensates_with_no_orphans(
-    client, fake_vectors, repo
+    client, fake_vectors
 ):
     """An upsert failure removes this doc's vectors and leaves it not processed."""
     filename = upload(client).get_json()["file"]["name"]
@@ -543,7 +550,7 @@ def test_process_upsert_failure_compensates_with_no_orphans(
 
 
 def test_process_retry_cleans_stale_vectors_before_rewrite(
-    client, fake_vectors, repo
+    client, fake_vectors
 ):
     """A retry after failure cleans stale vectors first, so it stays idempotent."""
     filename = upload(client).get_json()["file"]["name"]
@@ -576,7 +583,7 @@ def test_process_retry_cleans_stale_vectors_before_rewrite(
 
 
 def test_chat_retrieval_failure_leaves_no_stranded_message(
-    client, fake_vectors, repo
+    client, fake_vectors
 ):
     """A retrieval failure persists no user message, so no stranded question."""
     filename = upload(client).get_json()["file"]["name"]
@@ -595,7 +602,7 @@ def test_chat_retrieval_failure_leaves_no_stranded_message(
 
 
 def test_chat_embed_failure_leaves_no_stranded_message(
-    client, fake_embeddings, repo
+    client, fake_embeddings
 ):
     """An embed failure on the query path also leaves no stranded question."""
     filename = upload(client).get_json()["file"]["name"]
@@ -614,10 +621,10 @@ def test_chat_embed_failure_leaves_no_stranded_message(
 
 
 def test_chat_query_too_long_rejected_before_embedding(
-    client, fake_embeddings, repo
+    client, fake_embeddings
 ):
     """An oversized query is a 400 and never reaches the embedding model."""
-    from app import MAX_QUERY_CHARS
+    from routes.chat import MAX_QUERY_CHARS
 
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
@@ -632,6 +639,49 @@ def test_chat_query_too_long_rejected_before_embedding(
     assert fake_embeddings.embedded == embedded_before
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
     assert history == []
+
+
+def test_conversation_repository_round_trip():
+    """Conversation, message, and source records survive their aggregate interface."""
+    from repositories import ConversationRepository, FileRepository
+
+    engine = create_engine(
+        "sqlite://",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    file_record = FileRepository(session_factory).create_file("doc.pdf", title="Doc")
+    repository = ConversationRepository(session_factory)
+
+    conversation_id = repository.create_conversation(file_record["id"])
+    repository.add_message(
+        conversation_id,
+        "assistant",
+        "Answer",
+        [
+            {
+                "content": "Source",
+                "document": "doc.pdf",
+                "chunk_index": 0,
+                "score": 0.9,
+                "page": 3,
+            }
+        ],
+    )
+
+    messages = repository.get_messages(conversation_id)
+    assert [message["text"] for message in messages] == ["Answer"]
+    assert messages[0]["sources"] == [
+        {
+            "content": "Source",
+            "document": "doc.pdf",
+            "chunk_index": 0,
+            "score": 0.9,
+            "page": 3,
+        }
+    ]
 
 
 def test_concurrent_batches_cancel_on_first_business_failure():
@@ -667,11 +717,37 @@ def test_concurrent_batches_cancel_on_first_business_failure():
 
 
 def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
-    """Running the migrations on an empty database produces the app schema."""
-    db_path = tmp_path / "fresh.db"
+    """Running the migrations on an empty database produces the current schema."""
     backend_dir = pathlib.Path(__file__).resolve().parent.parent
+    app_packages = {
+        "app",
+        "composition",
+        "db",
+        "providers",
+        "repositories",
+        "routes",
+        "services",
+        "settings",
+        "storage",
+    }
+    app_imports = []
+    for migration in (backend_dir / "migrations").rglob("*.py"):
+        tree = ast.parse(migration.read_text(encoding="utf-8"), filename=str(migration))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            for module in modules:
+                if module.split(".", 1)[0] in app_packages:
+                    app_imports.append(f"{migration.name}:{module}")
+
+    assert app_imports == []
+
+    db_path = tmp_path / "fresh.db"
     env = {
-        # Restrict PATH/HOME so the run can't pick up a local .env via cwd
         **{k: v for k, v in os.environ.items() if k != "DATABASE_URL"},
         "DATABASE_URL": f"sqlite:///{db_path}",
         "PATH": "/usr/bin:/bin:/usr/local/bin",
@@ -688,10 +764,29 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
 
     import sqlite3
 
+    connection = sqlite3.connect(db_path)
     tables = {
         row[0]
-        for row in sqlite3.connect(db_path).execute(
+        for row in connection.execute(
             "select name from sqlite_master where type='table'"
         )
     }
-    assert {"files", "conversations", "messages"} <= tables
+    assert {
+        "alembic_version",
+        "app_settings",
+        "conversations",
+        "files",
+        "messages",
+        "sources",
+    } <= tables
+    assert {"users", "user_settings"}.isdisjoint(tables)
+    assert connection.execute("select version_num from alembic_version").fetchone() == (
+        "b7c9e2f4a1d6",
+    )
+    assert {"title", "original_filename", "is_processed"} <= {
+        row[1] for row in connection.execute("pragma table_info(files)")
+    }
+    assert "page" in {
+        row[1] for row in connection.execute("pragma table_info(sources)")
+    }
+    connection.close()

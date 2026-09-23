@@ -1,5 +1,5 @@
 """
-create user_settings and seed demo user.
+create the legacy user_settings table.
 
 Revision ID: f1c3a9b4d2e7
 Revises: 8d1f0c2ba743
@@ -8,12 +8,8 @@ Create Date: 2026-09-05 10:00:00.000000
 
 from typing import Sequence, Union
 
-import uuid
-
 from alembic import op
 import sqlalchemy as sa
-
-from services.accounts.auth_service import hash_password
 
 # revision identifiers, used by Alembic.
 revision: str = "f1c3a9b4d2e7"
@@ -21,8 +17,11 @@ down_revision: Union[str, Sequence[str], None] = "8d1f0c2ba743"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+DEMO_USER_ID = "13db88b6ca6a499b8f1dbd3d504e1b83"
 DEMO_EMAIL = "demo@papermind.local"
-DEMO_PASSWORD = "demo-password"
+DEMO_PASSWORD_HASH = (
+    "$2b$12$XCQV9kxyNy.WmRGKqcaNsOcAErzCcotZcHvOT/JtTpPAJVhY3QU8."
+)
 
 
 def upgrade() -> None:
@@ -45,7 +44,8 @@ def upgrade() -> None:
 
     bind = op.get_bind()
     exists = bind.execute(
-        sa.text("SELECT 1 FROM users WHERE email = :email"), {"email": DEMO_EMAIL}
+        sa.text("SELECT 1 FROM users WHERE email = :email"),
+        {"email": DEMO_EMAIL},
     ).scalar()
     if not exists:
         bind.execute(
@@ -54,9 +54,9 @@ def upgrade() -> None:
                 "VALUES (:id, :email, :password_hash)"
             ),
             {
-                "id": uuid.uuid4().hex,
+                "id": DEMO_USER_ID,
                 "email": DEMO_EMAIL,
-                "password_hash": hash_password(DEMO_PASSWORD),
+                "password_hash": DEMO_PASSWORD_HASH,
             },
         )
 

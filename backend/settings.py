@@ -2,11 +2,12 @@
 Typed, validated application settings.
 
 A single pydantic-settings object reads every environment variable the
-backend consumes, grouped by concern. This is the only module allowed to
-read the environment for application configuration; everything else
-consumes a ``Settings`` instance. Importing this module never builds a
-client or touches an external service — clients live in ``providers`` and
-are built lazily on first use.
+backend consumes, grouped by concern. Application modules consume a
+``Settings`` instance rather than reading the environment themselves.
+Alembic reads ``DATABASE_URL`` directly so database upgrades do not import
+application code. Importing this module never builds a client or touches an
+external service. Clients live in ``providers`` and are built lazily on first
+use.
 
 Field names generally mirror their environment variable
 (``chunk_size_tokens`` ← ``CHUNK_SIZE_TOKENS``) so validation failures
