@@ -53,6 +53,10 @@ VerifyCallable = Callable[[ChatCredentials], tuple[bool, str | None]]
 
 log = logging.getLogger(__name__)
 
+# Longest chat query accepted, matching the Message.text column (8192).
+# Checked before embedding so an oversized query never spends a model call.
+MAX_QUERY_CHARS = 8192
+
 
 def _needs_title_backfill(title: str | None) -> bool:
     """Return True when the stored title is missing or looks like a hex filename."""
@@ -491,12 +495,32 @@ def _register_routes(app: Flask, services: Services) -> None:
             except Exception as exc:
                 log.warning("/process-file vector cleanup warning for %s: %s", filename, exc)
             texts = [c.text for c in chunk_objs]
-            embeddings, embed_elapsed = _timed_call(
-                embedding_service.embed_texts, texts
-            )
-            _, upsert_elapsed = _timed_call(
-                vector_service.upsert_chunks, embeddings, chunk_objs, filename
-            )
+            try:
+                embeddings, embed_elapsed = _timed_call(
+                    embedding_service.embed_texts, texts
+                )
+                _, upsert_elapsed = _timed_call(
+                    vector_service.upsert_chunks, embeddings, chunk_objs, filename
+                )
+            except Exception as exc:
+                # Compensate a half-index: remove this document's vectors
+                # (filtered delete only, other documents stay intact) and
+                # leave the file marked not processed so a retry is clean.
+                try:
+                    vector_service.delete_by_filename(filename)
+                except Exception as cleanup_exc:
+                    log.warning(
+                        "/process-file compensation cleanup failed for %s: %s",
+                        filename, cleanup_exc,
+                    )
+                try:
+                    repository.set_processed(filename, False)
+                except Exception as state_exc:
+                    log.warning(
+                        "/process-file compensation state failed for %s: %s",
+                        filename, state_exc,
+                    )
+                raise
 
             # 3. Create Conversation (reuse one if the file is re-processed)
             file_record = repository.get_file(filename)
@@ -574,11 +598,17 @@ def _register_routes(app: Flask, services: Services) -> None:
         if not conversation_id:
             return jsonify({"error": "Conversation not found"}), 404
 
-        # Retrieval happens up front: the user message and the sources must be
-        # settled before the first token is streamed, so a provider failure can
-        # never leave the turn half-recorded.
+        # Query length is validated before spending an embedding call.
+        if not isinstance(query, str) or not query.strip():
+            return jsonify({"error": "Query and Filename are required"}), 400
+        if len(query) > MAX_QUERY_CHARS:
+            return jsonify({"error": "Query is too long"}), 400
+
+        # Retrieval happens up front and the user message is persisted
+        # only after it succeeds, so a retrieval failure can never leave
+        # a stranded question with no answer. The sources must also be
+        # settled before the first token is streamed.
         try:
-            repository.add_message(conversation_id, "user", query)
             query_embedding = embedding_service.embed_texts(query)[0]
             raw_sources = vector_service.query_vectors(
                 query_embedding, filename, query_text=query
@@ -587,6 +617,11 @@ def _register_routes(app: Flask, services: Services) -> None:
             context = "\n\n".join(source["content"] for source in sources)
         except Exception:
             log.exception("/response retrieval failed for %s", filename)
+            return jsonify({"error": "Internal server error"}), 500
+        try:
+            repository.add_message(conversation_id, "user", query)
+        except Exception:
+            log.exception("/response persist user message failed for %s", filename)
             return jsonify({"error": "Internal server error"}), 500
 
         def event(name, payload):

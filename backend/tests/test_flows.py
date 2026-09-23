@@ -494,6 +494,178 @@ def test_delete_removes_everything_with_no_orphans(
     assert client.get("/files").get_json()["files"] == []
 
 
+def test_process_embed_failure_compensates_with_no_orphans(
+    client, fake_vectors, fake_embeddings, repo
+):
+    """An embed failure removes this doc's vectors and leaves it not processed."""
+    filename = upload(client).get_json()["file"]["name"]
+
+    def _boom(texts):
+        raise RuntimeError("embed down")
+
+    fake_embeddings.embed_texts = _boom
+
+    response = client.post("/process-file", json={"filename": filename})
+
+    assert response.status_code == 500
+    assert fake_vectors.upserts == []
+    # Pre-write cleanup plus compensation cleanup both target this file.
+    assert fake_vectors.deleted.count(filename) >= 2
+    assert (
+        client.post("/file/is-processed", json={"filename": filename}).get_json()[
+            "is_processed"
+        ]
+        is False
+    )
+
+
+def test_process_upsert_failure_compensates_with_no_orphans(
+    client, fake_vectors, repo
+):
+    """An upsert failure removes this doc's vectors and leaves it not processed."""
+    filename = upload(client).get_json()["file"]["name"]
+
+    def _boom(embeddings, chunks, fname, **kwargs):
+        raise RuntimeError("upsert down")
+
+    fake_vectors.upsert_chunks = _boom
+
+    response = client.post("/process-file", json={"filename": filename})
+
+    assert response.status_code == 500
+    assert fake_vectors.deleted.count(filename) >= 2
+    assert (
+        client.post("/file/is-processed", json={"filename": filename}).get_json()[
+            "is_processed"
+        ]
+        is False
+    )
+
+
+def test_process_retry_cleans_stale_vectors_before_rewrite(
+    client, fake_vectors, repo
+):
+    """A retry after failure cleans stale vectors first, so it stays idempotent."""
+    filename = upload(client).get_json()["file"]["name"]
+
+    def _boom(embeddings, chunks, fname, **kwargs):
+        raise RuntimeError("upsert down")
+
+    fake_vectors.upsert_chunks = _boom
+    assert client.post("/process-file", json={"filename": filename}).status_code == 500
+    assert fake_vectors.deleted.count(filename) >= 2
+
+    # Fix the index and retry with a working upsert.
+    upserts = []
+    deletes = fake_vectors.deleted
+
+    def _ok(embeddings, chunks, fname, **kwargs):
+        upserts.append((embeddings, chunks, fname))
+
+    fake_vectors.upsert_chunks = _ok
+    assert client.post("/process-file", json={"filename": filename}).status_code == 200
+    # The retry cleaned stale vectors before writing again.
+    assert deletes.count(filename) >= 3
+    assert upserts and upserts[0][2] == filename
+    assert (
+        client.post("/file/is-processed", json={"filename": filename}).get_json()[
+            "is_processed"
+        ]
+        is True
+    )
+
+
+def test_chat_retrieval_failure_leaves_no_stranded_message(
+    client, fake_vectors, repo
+):
+    """A retrieval failure persists no user message, so no stranded question."""
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+
+    def _boom(embedding, fname, **kwargs):
+        raise RuntimeError("index down")
+
+    fake_vectors.query_vectors = _boom
+
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == 500
+    history = client.get(f"/messages?filename={filename}").get_json()["messages"]
+    assert history == []
+
+
+def test_chat_embed_failure_leaves_no_stranded_message(
+    client, fake_embeddings, repo
+):
+    """An embed failure on the query path also leaves no stranded question."""
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+
+    def _boom(texts):
+        raise RuntimeError("embed down")
+
+    fake_embeddings.embed_texts = _boom
+
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == 500
+    history = client.get(f"/messages?filename={filename}").get_json()["messages"]
+    assert history == []
+
+
+def test_chat_query_too_long_rejected_before_embedding(
+    client, fake_embeddings, repo
+):
+    """An oversized query is a 400 and never reaches the embedding model."""
+    from app import MAX_QUERY_CHARS
+
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+    embedded_before = list(fake_embeddings.embedded)
+
+    response = client.post(
+        "/response", json={"query": "x" * (MAX_QUERY_CHARS + 1), "filename": filename}
+    )
+
+    assert response.status_code == 400
+    assert "too long" in response.get_json()["error"].lower()
+    assert fake_embeddings.embedded == embedded_before
+    history = client.get(f"/messages?filename={filename}").get_json()["messages"]
+    assert history == []
+
+
+def test_concurrent_batches_cancel_on_first_business_failure():
+    """Remaining batches cancel on the first business error instead of running on."""
+    import threading
+    import time
+
+    from services.concurrency import map_batches_concurrently
+
+    started = []
+    started_lock = threading.Lock()
+
+    def _func(batch):
+        with started_lock:
+            started.append(batch)
+        if batch == "bad":
+            raise RuntimeError("business boom")
+        time.sleep(0.05)
+        return batch
+
+    batches = ["bad"] + [f"ok-{i}" for i in range(9)]
+    with pytest.raises(RuntimeError, match="business boom"):
+        map_batches_concurrently(
+            batches,
+            _func,
+            label="test-cancel",
+            max_workers=1,
+        )
+    # The bad batch fails fast; queued batches are cancelled so the full
+    # tail never runs (without cancel all 10 would start).
+    assert "bad" in started
+    assert len(started) < len(batches)
+
+
 def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     """Running the migrations on an empty database produces the app schema."""
     db_path = tmp_path / "fresh.db"
