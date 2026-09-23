@@ -12,7 +12,7 @@ from google import genai
 from google.genai import types
 
 from services.llm.base import LLMProvider
-from services.prompts import SYSTEM_INSTRUCTION
+from services.prompts import SYSTEM_INSTRUCTION, build_user_prompt
 
 
 def clear_cache() -> None:
@@ -39,10 +39,7 @@ class GoogleProvider(LLMProvider):
         result = self._sdk_client().models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
-            contents=[
-                f"Context: {context}",
-                query,
-            ],
+            contents=[build_user_prompt(context, query)],
         )
 
         text = getattr(result, "text", None)
@@ -68,17 +65,23 @@ class GoogleProvider(LLMProvider):
         for chunk in self._sdk_client().models.generate_content_stream(
             model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
-            contents=[
-                f"Context: {context}",
-                query,
-            ],
+            contents=[build_user_prompt(context, query)],
         ):
             text = getattr(chunk, "text", None)
             if text:
                 yield text
 
     def verify(self) -> None:
-        """Do verify."""
-        self._sdk_client().models.generate_content(
-            model=self.model, contents="ping", config={"max_output_tokens": 1}
-        )
+        """Verify the key with the same framing chat uses, under a timeout."""
+        client = self._sdk_client()
+
+        def _ping():
+            return client.models.generate_content(
+                model=self.model,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION, max_output_tokens=1
+                ),
+                contents=[build_user_prompt("", "ping")],
+            )
+
+        self._verify_with_timeout(_ping)

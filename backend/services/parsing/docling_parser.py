@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import logging
 import re
 from collections import Counter
 from typing import List
 
 from services.parsing.document_parser import DocumentParser
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Header/footer dedup helper (pure python, no heavy deps)
@@ -285,6 +288,10 @@ class DoclingParser(DocumentParser):
 
         pages_md = [full_md.strip()]
         pages_md = _strip_repeating_headers_footers(pages_md)
+        log.warning(
+            "docling returned a single page without provenance; "
+            "the caller decides whether it is a true single page"
+        )
         return pages_md
 
     def extract_text(self, pdf_content: bytes) -> str:

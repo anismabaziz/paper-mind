@@ -485,6 +485,13 @@ def _register_routes(app: Flask, services: Services) -> None:
             chunk_objs, parse_elapsed = _timed_call(
                 parser.get_chunk_objects, filename, file_content
             )
+            degraded = any(c.page_no is None for c in chunk_objs)
+            if degraded:
+                log.warning(
+                    "/process-file degraded parse for %s: chunks carry null "
+                    "page numbers, citation sources will show no page",
+                    filename,
+                )
 
             # 2. Embed & Vectorize (delete stale vectors first so a retry is idempotent)
             if not chunk_objs:
@@ -536,6 +543,16 @@ def _register_routes(app: Flask, services: Services) -> None:
                 filename, len(chunk_objs), parse_elapsed, embed_elapsed, upsert_elapsed, wall_elapsed,
             )
 
+            if degraded:
+                return jsonify(
+                    {
+                        "message": "PDF processed",
+                        "warning": (
+                            "Page numbers could not be detected, so citation "
+                            "sources for this document show no page."
+                        ),
+                    }
+                ), 200
             return jsonify({"message": "PDF processed"}), 200
         except VectorDimensionError as e:
             # Fail fast — do not wipe collection or caches. Surface a 400 with
