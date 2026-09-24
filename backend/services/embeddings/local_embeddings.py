@@ -19,6 +19,7 @@ generated.
 """
 
 import threading
+from abc import ABC, abstractmethod
 
 from services.concurrency import map_batches_concurrently
 
@@ -26,7 +27,16 @@ from services.concurrency import map_batches_concurrently
 EMBED_BATCH_SIZE = 100
 
 
-class LocalEmbeddingService:
+class EmbeddingService(ABC):
+    """Turn text into dense vectors for indexing and retrieval."""
+
+    @abstractmethod
+    def embed_texts(self, texts):
+        """Return one vector for each input text."""
+        raise NotImplementedError
+
+
+class LocalEmbeddingService(EmbeddingService):
     """
     CPU embedding via BAAI/bge-m3.
 

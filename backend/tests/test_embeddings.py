@@ -11,7 +11,7 @@ contract of the local service itself.
 import numpy as np
 import pytest
 
-from services.embeddings.local_embeddings import LocalEmbeddingService
+from services.embeddings.local_embeddings import EmbeddingService, LocalEmbeddingService
 
 
 class _RecordingModel:
@@ -31,6 +31,13 @@ def service():
     model = _RecordingModel()
     svc = LocalEmbeddingService(model_name="fake-embedding-model", model=model)
     return svc, model
+
+
+def test_local_service_implements_embedding_provider(service):
+    """The production adapter satisfies the provider interface used by routes."""
+    svc, _ = service
+
+    assert isinstance(svc, EmbeddingService)
 
 
 def test_embed_texts_batches_and_preserves_order(service):

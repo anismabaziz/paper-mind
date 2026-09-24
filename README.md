@@ -179,13 +179,21 @@ retrieval can be judged with numbers instead of vibes.
 
 ## Testing
 
+Run the fast suite against fakes and in-memory SQLite:
+
 ```bash
 cd backend
 uv run pytest
 ```
 
-Tests run against fakes and in-memory sqlite; they never touch real Qdrant,
-the LLM, or real Postgres (heavy models mocked or `pytest.importorskip`'d; `uv run pytest` stays headless).
+Run the full HTTP workflow against disposable Postgres and Qdrant services:
+
+```bash
+cd backend
+./run-full-stack-tests.sh
+```
+
+The full-stack run applies every migration to an empty database, uses deterministic local embedding, reranking, and chat providers, and removes its database, collection, and containers when it finishes. It needs Docker but no model API keys or paid services.
 
 The evaluator (`backend/evaluation/`) measures retrieval against
 `fixture.json` with `hit@5`/`recall@5` (k=5) + per-question breakdown and
