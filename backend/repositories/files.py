@@ -75,6 +75,30 @@ class FileRepository(BaseRepository):
             session.flush()
             return self._to_dict(record)
 
+    def mark_deleting(self, filename: str) -> dict[str, Any] | None:
+        """Enter the durable deleting state before external cleanup begins."""
+        with self._session_factory() as session, session.begin():
+            record = session.scalars(
+                select(FileRecord).where(FileRecord.filename == filename)
+            ).first()
+            if not record:
+                return None
+            record.deletion_state = "deleting"
+            record.deletion_error = None
+            record.deletion_attempts = (record.deletion_attempts or 0) + 1
+            session.flush()
+            return self._to_dict(record)
+
+    def mark_delete_failed(self, filename: str, error: str) -> None:
+        """Retain retryable cleanup state after a partial deletion failure."""
+        with self._session_factory() as session, session.begin():
+            record = session.scalars(
+                select(FileRecord).where(FileRecord.filename == filename)
+            ).first()
+            if record:
+                record.deletion_state = "delete_failed"
+                record.deletion_error = error[:2000]
+
     def delete_file(self, file_id: str) -> None:
         """Delete metadata for one document."""
         with self._session_factory() as session, session.begin():
@@ -92,4 +116,7 @@ class FileRepository(BaseRepository):
             original_filename=record.original_filename,
             is_processed=record.is_processed,
             last_opened_at=opened.isoformat() if opened else None,
+            deletion_state=getattr(record, "deletion_state", "active") or "active",
+            deletion_error=getattr(record, "deletion_error", None),
+            deletion_attempts=getattr(record, "deletion_attempts", 0) or 0,
         )

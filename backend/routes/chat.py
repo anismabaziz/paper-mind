@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from routes.common import traversal_check, vector_store_error_response
+from routes.common import (
+    deletion_blocked_response,
+    is_deleting_record,
+    traversal_check,
+    vector_store_error_response,
+)
 from services.accounts.chat_settings_service import (
     SUPPORTED_MODELS,
     SettingsError,
@@ -171,6 +176,8 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         file_record = files_repository.get_file(filename)
         if not file_record:
             return jsonify({"error": "File not found"}), 404
+        if is_deleting_record(file_record):
+            return deletion_blocked_response(file_record)
         conversation_id = conversations_repository.get_conversation_id(
             file_record["id"]
         )
@@ -206,6 +213,25 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         except Exception:
             log.exception("/response retrieval failed for %s", filename)
             return jsonify({"error": "Internal server error"}), 500
+
+        def _still_present() -> bool:
+            """Return whether the document survived a concurrent deletion."""
+            try:
+                current = files_repository.get_file(filename)
+            except Exception:
+                log.exception("/response deletion race check failed for %s", filename)
+                return True
+            if current is None:
+                return False
+            return not is_deleting_record(current)
+
+        if not _still_present():
+            log.warning(
+                "/response refusing chat for deleting document %s", filename
+            )
+            return deletion_blocked_response(
+                files_repository.get_file(filename) or {"deletion_state": "deleting"}
+            )
         try:
             conversations_repository.add_message(conversation_id, "user", query)
         except Exception:
@@ -232,9 +258,10 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                     "Please try again."
                 )
                 try:
-                    conversations_repository.add_message(
-                        conversation_id, "bot", failure
-                    )
+                    if _still_present():
+                        conversations_repository.add_message(
+                            conversation_id, "bot", failure
+                        )
                 except Exception:
                     log.exception("failed to persist error reply for %s", filename)
                 yield event("error", {"error": failure})
@@ -247,9 +274,15 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 "".join(fragments).strip() or "I don't know based on the given context."
             )
             try:
-                conversations_repository.add_message(
-                    conversation_id, "bot", answer, sources
-                )
+                if _still_present():
+                    conversations_repository.add_message(
+                        conversation_id, "bot", answer, sources
+                    )
+                else:
+                    log.warning(
+                        "/response skipping persist after concurrent delete for %s",
+                        filename,
+                    )
             except Exception:
                 log.exception("failed to persist answer for %s", filename)
             yield event(
