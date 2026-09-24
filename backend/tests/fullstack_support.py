@@ -61,6 +61,10 @@ class ControlledStorage(LocalStorage):
         """Fail the named operation on its next call."""
         self.failures.add(operation)
 
+    def unfail(self, operation: str) -> None:
+        """Clear a requested failure so a retry can succeed."""
+        self.failures.discard(operation)
+
     def save(self, filename: str, content: bytes) -> None:
         """Store bytes unless the save failure is active."""
         _maybe_fail(self.failures, "save")
@@ -102,6 +106,10 @@ class ControlledRepository:
     def fail(self, operation: str) -> None:
         """Fail the named repository method on its next call."""
         self.failures.add(operation)
+
+    def unfail(self, operation: str) -> None:
+        """Clear a requested failure so a retry can succeed."""
+        self.failures.discard(operation)
 
     def __getattr__(self, name: str):
         """Delegate a repository method after checking its failure switch."""
@@ -198,6 +206,10 @@ class ControlledVectorStore(VectorStore):
     def fail(self, operation: str) -> None:
         """Fail the named vector operation on its next call."""
         self.failures.add(operation)
+
+    def unfail(self, operation: str) -> None:
+        """Clear a requested failure so a retry can succeed."""
+        self.failures.discard(operation)
 
     def upsert(self, vectors) -> dict:
         """Store vectors unless the upsert failure is active."""

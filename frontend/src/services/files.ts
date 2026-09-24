@@ -18,7 +18,7 @@ export async function uploadFile(file: File) {
   return (await client.post<IUploadFile>("/upload", formData)).data;
 }
 
-interface IDeleteFile {
+export interface IDeleteFile {
   message: string;
 }
 export async function deleteFile(file: FileType) {

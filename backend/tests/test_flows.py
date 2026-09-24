@@ -949,9 +949,12 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     } <= tables
     assert {"users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "c4d2e9a1b5f6",
+        "e7a1c3d5f908",
     )
     assert {"title", "original_filename", "is_processed", "last_opened_at"} <= {
+        row[1] for row in connection.execute("pragma table_info(files)")
+    }
+    assert {"deletion_state", "deletion_error", "deletion_attempts"} <= {
         row[1] for row in connection.execute("pragma table_info(files)")
     }
     assert "page" in {
