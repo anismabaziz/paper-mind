@@ -32,6 +32,7 @@ docling = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=1.15.0",
     "pytest>=8.3.0",
     "ruff>=0.8.0",
@@ -40,6 +41,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "full_stack: HTTP tests backed by real Postgres and Qdrant",
+]
 
 [tool.mypy]
 python_version = "3.11"

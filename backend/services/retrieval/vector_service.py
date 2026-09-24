@@ -6,6 +6,7 @@ import uuid
 from services.concurrency import map_batches_concurrently
 from services.retrieval.base import VectorStore
 from services.retrieval.hybrid import build_sparse_vector, build_sparse_vectors
+from services.retrieval.reranker import Reranker
 
 # How many candidates the index is asked for vs. how many survive shaping.
 # Asking for more than we keep gives dedupe room to work.
@@ -114,7 +115,7 @@ class VectorService:
 
     UPSERT_BATCH_SIZE = 100
 
-    def __init__(self, store: VectorStore, reranker=None):
+    def __init__(self, store: VectorStore, reranker: Reranker | None = None):
         """Bind the store to index and query; the reranker is optional."""
         self._store = store
         self._reranker = reranker

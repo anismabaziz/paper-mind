@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from providers import get_vector_index
 from repositories import Repositories, build_repositories
 from services.accounts.chat_settings_service import verify_api_key
-from services.embeddings.local_embeddings import LocalEmbeddingService
+from services.embeddings.local_embeddings import EmbeddingService, LocalEmbeddingService
 from services.llm.base import ChatCredentials, LLMProvider
 from services.llm.factory import build_chat_provider
 from services.parsing.document_parser import DocumentIngestor
@@ -27,7 +27,7 @@ class Services:
     repositories: Repositories
     storage: LocalStorage
     parser: DocumentIngestor
-    embedding_service: LocalEmbeddingService
+    embedding_service: EmbeddingService
     vector_service: VectorService
     chat_provider_factory: CredentialsCallable
     api_key_verifier: VerifyCallable

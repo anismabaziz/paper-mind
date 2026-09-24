@@ -19,9 +19,21 @@ from __future__ import annotations
 
 import threading
 import time
+from abc import ABC, abstractmethod
 
 
-class RerankerService:
+class Reranker(ABC):
+    """Re-score retrieved passages before they are shown or sent to chat."""
+
+    @abstractmethod
+    def maybe_rerank(
+        self, query: str | None, sources: list[dict], enabled: bool | None = None
+    ) -> list[dict]:
+        """Return passages in reranked order."""
+        raise NotImplementedError
+
+
+class RerankerService(Reranker):
     """Local cross-encoder re-scoring, gated by the ``enabled`` flag."""
 
     def __init__(self, model_name: str, enabled: bool, model=None):

@@ -4,14 +4,13 @@ Route and storage hardening coverage.
 External behavior only: HTTP status and payload for the file-meta and
 download routes, the storage traversal guard, ingestion retry after an
 embedding failure, the SSE error path, title backfill served through the
-listing, and the health endpoint. Fakes and in-memory sqlite throughout —
-no test touches Qdrant, an LLM provider, Postgres, or the real upload dir.
+listing, and the health endpoint. This module uses fakes and in-memory
+SQLite throughout.
 """
 
 # ruff: noqa: D100, D101, D102, D103, D104, D105, D107
 
 import io
-import json
 from dataclasses import replace
 
 import pytest
@@ -26,6 +25,7 @@ from repositories import build_repositories
 from services.accounts.secrets_service import encrypt_api_key
 from services.parsing.document_parser import Chunk
 from storage import LocalStorage
+from tests.sse import parse_sse
 
 
 @pytest.fixture
@@ -183,21 +183,6 @@ def client(app):
 def upload(client, name="doc.pdf"):
     data = {"file": (io.BytesIO(b"%PDF-fake-bytes"), name)}
     return client.post("/upload", data=data, content_type="multipart/form-data")
-
-
-def parse_sse(body):
-    events = []
-    for block in body.split("\n\n"):
-        if not block.strip():
-            continue
-        name, data = None, None
-        for line in block.split("\n"):
-            if line.startswith("event: "):
-                name = line[len("event: ") :]
-            elif line.startswith("data: "):
-                data = json.loads(line[len("data: ") :])
-        events.append((name, data))
-    return events
 
 
 def _make_pdf() -> bytes:

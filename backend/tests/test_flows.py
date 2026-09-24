@@ -1,15 +1,13 @@
 """
 Service-layer flow tests.
 
-Every external edge is a fake: vector index, embeddings, parser, LLM, and
-storage are constructed here and injected through ``create_app``; the
-repository runs against an in-memory sqlite. No test touches a vector
-store, an LLM provider, a real Postgres, or the real upload dir.
+This module keeps every external edge fake: vector index, embeddings, parser,
+LLM, and storage are constructed here and injected through ``create_app``;
+the repository runs against in-memory SQLite.
 """
 
 import ast
 import io
-import json
 import os
 import pathlib
 import subprocess
@@ -29,6 +27,7 @@ from services.accounts.secrets_service import encrypt_api_key
 from services.llm.base import ChatCredentials
 from services.parsing.document_parser import Chunk
 from services.retrieval.vector_service import TOP_K, shape_sources
+from tests.sse import parse_sse
 
 
 @pytest.fixture
@@ -257,22 +256,6 @@ def client(app):
     """Do client."""
     with app.test_client() as client:
         yield client
-
-
-def parse_sse(body):
-    """Split an SSE body into (event, data) tuples."""
-    events = []
-    for block in body.split("\n\n"):
-        if not block.strip():
-            continue
-        name, data = None, None
-        for line in block.split("\n"):
-            if line.startswith("event: "):
-                name = line[len("event: ") :]
-            elif line.startswith("data: "):
-                data = json.loads(line[len("data: ") :])
-        events.append((name, data))
-    return events
 
 
 def upload(client, name="doc.pdf"):
