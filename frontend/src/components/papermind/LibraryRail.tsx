@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings } from "lucide-react";
+import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings, AlertTriangle, RotateCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { processFile } from "@/services/files";
-import { useFiles, useUploadFile, useDeleteFile, useProcessFile, useTouchFileOpened } from "@/hooks/useFiles";
+import { useFiles, useUploadFile, useDeleteFile, useRetryIngestion, useTouchFileOpened } from "@/hooks/useFiles";
 import { formatFileSize } from "@/lib/format";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
@@ -14,8 +13,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import type { File as DbFile } from "@/types/db";
-import { displayTitle } from "@/types/db";
+import type { File as DbFile, IngestionJob } from "@/types/db";
+import { displayTitle, ingestionStageLabel, isIngestionActive } from "@/types/db";
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -23,11 +22,22 @@ function pad(n: number) {
 
 const MAX_RECENTS = 12;
 
+function jobStatusLine(job: IngestionJob | null | undefined): string {
+  if (!job) return "Not indexed";
+  if (job.state === "failed") {
+    return job.error_message ?? "Indexing failed \u2014 retry";
+  }
+  if (job.state === "stale") return "Superseded by a newer attempt";
+  if (job.state === "ready") return "Indexed";
+  return `${ingestionStageLabel(job.stage)} \u00b7 ${job.progress}%`;
+}
+
 export function LibraryRail() {
   const queryClient = useQueryClient();
   const { file: selectedFile, setFile } = usePdfStore();
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<"library" | "recent">("library");
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openSettings = useSettingsUi((s) => s.open);
@@ -73,21 +83,15 @@ export function LibraryRail() {
   }, [viewFiles, query]);
 
   const uploadMutation = useUploadFile({
-    onSuccess: async (data) => {
-      try {
-        await processFile(data.file);
-      } catch (err) {
-        console.error("Indexing failed:", err);
-        alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        // A fresh upload counts as opened so it enters Recent readings.
-        touchOpened.mutate(data.file);
-        // ["files"] prefix covers the per-document status/messages/meta keys.
-        queryClient.invalidateQueries({ queryKey: ["files"] });
-      }
+    onSuccess: (data) => {
+      // A fresh upload counts as opened so it enters Recent readings. The
+      // upload response already carries the queued ingestion job, so the
+      // listing polls it directly with no client-side processing call.
+      touchOpened.mutate(data.file);
+      queryClient.invalidateQueries({ queryKey: ["files"] });
     },
     onError: (err) => {
-      alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
+      setUploadError(err instanceof Error ? err.message : String(err));
     },
   });
 
@@ -99,9 +103,9 @@ export function LibraryRail() {
   const deleteError = deleteMutation.error instanceof Error ? deleteMutation.error.message : null;
   const deleteTarget = deleteMutation.variables as DbFile | undefined;
 
-  const processMutation = useProcessFile({
-    onError: (err) => alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`),
-  });
+  const retryMutation = useRetryIngestion();
+  const retryTarget = retryMutation.variables as string | undefined;
+  const retryError = retryMutation.error instanceof Error ? retryMutation.error.message : null;
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files?.[0]) uploadMutation.mutate(e.target.files[0]);
@@ -196,6 +200,27 @@ export function LibraryRail() {
           )}
         </div>
 
+        {(uploadError || retryError) && (
+          <div role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2">
+            <p className="text-xs font-medium text-destructive">
+              {retryError ? "Retry failed" : "Upload failed"}
+            </p>
+            <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-soft">
+              {retryError ?? uploadError}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setUploadError(null);
+                retryMutation.reset();
+              }}
+              className="mt-2 border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {deleteMutation.isError && (
           <div role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2">
             <p className="text-xs font-medium text-destructive">
@@ -263,8 +288,10 @@ export function LibraryRail() {
             {filtered.map((item, index) => {
               const active = selectedFile?.id === item.id;
               const isRemoving = deleteMutation.isPending && (deleteMutation.variables as DbFile | undefined)?.id === item.id;
-              const isRetrying = processMutation.isPending && (processMutation.variables as DbFile | undefined)?.name === item.name;
-              const isProcessing = !item.is_processed;
+              const job = item.ingestion;
+              const isRetrying = retryMutation.isPending && retryTarget === item.name;
+              const isJobActive = isIngestionActive(job?.state) || isRetrying;
+              const isJobFailed = job?.state === "failed" && !isRetrying;
               const isDeleting = item.deletion_state === "deleting" || isRemoving;
               const isDeleteFailed = item.deletion_state === "delete_failed";
 
@@ -280,9 +307,11 @@ export function LibraryRail() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (!isProcessing) selectFile(item);
+                        // A failed job still has readable PDF bytes, so the
+                        // reader stays reachable to inspect and retry it.
+                        if (!isJobActive) selectFile(item);
                       }}
-                      className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isProcessing && "cursor-default")}
+                      className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isJobActive && "cursor-default")}
                     >
                       <span className="flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden font-mono text-[0.58rem] text-ink-faint">
                         <span>0{index + 1}</span>
@@ -294,10 +323,15 @@ export function LibraryRail() {
                             </span>
                           ) : isDeleteFailed ? (
                             <span className="text-destructive">Delete failed</span>
-                          ) : isProcessing ? (
+                          ) : isJobFailed ? (
+                            <span className="inline-flex items-center gap-1 text-destructive">
+                              <AlertTriangle className="size-2.5" />
+                              Failed
+                            </span>
+                          ) : isJobActive ? (
                             <span className="inline-flex items-center gap-1">
                               <Loader2 className="size-2.5 animate-spin" />
-                              {isRetrying ? "Re-indexing" : "Indexing"}
+                              {isRetrying ? "Retrying" : ingestionStageLabel(job?.stage ?? "queued")}
                             </span>
                           ) : (
                             <span>{formatFileSize(item.metadata.size)}</span>
@@ -309,7 +343,11 @@ export function LibraryRail() {
                       </span>
                       <span className="block min-w-0 max-w-full truncate overflow-hidden text-[0.65rem] text-ink-faint">
                         {item.metadata.content_type.split("/").pop()?.toUpperCase() ?? "PDF"} ·{" "}
-                        {isDeleting ? "Deleting" : isDeleteFailed ? (item.deletion_error ?? "Delete failed — retry") : isProcessing ? "Queued for indexing" : "Indexed"}
+                        {isDeleting
+                          ? "Deleting"
+                          : isDeleteFailed
+                            ? (item.deletion_error ?? "Delete failed — retry")
+                            : jobStatusLine(job)}
                       </span>
                     </button>
 
@@ -324,15 +362,26 @@ export function LibraryRail() {
                         >
                           Retry
                         </button>
-                      ) : isProcessing ? (
+                      ) : isJobFailed ? (
                         <button
                           type="button"
-                          onClick={() => processMutation.mutate(item)}
+                          onClick={() => retryMutation.mutate(item.name)}
                           disabled={isRetrying}
-                          className="mr-1 grid size-7 place-items-center border border-rule bg-paper text-[0.6rem] font-medium text-ink-soft hover:border-ink hover:text-ink disabled:opacity-40"
+                          title={job?.error_message ?? "Retry indexing"}
+                          aria-label={`Retry indexing ${displayTitle(item)}`}
+                          className="mr-1 inline-flex items-center gap-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
                         >
-                          {isRetrying ? <Loader2 className="size-3 animate-spin" /> : "→"}
+                          {isRetrying ? <Loader2 className="size-3 animate-spin" /> : <RotateCw className="size-3" />}
+                          Retry
                         </button>
+                      ) : isJobActive ? (
+                        <span
+                          className="mr-1 grid size-7 place-items-center"
+                          role="status"
+                          aria-label={`${ingestionStageLabel(job?.stage ?? "queued")} ${job?.progress ?? 0}%`}
+                        >
+                          <Loader2 className="size-3 animate-spin" />
+                        </span>
                       ) : !isRemoving && !isDeleting ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
