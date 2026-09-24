@@ -26,7 +26,14 @@ from repositories import build_repositories
 from services.accounts.secrets_service import encrypt_api_key
 from services.llm.base import ChatCredentials
 from services.parsing.document_parser import Chunk
-from services.retrieval.vector_service import TOP_K, shape_sources
+from services.retrieval.base import (
+    RetrievalResult,
+    VectorDimensionError,
+    VectorStoreConfigurationError,
+    VectorStoreUnavailableError,
+)
+from services.retrieval.hybrid import build_sparse_vector
+from services.retrieval.vector_service import FETCH_K, shape_sources
 from tests.sse import parse_sse
 
 
@@ -109,12 +116,22 @@ class FakeVectorService:
         self.upserts.append((embeddings, chunks, filename))
 
     def query_vectors(
-        self, embedding, filename, top_k=TOP_K, query_text=None, **kwargs
+        self, embedding, filename, top_k=FETCH_K, query_text=None, **kwargs
     ):
         # Route through the real shaping so flow tests see the same
         # dedupe/bound/order behavior as production retrieval.
         """Do query vectors."""
-        return shape_sources(self.matches)
+        sources = shape_sources(self.matches)
+        method = (
+            "hybrid"
+            if query_text and build_sparse_vector(query_text)["indices"]
+            else "dense"
+        )
+        return RetrievalResult(
+            sources=sources,
+            method=method,
+            outcome="success" if sources else "empty",
+        )
 
     def delete_by_filename(self, filename):
         """Do delete by filename."""
@@ -322,6 +339,7 @@ def test_ask_streams_tokens_and_persists_sources(client, fake_vectors):
     done_name, done_data = events[-1]
     assert done_name == "done"
     assert done_data["done"] is True
+    assert done_data["retrieval"] == {"method": "dense", "outcome": "success"}
     assert len(done_data["sources"]) == 1
     src = done_data["sources"][0]
     assert src["content"] == "chunk about topic"
@@ -530,6 +548,49 @@ def test_process_upsert_failure_compensates_with_no_orphans(client, fake_vectors
     )
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_category"),
+    [
+        (
+            VectorStoreUnavailableError("Vector store is unavailable"),
+            503,
+            "vector_store_unavailable",
+        ),
+        (
+            VectorStoreConfigurationError("Collection schema is invalid"),
+            500,
+            "vector_store_configuration",
+        ),
+        (
+            VectorDimensionError(expected=1024, got=512),
+            400,
+            "vector_dimension_mismatch",
+        ),
+    ],
+)
+def test_process_file_reports_vector_failure_categories(
+    client, fake_vectors, error, expected_status, expected_category
+):
+    """Vector-store failures remain distinct while processing a Document."""
+
+    def _fail(*args, **kwargs):
+        raise error
+
+    filename = upload(client).get_json()["file"]["name"]
+    fake_vectors.upsert_chunks = _fail
+
+    response = client.post("/process-file", json={"filename": filename})
+
+    assert response.status_code == expected_status
+    assert response.get_json()["category"] == expected_category
+    assert (
+        client.post("/file/is-processed", json={"filename": filename}).get_json()[
+            "is_processed"
+        ]
+        is False
+    )
+
+
 def test_process_retry_cleans_stale_vectors_before_rewrite(client, fake_vectors):
     """A retry after failure cleans stale vectors first, so it stays idempotent."""
     filename = upload(client).get_json()["file"]["name"]
@@ -559,6 +620,58 @@ def test_process_retry_cleans_stale_vectors_before_rewrite(client, fake_vectors)
         ]
         is True
     )
+
+
+def test_empty_retrieval_is_a_successful_empty_result(client, fake_vectors):
+    """A valid query with no evidence completes with an empty result marker."""
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+    fake_vectors.matches = []
+
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == 200
+    done = parse_sse(response.get_data(as_text=True))[-1][1]
+    assert done["sources"] == []
+    assert done["retrieval"] == {"method": "dense", "outcome": "empty"}
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_category"),
+    [
+        (
+            VectorStoreUnavailableError("Vector store is unavailable"),
+            503,
+            "vector_store_unavailable",
+        ),
+        (
+            VectorStoreConfigurationError("Collection schema is invalid"),
+            500,
+            "vector_store_configuration",
+        ),
+        (
+            VectorDimensionError(expected=1024, got=512),
+            409,
+            "vector_dimension_mismatch",
+        ),
+    ],
+)
+def test_retrieval_failure_categories_are_distinct_at_http_boundary(
+    client, fake_vectors, error, expected_status, expected_category
+):
+    """Each retrieval failure category has its own HTTP status and payload."""
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+
+    def _fail(*args, **kwargs):
+        raise error
+
+    fake_vectors.query_vectors = _fail
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == expected_status
+    assert response.get_json()["category"] == expected_category
+    assert client.get(f"/messages?filename={filename}").get_json()["messages"] == []
 
 
 def test_chat_retrieval_failure_leaves_no_stranded_message(client, fake_vectors):

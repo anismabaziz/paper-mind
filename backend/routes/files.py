@@ -9,8 +9,17 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from routes.common import file_url, is_safe_filename, traversal_check
-from services.retrieval.base import VectorDimensionError
+from routes.common import (
+    file_url,
+    is_safe_filename,
+    traversal_check,
+    vector_store_error_response,
+)
+from services.retrieval.base import (
+    VectorDimensionError,
+    VectorStoreConfigurationError,
+    VectorStoreUnavailableError,
+)
 from services.titles import backfill_title, derive_title
 
 if TYPE_CHECKING:
@@ -307,6 +316,12 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                     }
                 ), 200
             return jsonify({"message": "PDF processed"}), 200
+        except (
+            VectorStoreUnavailableError,
+            VectorStoreConfigurationError,
+        ) as exc:
+            log.exception("/process-file vector store failed for %s", filename)
+            return vector_store_error_response(exc)
         except VectorDimensionError as exc:
             hint = (
                 "Delete embeddings via POST /delete-embeddings and re-ingest "
@@ -315,7 +330,13 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             log.warning(
                 "/process-file dimension mismatch for %s: %s", filename or "?", exc
             )
-            return jsonify({"error": str(exc), "hint": hint}), 400
+            return jsonify(
+                {
+                    "error": str(exc),
+                    "hint": hint,
+                    "category": "vector_dimension_mismatch",
+                }
+            ), 400
         except Exception:
             log.exception("/process-file failed for %s", filename or "?")
             return jsonify({"error": "Internal server error"}), 500

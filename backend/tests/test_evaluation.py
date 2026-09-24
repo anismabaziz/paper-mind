@@ -22,6 +22,8 @@ from evaluation import cli, evaluator, judge
 from evaluation.build_primer_pdf import SOURCE as PRIMER_SOURCE
 from evaluation.metrics import hit_at_k, recall_at_k, summarize
 from services.parsing.document_parser import resolve_parser
+from services.retrieval.base import VectorStoreConfigurationError
+from services.retrieval.hybrid import RRF_K, build_sparse_vector
 
 STOPWORDS = {
     "a",
@@ -93,24 +95,90 @@ class InMemoryIndex:
         """Do upsert."""
         self.vectors.extend(vectors)
 
-    def query(self, vector, top_k, include_metadata=False, filter=None):
-        """Do query."""
+    def query(
+        self,
+        vector,
+        top_k,
+        include_metadata=False,
+        filter=None,
+        method="dense",
+        sparse_vector=None,
+        **kwargs,
+    ):
+        """Run dense, sparse, or hybrid retrieval without hidden fallback."""
+        if method not in {"dense", "sparse", "hybrid"}:
+            raise VectorStoreConfigurationError(
+                f"Unsupported retrieval method: {method}"
+            )
         name = (filter or {}).get("pdf_name")
-        scored = [
-            {
-                "score": self._cosine(vector, v["values"]),
-                "metadata": dict(v["metadata"]),
-            }
-            for v in self.vectors
-            if v["metadata"]["pdf_name"] == name
+        candidates = [
+            candidate
+            for candidate in self.vectors
+            if candidate["metadata"]["pdf_name"] == name
         ]
-        scored.sort(key=lambda m: m["score"], reverse=True)
-        return {"matches": scored[:top_k]}
+        dense = [
+            {
+                "id": candidate.get("id", candidate["metadata"]["content"]),
+                "score": score,
+                "metadata": dict(candidate["metadata"]),
+            }
+            for candidate in candidates
+            if (score := self._cosine(vector, candidate["values"])) > 0
+        ]
+        dense.sort(key=lambda match: match["score"], reverse=True)
+        if method == "dense":
+            matches = dense
+        else:
+            if sparse_vector is None:
+                raise VectorStoreConfigurationError("Sparse query vector is required")
+            sparse = [
+                {
+                    "id": vector.get("id", vector["metadata"]["content"]),
+                    "score": score,
+                    "metadata": dict(vector["metadata"]),
+                }
+                for vector in candidates
+                if (
+                    score := self._sparse_dot(
+                        sparse_vector,
+                        vector.get("sparse_vector")
+                        or build_sparse_vector(vector["metadata"]["content"]),
+                    )
+                )
+                > 0
+            ]
+            sparse.sort(key=lambda match: match["score"], reverse=True)
+            matches = sparse if method == "sparse" else self._fuse(dense, sparse)
+        return {
+            "matches": matches[:top_k],
+            "method": method,
+            "outcome": "success" if matches else "empty",
+        }
 
     def delete(self, filter=None):
         """Do delete."""
         name = (filter or {}).get("pdf_name")
         self.vectors = [v for v in self.vectors if v["metadata"]["pdf_name"] != name]
+
+    @staticmethod
+    def _sparse_dot(query_sparse, document_sparse):
+        query_values = dict(zip(query_sparse["indices"], query_sparse["values"]))
+        document_values = dict(
+            zip(document_sparse["indices"], document_sparse["values"])
+        )
+        return sum(
+            value * document_values.get(index, 0.0)
+            for index, value in query_values.items()
+        )
+
+    @staticmethod
+    def _fuse(dense, sparse):
+        fused = {}
+        for matches in (dense, sparse):
+            for rank, match in enumerate(matches, start=1):
+                entry = fused.setdefault(match["id"], {**match, "score": 0.0})
+                entry["score"] += 1.0 / (RRF_K + rank)
+        return sorted(fused.values(), key=lambda match: match["score"], reverse=True)
 
     @staticmethod
     def _cosine(a, b):
@@ -274,6 +342,24 @@ class TestFixtureIntegrity:
         assert "CC0" in text
 
 
+def test_retrieve_does_not_fall_back_when_store_rejects_sparse():
+    """A misconfigured store fails instead of silently running dense retrieval."""
+
+    class UnsupportedStore:
+        def __init__(self):
+            self.calls = 0
+
+        def query(self, *args, **kwargs):
+            self.calls += 1
+            raise TypeError("sparse retrieval is required")
+
+    store = UnsupportedStore()
+    with pytest.raises(TypeError, match="sparse retrieval is required"):
+        evaluator.retrieve([0.1], "doc.pdf", store, query_text="keyword")
+
+    assert store.calls == 1
+
+
 class TestEvaluator:
     """TestEvaluator."""
 
@@ -292,21 +378,21 @@ class TestEvaluator:
                 {
                     "id": "both-gold",
                     "document": "synthetic.pdf",
-                    "question": "both marker",
+                    "question": "both",
                     "expected_answer": "expected",
                     "gold_snippets": ["gold alpha", "gold beta"],
                 },
                 {
                     "id": "one-gold",
                     "document": "synthetic.pdf",
-                    "question": "one marker",
+                    "question": "one",
                     "expected_answer": "expected",
                     "gold_snippets": ["gold alpha"],
                 },
                 {
                     "id": "no-gold",
                     "document": "synthetic.pdf",
-                    "question": "none marker",
+                    "question": "none",
                     "expected_answer": "expected",
                     "gold_snippets": ["gold alpha"],
                 },
@@ -323,10 +409,10 @@ class TestEvaluator:
         }
         seeds = {
             "both-gold": [
-                "both marker chunk with gold alpha",
-                "both marker chunk with gold beta",
+                "both gold alpha chunk",
+                "both gold beta chunk",
             ],
-            "one-gold": ["one marker chunk with gold alpha"],
+            "one-gold": ["one gold alpha chunk"],
             # Deliberately lacks its gold snippet: this question must miss.
             "no-gold": ["none marker chunk with nothing useful"],
         }
@@ -372,6 +458,7 @@ class TestEvaluator:
         )
         assert report.retrieval.questions == 3
         per_id = {q["id"]: q for q in report.per_question}
+        assert per_id["both-gold"]["retrieval_method"] == "hybrid"
         assert per_id["both-gold"]["hit_at_k"] is True
         assert per_id["both-gold"]["recall_at_k"] == 1.0
         assert per_id["one-gold"]["hit_at_k"] is True
