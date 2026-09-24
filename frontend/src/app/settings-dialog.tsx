@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import {
   getSettings,
   saveSettings,
   verifySettings,
+  type IModelCatalog,
 } from "@/services/settings";
 import { cn } from "@/lib/utils";
 import { useEscapeKey } from "@/hooks/useEscape";
@@ -15,6 +16,11 @@ import useSettingsUi from "@/store/settings-ui";
 type Feedback = { kind: "success" | "error"; text: string } | null;
 
 export default function SettingsDialog() {
+  const isOpen = useSettingsUi((state) => state.isOpen);
+  return isOpen ? <SettingsDialogContent /> : null;
+}
+
+function SettingsDialogContent() {
   const { isOpen, close } = useSettingsUi();
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({
@@ -31,8 +37,47 @@ export default function SettingsDialog() {
   const [testing, setTesting] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const requestControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestControllerRef.current?.abort();
+      requestControllerRef.current = null;
+    };
+  }, []);
+
+  const closeSettings = useCallback(() => {
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
+    setApiKey("");
+    setFeedback(null);
+    close();
+  }, [close]);
 
   const settings = settingsQuery.data;
+  const loadErrorData = (settingsQuery.error as {
+    response?: {
+      data?: {
+        supported_models?: IModelCatalog;
+      };
+    };
+  } | null)?.response?.data ?? null;
+  const storedSupportedModels =
+    settings?.supported_models ?? loadErrorData?.supported_models;
+  const effectiveSupportedModels = useMemo(
+    () => storedSupportedModels ?? {},
+    [storedSupportedModels],
+  );
+  const effectiveModelCatalog = useMemo(
+    () => Object.values(effectiveSupportedModels).flat(),
+    [effectiveSupportedModels],
+  );
+  const loadErrorText = settingsQuery.isError
+    ? errorMessage(settingsQuery.error, "Could not load settings.")
+    : null;
 
   // Move focus into the dialog on open, restore it on close.
   useEffect(() => {
@@ -43,7 +88,7 @@ export default function SettingsDialog() {
       restoreFocusRef.current?.focus();
     };
   }, [isOpen]);
-  useEscapeKey(isOpen, close);
+  useEscapeKey(isOpen, closeSettings);
 
   useEffect(() => {
     if (settings) {
@@ -52,53 +97,97 @@ export default function SettingsDialog() {
     }
   }, [settings]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (!model) return;
+    const supported = effectiveModelCatalog.some(
+      (entry) => entry.provider === provider && entry.id === model,
+    );
+    if (!supported) setModel("");
+  }, [effectiveModelCatalog, model, provider]);
 
-  const providers = Object.keys(settings?.supported_models ?? {});
-  const models = provider ? settings?.supported_models[provider] ?? [] : [];
+  const allProviders = Object.keys(effectiveSupportedModels);
+  const catalogModels = effectiveModelCatalog.filter(
+    (entry) => entry.provider === provider,
+  );
+  const models = catalogModels.map((entry) => entry.id);
+  const selectedModel = catalogModels.find((entry) => entry.id === model);
   const savedMaskedKey = settings?.masked_key ?? null;
-  const dirty = provider !== (settings?.provider ?? "") || model !== (settings?.model ?? "") || apiKey !== "";
+  const canRecoverFromLoadError = allProviders.length > 0;
+  const hasLocalChatModel = effectiveModelCatalog.some(
+    (entry) => entry.data_location === "local",
+  );
+
+  const beginRequest = () => {
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+    return controller;
+  };
+
+  const finishRequest = (controller: AbortController) => {
+    if (requestControllerRef.current === controller) {
+      requestControllerRef.current = null;
+    }
+  };
 
   const handleSave = async () => {
-    if (!provider || !model || !apiKey || saving) return;
+    if (!provider || !model || !apiKey || saving || testing) return;
+    const controller = beginRequest();
     setSaving(true);
     setFeedback(null);
     try {
-      await saveSettings({ provider, model, api_key: apiKey });
+      await saveSettings(
+        { provider, model, api_key: apiKey },
+        controller.signal,
+      );
+      if (!mountedRef.current || controller.signal.aborted) return;
       setApiKey("");
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      if (!mountedRef.current || controller.signal.aborted) return;
       setFeedback({ kind: "success", text: "Settings saved." });
     } catch (e) {
-      setFeedback({ kind: "error", text: errorMessage(e, "Could not save settings.") });
+      if (mountedRef.current && !controller.signal.aborted) {
+        setFeedback({ kind: "error", text: errorMessage(e, "Could not save settings.") });
+      }
     } finally {
-      setSaving(false);
+      finishRequest(controller);
+      if (mountedRef.current) setSaving(false);
     }
   };
 
   const handleTest = async () => {
-    if (testing) return;
+    if (testing || saving) return;
+    if (!provider || !model || !apiKey) {
+      setFeedback({
+        kind: "error",
+        text: "Provider, model, and API key are required before testing.",
+      });
+      return;
+    }
+    const controller = beginRequest();
     setTesting(true);
     setFeedback(null);
     try {
-      if (dirty) {
-        if (!provider || !model || !apiKey) {
-          setFeedback({ kind: "error", text: "Provider, model, and API key are required before testing." });
-          return;
-        }
-        await saveSettings({ provider, model, api_key: apiKey });
-        setApiKey("");
-        await queryClient.invalidateQueries({ queryKey: ["settings"] });
-      }
-      const result = await verifySettings();
+      const result = await verifySettings(
+        { provider, model, api_key: apiKey },
+        controller.signal,
+      );
+      if (!mountedRef.current || controller.signal.aborted) return;
       setFeedback(
         result.ok
-          ? { kind: "success", text: dirty ? "Settings saved and the connection works." : "Connection works." }
+          ? {
+              kind: "success",
+              text: "Connection works. Save settings to make it active.",
+            }
           : { kind: "error", text: result.error ?? "Connection failed." }
       );
     } catch (e) {
-      setFeedback({ kind: "error", text: errorMessage(e, "Could not run the connection test.") });
+      if (mountedRef.current && !controller.signal.aborted) {
+        setFeedback({ kind: "error", text: errorMessage(e, "Could not run the connection test.") });
+      }
     } finally {
-      setTesting(false);
+      finishRequest(controller);
+      if (mountedRef.current) setTesting(false);
     }
   };
 
@@ -112,7 +201,7 @@ export default function SettingsDialog() {
       >
         <button
           ref={closeRef}
-          onClick={close}
+          onClick={closeSettings}
           aria-label="Close settings"
           className="absolute right-4 top-4 text-ink-faint hover:text-ink cursor-pointer"
         >
@@ -129,10 +218,11 @@ export default function SettingsDialog() {
             <div className="flex justify-center py-6">
               <Loader2 size={18} className="animate-spin text-ink-faint" />
             </div>
-          ) : settingsQuery.isError ? (
-            <FormFeedback kind="error" text={errorMessage(settingsQuery.error, "Could not load settings.")} />
+          ) : settingsQuery.isError && !canRecoverFromLoadError ? (
+            <FormFeedback kind="error" text={loadErrorText ?? "Could not load settings."} />
           ) : (
             <>
+              {loadErrorText && <FormFeedback kind="error" text={loadErrorText} />}
               <label className="block">
                 <span className="label-meta">Provider</span>
                 <select
@@ -144,7 +234,7 @@ export default function SettingsDialog() {
                   className={selectClass}
                 >
                   <option value="">Select a provider…</option>
-                  {providers.map((p) => (
+                  {allProviders.map((p) => (
                     <option key={p} value={p}>
                       {p}
                     </option>
@@ -169,11 +259,64 @@ export default function SettingsDialog() {
                 </select>
               </label>
 
+              {selectedModel && (
+                <div
+                  className="border-y border-rule/70 py-3"
+                  aria-label="Model capabilities"
+                >
+                  <div className="mb-2 font-mono text-xs text-ink">
+                    {selectedModel.id}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div>
+                      <div className="text-ink-faint">Context</div>
+                      <div className="mt-0.5 text-ink">
+                        {formatTokenCount(selectedModel.context_window_tokens)} tokens
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-ink-faint">Output</div>
+                      <div className="mt-0.5 text-ink">
+                        {formatTokenCount(selectedModel.max_output_tokens)} tokens
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-ink-faint">Structured output</div>
+                      <div className="mt-0.5 text-ink">
+                        {selectedModel.structured_output ? "Supported" : "Not supported"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-ink-faint">Tool use</div>
+                      <div className="mt-0.5 text-ink">
+                        {selectedModel.tool_use ? "Supported" : "Not supported"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-ink-faint">Verification timeout</div>
+                      <div className="mt-0.5 text-ink">
+                        {selectedModel.timeout_seconds} seconds
+                      </div>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs leading-5 text-ink-soft">
+                    {formatUsd(selectedModel.input_cost_per_million_usd)} input / {" "}
+                    {formatUsd(selectedModel.output_cost_per_million_usd)} output per 1M
+                    tokens · {selectedModel.pricing_tier} pricing ·{" "}
+                    {selectedModel.data_location === "cloud"
+                      ? "cloud processing"
+                      : "local processing"}
+                  </p>
+                </div>
+              )}
+
               <label className="block">
                 <span className="label-meta">API key</span>
                 <Input
                   type="password"
-                  placeholder={savedMaskedKey ? `Saved key ${savedMaskedKey} — paste a new key to replace` : "Paste your API key"}
+                  placeholder={savedMaskedKey
+                    ? `Saved key ${savedMaskedKey} — paste a new key to replace`
+                    : "Paste your API key"}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   className="h-10 bg-paper border-rule text-xs focus-visible:border-ink focus-visible:ring-0"
@@ -181,12 +324,24 @@ export default function SettingsDialog() {
                 />
               </label>
 
+              <p className="rounded-sm border border-rule/70 bg-canvas px-3 py-2 text-xs leading-5 text-ink-soft">
+                {selectedModel?.data_location === "local"
+                  ? "Questions and retrieved passages stay on this machine."
+                  : `Questions and retrieved passages leave this machine when you use ${
+                      provider || "the selected cloud provider"
+                    }.`} {" "}
+                {hasLocalChatModel
+                  ? "A local-only chat option is available in the catalog."
+                  : "This build has no local-only chat option."} Embeddings and reranking
+                stay on this machine.
+              </p>
+
               {feedback && <FormFeedback kind={feedback.kind} text={feedback.text} />}
 
               <div className="flex gap-2 pt-1">
                 <Button
                   onClick={handleSave}
-                  disabled={!provider || !model || !apiKey || saving}
+                   disabled={!provider || !model || !apiKey || saving || testing}
                   className="flex-1 h-10 bg-ink text-paper text-xs hover:bg-ink/90"
                 >
                   {saving && <Loader2 size={14} className="animate-spin" />}
@@ -231,6 +386,19 @@ function errorMessage(e: unknown, fallback: string): string {
     if (data?.error) return data.error;
   }
   return fallback;
+}
+
+function formatTokenCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatUsd(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 3,
+  }).format(value);
 }
 
 const selectClass =

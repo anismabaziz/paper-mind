@@ -115,7 +115,7 @@ def test_app_settings_upsert_round_trip(app_secret):
     assert stored["encrypted_api_key"] == encrypted
     assert decrypt_api_key(stored["encrypted_api_key"]) == "sk-live-abc123"
 
-    repo.upsert_app_settings("google", "gemini-2.0-flash", encrypted)
+    repo.upsert_app_settings("google", "gemini-2.5-flash", encrypted)
     updated = repo.get_app_settings()
     assert updated["provider"] == "google"
-    assert updated["model"] == "gemini-2.0-flash"
+    assert updated["model"] == "gemini-2.5-flash"

@@ -8,6 +8,7 @@ the repository runs against in-memory SQLite.
 
 import ast
 import io
+import logging
 import os
 import pathlib
 import subprocess
@@ -24,7 +25,7 @@ from composition import Services
 from db import AppSettings, Base
 from repositories import build_repositories
 from services.accounts.secrets_service import encrypt_api_key
-from services.llm.base import ChatCredentials
+from services.llm.base import ChatCredentials, LLMProvider
 from services.parsing.document_parser import Chunk
 from services.retrieval.base import (
     RetrievalResult,
@@ -358,6 +359,47 @@ def test_ask_streams_tokens_and_persists_sources(client, fake_vectors):
     )
 
 
+def test_generation_failure_does_not_print_the_api_key(capsys):
+    """One-shot generation diagnostics cannot expose the provider key."""
+    secret = "sk-generation-secret"
+
+    class FailingProvider(LLMProvider):
+        def _build_client(self):
+            return None
+
+        def verify(self):
+            return None
+
+        def _generate_response(self, query, context):
+            raise RuntimeError(f"provider echoed {secret}")
+
+        def _stream_response(self, query, context):
+            yield ""
+
+    provider = FailingProvider(secret, "test-model")
+    result = provider.generate_response("question", "retrieved passage")
+
+    assert secret not in capsys.readouterr().out
+    assert "retrieved passage" in result
+
+
+def test_streaming_provider_failure_does_not_log_the_api_key(
+    client, fake_vectors, fake_chat, caplog
+):
+    """Streaming diagnostics cannot expose the stored provider key."""
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+    fake_chat.provider_error = RuntimeError("provider echoed sk-test-chat-key")
+
+    with caplog.at_level(logging.ERROR):
+        response = client.post(
+            "/response", json={"query": "what?", "filename": filename}
+        )
+
+    assert response.status_code == 200
+    assert "sk-test-chat-key" not in caplog.text
+
+
 def test_factory_builds_provider_with_credentials_arguments():
     """Provider/model/key land on the instance the factory builds."""
     from services.llm.factory import build_chat_provider
@@ -405,6 +447,46 @@ def test_provider_failure_surfaces_without_fallback():
     )
     with pytest.raises(RuntimeError, match="provider down"):
         list(provider.stream_response("q", "ctx"))
+
+
+def test_response_rejects_a_retired_saved_model(client, repositories):
+    """A stored model outside the active catalog cannot serve new chats."""
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+    repositories.app_settings.upsert_app_settings(
+        "google", "gemini-2.0-flash", encrypt_api_key("sk-retired-model-key")
+    )
+
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == 400
+    assert "unsupported model" in response.get_json()["error"].lower()
+
+
+def test_response_rejects_an_unsupported_saved_provider(client, repositories):
+    """A stored provider outside the catalog gets an actionable error."""
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+    repositories.app_settings.upsert_app_settings(
+        "anthropic", "claude-test", encrypt_api_key("sk-unsupported-provider-key")
+    )
+
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == 400
+    assert "unsupported provider" in response.get_json()["error"].lower()
+
+
+def test_response_rejects_malformed_saved_settings(client, repositories):
+    """An incomplete settings row gets re-save guidance, not a crash."""
+    filename = upload(client).get_json()["file"]["name"]
+    client.post("/process-file", json={"filename": filename})
+    repositories.app_settings.upsert_app_settings("", "", "not-a-key")
+
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == 400
+    assert "incomplete" in response.get_json()["error"]
 
 
 def test_chat_without_settings_asks_user_to_configure(client, repositories):
