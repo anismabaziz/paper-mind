@@ -556,6 +556,66 @@ class TestLiveGate:
             cli.main([])
         assert "live" in str(exc.value.code)
 
+    def test_evaluation_judge_errors_redact_the_api_key(self, monkeypatch):
+        """A provider exception cannot print the evaluation key."""
+        import settings as settings_module
+        from services.embeddings import local_embeddings
+        from services.llm import google_provider
+
+        secret = "sk-evaluation-secret"
+
+        class FakeEmbedding:
+            def __init__(self, model):
+                self.model = model
+
+            def embed_texts(self, texts):
+                return [[0.0] for _ in texts]
+
+        class FakeModels:
+            def generate_content(self, **kwargs):
+                raise RuntimeError(f"judge rejected {secret}")
+
+        class FakeGoogleClient:
+            models = FakeModels()
+
+        monkeypatch.setattr(
+            settings_module,
+            "get_settings",
+            lambda: type(
+                "Settings",
+                (),
+                {"embedding": type("Embedding", (), {"embedding_model": "fake"})()},
+            )(),
+        )
+        monkeypatch.setattr(local_embeddings, "LocalEmbeddingService", FakeEmbedding)
+        monkeypatch.setattr(google_provider, "_client", lambda key: FakeGoogleClient())
+
+        _, _, judge = cli.make_live_components("google", "gemini-2.5-flash", secret)
+        with pytest.raises(RuntimeError) as exc:
+            judge("judge this")
+
+        assert secret not in str(exc.value)
+
+    def test_cli_refuses_a_cross_provider_judge(self, monkeypatch):
+        """Evaluation never sends a Groq key to the Google judge."""
+        monkeypatch.setattr(
+            cli,
+            "load_fixture",
+            lambda: pytest.fail("cross-provider evaluation reached the fixture"),
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            cli.run(
+                live=True,
+                judge=True,
+                k=5,
+                provider="groq",
+                model="openai/gpt-oss-20b",
+                api_key="groq-secret",
+            )
+
+        assert "Google" in str(exc.value.code)
+
     def test_cli_json_output_shape(self, fixture, indexed_index, monkeypatch, capsys):
         """Do test cli json output shape."""
         monkeypatch.setattr(
@@ -571,3 +631,35 @@ class TestLiveGate:
         payload = json.loads(capsys.readouterr().out)
         assert set(payload) == {"retrieval", "faithfulness", "per_question"}
         assert payload["retrieval"]["k"] == 3
+
+    def test_cli_defaults_to_an_active_catalog_model(self, monkeypatch, capsys):
+        """The live evaluator uses a current model without a literal override."""
+        captured = {}
+
+        def fake_run(**kwargs):
+            captured.update(kwargs)
+            return {
+                "retrieval": {"k": 3, "questions": 0, "hit_rate": 0.0, "recall": 0.0},
+                "faithfulness": {"mean": 0.0, "judged": 0, "faithful": 0},
+                "per_question": [],
+            }
+
+        monkeypatch.setattr(cli, "run", fake_run)
+        cli.main(["--live", "--no-judge", "--json"])
+
+        assert captured["provider"] == "google"
+        assert captured["model"] == "gemini-2.5-flash"
+        assert json.loads(capsys.readouterr().out)["retrieval"]["k"] == 3
+
+    def test_cli_rejects_a_retired_model_before_running(self, monkeypatch):
+        """A retired model cannot reach the live evaluation runner."""
+        monkeypatch.setattr(
+            cli,
+            "run",
+            lambda **kwargs: pytest.fail("retired model reached the evaluator"),
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            cli.main(["--live", "--no-judge", "--model", "gemini-2.0-flash"])
+
+        assert exc.value.code == 2

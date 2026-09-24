@@ -45,12 +45,13 @@ app settings stored encrypted in Postgres and configured through the app's
 Settings dialog:
 
 - `GET /settings` — current settings (masked key) plus the supported
-  provider → models map
-- `PUT /settings` — validate provider/model and encrypt the key
-- `POST /settings/verify` — one-token completion against the chosen
-  provider/model with the stored key
+  provider → model capability catalog
+- `PUT /settings` — verify the candidate, then encrypt and replace the single
+  global settings row
+- `POST /settings/verify` — verify candidate provider/model/key values without
+  changing stored settings
 
-All three are open (no auth) and operate on the single `app_settings` row.
+The settings routes are open (no auth) and use the single `app_settings` row.
 Chat runs on those global settings — a workspace with no saved settings gets
 a clear "configure a provider in Settings" error, and the backend boots fine
 with no keys at all. Retrieval-only evaluation (`evaluation.cli --live
@@ -127,4 +128,5 @@ A live run indexes the sample docs under an `eval-` prefix in the vector
 index and deletes them afterwards. The index lives at `http://localhost:6333`
 (compose exposes 6333→6333 and
 6334→6334);
-no chat key is required for retrieval-only (`--no-judge`).
+no chat key is required for retrieval-only (`--no-judge`). The LLM-as-judge
+currently accepts Google settings; use `--no-judge` for Groq generation runs.

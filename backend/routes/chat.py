@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from routes.common import (
-    scrub_api_key_from_text,
-    traversal_check,
-    vector_store_error_response,
+from routes.common import traversal_check, vector_store_error_response
+from services.accounts.chat_settings_service import (
+    SUPPORTED_MODELS,
+    SettingsError,
+    model_for,
 )
 from services.accounts.secrets_service import (
     SecretsResaveRequiredError,
@@ -59,7 +60,11 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         if guard is not None:
             return guard
 
-        stored = app_settings_repository.get_app_settings()
+        try:
+            stored = app_settings_repository.get_app_settings()
+        except Exception as exc:
+            log.error("/response settings read failed: %s", type(exc).__name__)
+            return jsonify({"error": "Stored settings could not be read."}), 500
         if not stored:
             return jsonify(
                 {
@@ -70,12 +75,41 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 }
             ), 400
         try:
-            api_key = decrypt_api_key(stored["encrypted_api_key"])
+            provider = stored["provider"]
+            model = stored["model"]
+            ciphertext = stored["encrypted_api_key"]
+        except (AttributeError, KeyError, TypeError):
+            return jsonify(
+                {
+                    "error": (
+                        "Saved provider settings are incomplete. Re-save your "
+                        "provider settings in Settings."
+                    )
+                }
+            ), 400
+        if (
+            not isinstance(provider, str)
+            or not provider
+            or not isinstance(model, str)
+            or not model
+            or not isinstance(ciphertext, str)
+            or not ciphertext
+        ):
+            return jsonify(
+                {
+                    "error": (
+                        "Saved provider settings are incomplete. Re-save your "
+                        "provider settings in Settings."
+                    )
+                }
+            ), 400
+        try:
+            api_key = decrypt_api_key(ciphertext)
         except SecretsResaveRequiredError as exc:
             log.warning("/response stale key derivation")
-            return jsonify({"error": str(exc)}), 400
-        except Exception:
-            log.exception("/response decrypt failed")
+            return jsonify({"error": str(exc), "needs_resave": True}), 400
+        except Exception as exc:
+            log.error("/response decrypt failed: %s", type(exc).__name__)
             return jsonify(
                 {
                     "error": (
@@ -84,21 +118,54 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                     )
                 }
             ), 500
+        if provider not in SUPPORTED_MODELS:
+            return jsonify(
+                {
+                    "error": (
+                        "Saved provider settings use an unsupported provider. "
+                        "Choose a current provider in Settings."
+                    )
+                }
+            ), 400
+        try:
+            model_definition = model_for(provider, model)
+        except SettingsError:
+            return jsonify(
+                {
+                    "error": (
+                        "Saved provider settings use an unsupported model. "
+                        "Choose a current model in Settings."
+                    )
+                }
+            ), 400
         try:
             credentials = ChatCredentials(
-                provider=stored["provider"],
-                model=stored["model"],
+                provider=provider,
+                model=model,
                 api_key=api_key,
+                verification_timeout_seconds=model_definition.timeout_seconds,
             )
             chat_provider = chat_provider_factory(credentials)
         except ValueError as exc:
-            log.warning("/response provider error for %s: %s", filename, exc)
-            safe_error = scrub_api_key_from_text(str(exc), api_key)
+            log.warning(
+                "/response provider error for %s: %s",
+                filename,
+                type(exc).__name__,
+            )
             return jsonify(
-                {"error": safe_error or "Invalid provider configuration"}
-            ), 500
-        except Exception:
-            log.exception("/response provider build failed for %s", filename)
+                {
+                    "error": (
+                        "Saved provider settings use an unsupported provider. "
+                        "Choose a current provider in Settings."
+                    )
+                }
+            ), 400
+        except Exception as exc:
+            log.error(
+                "/response provider build failed for %s: %s",
+                filename,
+                type(exc).__name__,
+            )
             return jsonify({"error": "Internal server error"}), 500
 
         file_record = files_repository.get_file(filename)
@@ -154,8 +221,12 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 for token in chat_provider.stream_response(query, context):
                     fragments.append(token)
                     yield event("token", {"text": token})
-            except Exception:
-                log.exception("/response generation failed for %s", filename)
+            except Exception as exc:
+                log.error(
+                    "/response generation failed for %s: %s",
+                    filename,
+                    type(exc).__name__,
+                )
                 failure = (
                     "Sorry. The language model is unavailable right now. "
                     "Please try again."

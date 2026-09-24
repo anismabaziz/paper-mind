@@ -1,8 +1,8 @@
 """
 Groq chat provider.
 
-Clients are built per API key (cached) so every user's stored key can be
-used without process-global state.
+Clients are built per API key (cached) so the stored key can be used
+without process-global state.
 """
 
 from functools import lru_cache
@@ -31,6 +31,8 @@ class GroqProvider(LLMProvider):
     name = "groq"
 
     def _build_client(self):
+        if not self._use_cache:
+            return Groq(api_key=self.api_key)
         return _client(self.api_key)
 
     def _generate_response(self, query: str, context: str) -> str:

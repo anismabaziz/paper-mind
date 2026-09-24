@@ -154,18 +154,17 @@ def full_stack_app(migrated_database, tmp_path):
 
 def _configure_chat(harness: ApplicationHarness) -> None:
     """Save and verify credentials through the public settings routes."""
-    response = harness.client.put(
-        "/settings",
-        json={
-            "provider": "groq",
-            "model": "llama-3.3-70b-versatile",
-            "api_key": "full-stack-test-key",
-        },
-    )
+    candidate = {
+        "provider": "groq",
+        "model": "openai/gpt-oss-20b",
+        "api_key": "full-stack-test-key",
+    }
+    response = harness.client.put("/settings", json=candidate)
     assert response.status_code == 200, response.text
-    response = harness.client.post("/settings/verify")
+    response = harness.client.post("/settings/verify", json=candidate)
     assert response.status_code == 200, response.text
-    assert response.json() == {"ok": True, "error": None}
+    assert response.json()["ok"] is True
+    assert response.json()["error"] is None
 
 
 def _upload_sample(harness: ApplicationHarness) -> str:
@@ -183,6 +182,37 @@ def _process(harness: ApplicationHarness, filename: str) -> None:
     """Process an uploaded PDF through the HTTP route."""
     response = harness.client.post("/process-file", json={"filename": filename})
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.full_stack
+def test_failed_candidate_keeps_the_saved_provider_credentials(full_stack_app):
+    """A rejected candidate leaves the real settings row usable."""
+    harness = full_stack_app
+    working = {
+        "provider": "groq",
+        "model": "openai/gpt-oss-20b",
+        "api_key": "working-key",
+    }
+    assert harness.client.put("/settings", json=working).status_code == 200
+    before = harness.repositories.app_settings.get_app_settings()
+    harness.chat.fail("verify")
+
+    response = harness.client.put(
+        "/settings",
+        json={
+            "provider": "google",
+            "model": "gemini-2.5-flash",
+            "api_key": "bad-key",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "not changed" in response.json()["error"]
+    after = harness.repositories.app_settings.get_app_settings()
+    assert after["provider"] == before["provider"]
+    assert after["model"] == before["model"]
+    assert after["encrypted_api_key"] == before["encrypted_api_key"]
+    assert harness.client.get("/settings").json()["masked_key"] == "••••-key"
 
 
 @pytest.mark.full_stack

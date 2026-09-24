@@ -1,5 +1,5 @@
 """
-Build a chat provider instance from a user's chat credentials.
+Build a chat provider instance from the global chat credentials.
 
 The single place that maps a provider name to its class; adding a provider
 means implementing one :class:`LLMProvider` subclass and adding it here.
@@ -15,7 +15,9 @@ _PROVIDERS = {
 }
 
 
-def build_chat_provider(credentials: ChatCredentials, client=None) -> LLMProvider:
+def build_chat_provider(
+    credentials: ChatCredentials, client=None, use_cache: bool = True
+) -> LLMProvider:
     """
     Construct the provider a request will chat through.
 
@@ -29,4 +31,11 @@ def build_chat_provider(credentials: ChatCredentials, client=None) -> LLMProvide
             f"Unsupported provider {credentials.provider!r}; expected one of "
             f"{sorted(_PROVIDERS)}"
         ) from None
-    return cls(api_key=credentials.api_key, model=credentials.model, client=client)
+    provider = cls(
+        api_key=credentials.api_key,
+        model=credentials.model,
+        client=client,
+        use_cache=use_cache,
+    )
+    provider.verification_timeout_seconds = credentials.verification_timeout_seconds
+    return provider
