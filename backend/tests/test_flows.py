@@ -35,6 +35,7 @@ from services.retrieval.base import (
 )
 from services.retrieval.hybrid import build_sparse_vector
 from services.retrieval.vector_service import FETCH_K, shape_sources
+from tests.ingestion_helpers import build_test_worker
 from tests.sse import parse_sse
 
 
@@ -266,7 +267,15 @@ def app(
         vector_service=fake_vectors,
         chat_provider_factory=fake_chat,
     )
-    return create_app(settings_obj, services=services)
+    application = create_app(settings_obj, services=services)
+    application.config.update(
+        TEST_REPOSITORIES=repositories,
+        TEST_STORAGE=fake_storage,
+        TEST_PARSER=fake_parser,
+        TEST_EMBEDDINGS=fake_embeddings,
+        TEST_VECTORS=fake_vectors,
+    )
+    return application
 
 
 @pytest.fixture
@@ -280,6 +289,19 @@ def upload(client, name="doc.pdf"):
     """Do upload."""
     data = {"file": (io.BytesIO(b"%PDF-fake-bytes"), name)}
     return client.post("/upload", data=data, content_type="multipart/form-data")
+
+
+def run_ingestion(app, worker_id="test-worker"):
+    """Drain queued ingestion jobs through the worker."""
+    return build_test_worker(app, worker_id).drain()
+
+
+def index_document(client, app, name="doc.pdf"):
+    """Upload a document and run its durable ingestion job to ready."""
+    filename = upload(client, name).get_json()["file"]["name"]
+    assert client.post("/process-file", json={"filename": filename}).status_code == 202
+    assert run_ingestion(app) == 1
+    return filename
 
 
 def test_upload_stores_bytes_and_creates_record(client, fake_storage):
@@ -303,13 +325,18 @@ def test_upload_without_file_is_rejected(client):
     assert client.post("/upload", data={}).status_code == 400
 
 
-def test_process_embeds_and_marks_processed(client, fake_vectors, fake_embeddings):
+def test_process_embeds_and_marks_processed(client, app, fake_vectors, fake_embeddings):
     """Do test process embeds and marks processed."""
     filename = upload(client).get_json()["file"]["name"]
 
     response = client.post("/process-file", json={"filename": filename})
 
-    assert response.status_code == 200
+    assert response.status_code == 202
+    assert response.get_json()["job"]["state"] == "queued"
+    assert fake_vectors.upserts == [], "the request must not index inline"
+    assert fake_embeddings.embedded == []
+
+    assert run_ingestion(app) == 1
     assert fake_vectors.upserts, "document should reach the vector index"
     _, texts, upserted_file = fake_vectors.upserts[0]
     assert upserted_file == filename
@@ -323,10 +350,9 @@ def test_process_embeds_and_marks_processed(client, fake_vectors, fake_embedding
     )
 
 
-def test_ask_streams_tokens_and_persists_sources(client, fake_vectors):
+def test_ask_streams_tokens_and_persists_sources(client, app, fake_vectors):
     """Do test ask streams tokens and persists sources."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
 
     response = client.post("/response", json={"query": "what?", "filename": filename})
 
@@ -384,11 +410,10 @@ def test_generation_failure_does_not_print_the_api_key(capsys):
 
 
 def test_streaming_provider_failure_does_not_log_the_api_key(
-    client, fake_vectors, fake_chat, caplog
+    client, app, fake_vectors, fake_chat, caplog
 ):
     """Streaming diagnostics cannot expose the stored provider key."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
     fake_chat.provider_error = RuntimeError("provider echoed sk-test-chat-key")
 
     with caplog.at_level(logging.ERROR):
@@ -449,10 +474,9 @@ def test_provider_failure_surfaces_without_fallback():
         list(provider.stream_response("q", "ctx"))
 
 
-def test_response_rejects_a_retired_saved_model(client, repositories):
+def test_response_rejects_a_retired_saved_model(client, app, repositories):
     """A stored model outside the active catalog cannot serve new chats."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
     repositories.app_settings.upsert_app_settings(
         "google", "gemini-2.0-flash", encrypt_api_key("sk-retired-model-key")
     )
@@ -463,10 +487,9 @@ def test_response_rejects_a_retired_saved_model(client, repositories):
     assert "unsupported model" in response.get_json()["error"].lower()
 
 
-def test_response_rejects_an_unsupported_saved_provider(client, repositories):
+def test_response_rejects_an_unsupported_saved_provider(client, app, repositories):
     """A stored provider outside the catalog gets an actionable error."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
     repositories.app_settings.upsert_app_settings(
         "anthropic", "claude-test", encrypt_api_key("sk-unsupported-provider-key")
     )
@@ -477,10 +500,9 @@ def test_response_rejects_an_unsupported_saved_provider(client, repositories):
     assert "unsupported provider" in response.get_json()["error"].lower()
 
 
-def test_response_rejects_malformed_saved_settings(client, repositories):
+def test_response_rejects_malformed_saved_settings(client, app, repositories):
     """An incomplete settings row gets re-save guidance, not a crash."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
     repositories.app_settings.upsert_app_settings("", "", "not-a-key")
 
     response = client.post("/response", json={"query": "what?", "filename": filename})
@@ -502,11 +524,10 @@ def test_chat_without_settings_asks_user_to_configure(client, repositories):
 
 
 def test_provider_failure_still_leaves_a_visible_reply(
-    client, fake_vectors, fake_chat, capsys
+    client, app, fake_vectors, fake_chat, capsys
 ):
     """Do test provider failure still leaves a visible reply."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
 
     fake_chat.provider_error = RuntimeError("provider down")
 
@@ -526,10 +547,9 @@ def test_provider_failure_still_leaves_a_visible_reply(
     assert error_data["error"] in history[-1]["text"]
 
 
-def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fake_chat):
+def test_sources_panel_order_matches_llm_context_order(client, app, fake_vectors, fake_chat):
     """Do test sources panel order matches llm context order."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
 
     fake_vectors.matches = [
         {
@@ -564,11 +584,10 @@ def test_sources_panel_order_matches_llm_context_order(client, fake_vectors, fak
 
 
 def test_delete_removes_everything_with_no_orphans(
-    client, fake_storage, fake_vectors, repositories
+    client, app, fake_storage, fake_vectors, repositories
 ):
     """Do test delete removes everything with no orphans."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
     client.post("/response", json={"query": "what?", "filename": filename})
 
     response = client.delete(f"/files/remove?path={filename}")
@@ -585,7 +604,7 @@ def test_delete_removes_everything_with_no_orphans(
 
 
 def test_process_embed_failure_compensates_with_no_orphans(
-    client, fake_vectors, fake_embeddings
+    client, app, fake_vectors, fake_embeddings
 ):
     """An embed failure removes this doc's vectors and leaves it not processed."""
     filename = upload(client).get_json()["file"]["name"]
@@ -597,10 +616,14 @@ def test_process_embed_failure_compensates_with_no_orphans(
 
     response = client.post("/process-file", json={"filename": filename})
 
-    assert response.status_code == 500
+    assert response.status_code == 202
     assert fake_vectors.upserts == []
-    # Pre-write cleanup plus compensation cleanup both target this file.
-    assert fake_vectors.deleted.count(filename) >= 2
+    assert run_ingestion(app) == 1
+
+    job = app.config["TEST_REPOSITORIES"].ingestion_jobs.get_latest(filename)
+    assert job["state"] == "failed"
+    assert job["error_category"] == "ingestion_failed"
+    assert fake_vectors.deleted.count(filename) >= 1
     assert (
         client.post("/file/is-processed", json={"filename": filename}).get_json()[
             "is_processed"
@@ -609,7 +632,9 @@ def test_process_embed_failure_compensates_with_no_orphans(
     )
 
 
-def test_process_upsert_failure_compensates_with_no_orphans(client, fake_vectors):
+def test_process_upsert_failure_compensates_with_no_orphans(
+    client, app, fake_vectors
+):
     """An upsert failure removes this doc's vectors and leaves it not processed."""
     filename = upload(client).get_json()["file"]["name"]
 
@@ -620,8 +645,9 @@ def test_process_upsert_failure_compensates_with_no_orphans(client, fake_vectors
 
     response = client.post("/process-file", json={"filename": filename})
 
-    assert response.status_code == 500
-    assert fake_vectors.deleted.count(filename) >= 2
+    assert response.status_code == 202
+    assert run_ingestion(app) == 1
+    assert fake_vectors.deleted.count(filename) >= 1
     assert (
         client.post("/file/is-processed", json={"filename": filename}).get_json()[
             "is_processed"
@@ -631,29 +657,26 @@ def test_process_upsert_failure_compensates_with_no_orphans(client, fake_vectors
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_status", "expected_category"),
+    ("error", "expected_category"),
     [
         (
             VectorStoreUnavailableError("Vector store is unavailable"),
-            503,
             "vector_store_unavailable",
         ),
         (
             VectorStoreConfigurationError("Collection schema is invalid"),
-            500,
             "vector_store_configuration",
         ),
         (
             VectorDimensionError(expected=1024, got=512),
-            400,
             "vector_dimension_mismatch",
         ),
     ],
 )
-def test_process_file_reports_vector_failure_categories(
-    client, fake_vectors, error, expected_status, expected_category
+def test_ingestion_job_reports_vector_failure_categories(
+    client, app, fake_vectors, error, expected_category
 ):
-    """Vector-store failures remain distinct while processing a Document."""
+    """Vector-store failures stay distinct on the durable job."""
 
     def _fail(*args, **kwargs):
         raise error
@@ -661,10 +684,12 @@ def test_process_file_reports_vector_failure_categories(
     filename = upload(client).get_json()["file"]["name"]
     fake_vectors.upsert_chunks = _fail
 
-    response = client.post("/process-file", json={"filename": filename})
+    assert client.post("/process-file", json={"filename": filename}).status_code == 202
+    assert run_ingestion(app) == 1
 
-    assert response.status_code == expected_status
-    assert response.get_json()["category"] == expected_category
+    job = app.config["TEST_REPOSITORIES"].ingestion_jobs.get_latest(filename)
+    assert job["state"] == "failed"
+    assert job["error_category"] == expected_category
     assert (
         client.post("/file/is-processed", json={"filename": filename}).get_json()[
             "is_processed"
@@ -673,7 +698,7 @@ def test_process_file_reports_vector_failure_categories(
     )
 
 
-def test_process_retry_cleans_stale_vectors_before_rewrite(client, fake_vectors):
+def test_process_retry_cleans_stale_vectors_before_rewrite(client, app, fake_vectors):
     """A retry after failure cleans stale vectors first, so it stays idempotent."""
     filename = upload(client).get_json()["file"]["name"]
 
@@ -681,8 +706,9 @@ def test_process_retry_cleans_stale_vectors_before_rewrite(client, fake_vectors)
         raise RuntimeError("upsert down")
 
     fake_vectors.upsert_chunks = _boom
-    assert client.post("/process-file", json={"filename": filename}).status_code == 500
-    assert fake_vectors.deleted.count(filename) >= 2
+    assert client.post("/process-file", json={"filename": filename}).status_code == 202
+    assert run_ingestion(app) == 1
+    assert fake_vectors.deleted.count(filename) >= 1
 
     # Fix the index and retry with a working upsert.
     upserts = []
@@ -692,9 +718,11 @@ def test_process_retry_cleans_stale_vectors_before_rewrite(client, fake_vectors)
         upserts.append((embeddings, chunks, fname))
 
     fake_vectors.upsert_chunks = _ok
-    assert client.post("/process-file", json={"filename": filename}).status_code == 200
+    retry = client.post(f"/ingestion-jobs/{filename}/retry")
+    assert retry.status_code == 201
+    assert run_ingestion(app) == 1
     # The retry cleaned stale vectors before writing again.
-    assert deletes.count(filename) >= 3
+    assert deletes.count(filename) >= 2
     assert upserts and upserts[0][2] == filename
     assert (
         client.post("/file/is-processed", json={"filename": filename}).get_json()[
@@ -704,10 +732,9 @@ def test_process_retry_cleans_stale_vectors_before_rewrite(client, fake_vectors)
     )
 
 
-def test_empty_retrieval_is_a_successful_empty_result(client, fake_vectors):
+def test_empty_retrieval_is_a_successful_empty_result(client, app, fake_vectors):
     """A valid query with no evidence completes with an empty result marker."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
     fake_vectors.matches = []
 
     response = client.post("/response", json={"query": "what?", "filename": filename})
@@ -739,11 +766,10 @@ def test_empty_retrieval_is_a_successful_empty_result(client, fake_vectors):
     ],
 )
 def test_retrieval_failure_categories_are_distinct_at_http_boundary(
-    client, fake_vectors, error, expected_status, expected_category
+    client, app, fake_vectors, error, expected_status, expected_category
 ):
     """Each retrieval failure category has its own HTTP status and payload."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
 
     def _fail(*args, **kwargs):
         raise error
@@ -756,10 +782,9 @@ def test_retrieval_failure_categories_are_distinct_at_http_boundary(
     assert client.get(f"/messages?filename={filename}").get_json()["messages"] == []
 
 
-def test_chat_retrieval_failure_leaves_no_stranded_message(client, fake_vectors):
+def test_chat_retrieval_failure_leaves_no_stranded_message(client, app, fake_vectors):
     """A retrieval failure persists no user message, so no stranded question."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
 
     def _boom(embedding, fname, **kwargs):
         raise RuntimeError("index down")
@@ -773,10 +798,9 @@ def test_chat_retrieval_failure_leaves_no_stranded_message(client, fake_vectors)
     assert history == []
 
 
-def test_chat_embed_failure_leaves_no_stranded_message(client, fake_embeddings):
+def test_chat_embed_failure_leaves_no_stranded_message(client, app, fake_embeddings):
     """An embed failure on the query path also leaves no stranded question."""
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
 
     def _boom(texts):
         raise RuntimeError("embed down")
@@ -790,12 +814,11 @@ def test_chat_embed_failure_leaves_no_stranded_message(client, fake_embeddings):
     assert history == []
 
 
-def test_chat_query_too_long_rejected_before_embedding(client, fake_embeddings):
+def test_chat_query_too_long_rejected_before_embedding(client, app, fake_embeddings):
     """An oversized query is a 400 and never reaches the embedding model."""
     from routes.chat import MAX_QUERY_CHARS
 
-    filename = upload(client).get_json()["file"]["name"]
-    client.post("/process-file", json={"filename": filename})
+    filename = index_document(client, app)
     embedded_before = list(fake_embeddings.embedded)
 
     response = client.post(
@@ -944,12 +967,13 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
         "app_settings",
         "conversations",
         "files",
+        "ingestion_jobs",
         "messages",
         "sources",
     } <= tables
     assert {"users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "e7a1c3d5f908",
+        "f2b4c6d8a013",
     )
     assert {"title", "original_filename", "is_processed", "last_opened_at"} <= {
         row[1] for row in connection.execute("pragma table_info(files)")

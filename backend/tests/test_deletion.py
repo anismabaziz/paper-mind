@@ -18,6 +18,7 @@ from app import create_app
 from composition import Services
 from db import Base, Message, Source
 from repositories import build_repositories
+from tests.ingestion_helpers import build_test_worker
 from services.accounts.secrets_service import encrypt_api_key
 from services.parsing.document_parser import Chunk
 from services.retrieval.base import RetrievalResult
@@ -210,16 +211,26 @@ def app(
     settings_obj,
 ):
     """Compose the app like production, with fakes wired through the factory."""
+    parser = FakeParser()
+    embeddings = FakeEmbeddingService()
     services = replace(
         Services.from_settings(settings_obj),
         repositories=repositories,
         storage=fake_storage,
-        parser=FakeParser(),
-        embedding_service=FakeEmbeddingService(),
+        parser=parser,
+        embedding_service=embeddings,
         vector_service=fake_vectors,
         chat_provider_factory=FakeChatFactory(),
     )
-    return create_app(settings_obj, services=services)
+    application = create_app(settings_obj, services=services)
+    application.config.update(
+        TEST_REPOSITORIES=repositories,
+        TEST_STORAGE=fake_storage,
+        TEST_PARSER=parser,
+        TEST_EMBEDDINGS=embeddings,
+        TEST_VECTORS=fake_vectors,
+    )
+    return application
 
 
 @pytest.fixture
@@ -235,10 +246,11 @@ def upload(client, name="doc.pdf"):
     return client.post("/upload", data=data, content_type="multipart/form-data")
 
 
-def upload_process_chat(client):
+def upload_process_chat(client, app):
     """Upload, index, and ask once so deletion has vectors and history."""
     filename = upload(client).get_json()["file"]["name"]
-    assert client.post("/process-file", json={"filename": filename}).status_code == 200
+    assert client.post("/process-file", json={"filename": filename}).status_code == 202
+    assert build_test_worker(app).drain() == 1
     streamed = client.post("/response", json={"query": "what?", "filename": filename})
     assert streamed.status_code == 200
     # Consume the SSE stream so the bot reply is persisted before assertions.
@@ -248,9 +260,9 @@ def upload_process_chat(client):
 
 def test_vector_failure_keeps_retryable_delete_failed_state(
     client, fake_storage, fake_vectors, repositories
-):
+, app):
     """A vector failure never reports success and retains state for retry."""
-    filename = upload_process_chat(client)
+    filename = upload_process_chat(client, app)
     fake_vectors.fail_delete = True
 
     response = client.delete(f"/files/remove?path={filename}")
@@ -278,9 +290,9 @@ def test_vector_failure_keeps_retryable_delete_failed_state(
 
 def test_storage_failure_keeps_bytes_and_metadata_for_retry(
     client, fake_storage, fake_vectors, repositories
-):
+, app):
     """A disk failure during cleanup is a 500 with the document retained."""
-    filename = upload_process_chat(client)
+    filename = upload_process_chat(client, app)
     fake_storage.fail_delete = True
 
     response = client.delete(f"/files/remove?path={filename}")
@@ -299,9 +311,9 @@ def test_storage_failure_keeps_bytes_and_metadata_for_retry(
 
 def test_conversation_failure_retains_history_for_retry(
     client, fake_vectors, repositories, monkeypatch
-):
+, app):
     """A Postgres failure deleting history blocks metadata finalization."""
-    filename = upload_process_chat(client)
+    filename = upload_process_chat(client, app)
 
     def _boom(conversation_id):
         raise RuntimeError("postgres down")
@@ -320,11 +332,11 @@ def test_conversation_failure_retains_history_for_retry(
 
 def test_deletion_removes_citation_sources_without_orphans(
     client, repositories
-):
+, app):
     """Conversation cleanup removes messages and their citation sources."""
     from db import Source as SourceModel
 
-    filename = upload_process_chat(client)
+    filename = upload_process_chat(client, app)
     file_record = repositories.files.get_file(filename)
     conversation_id = repositories.conversations.get_conversation_id(
         file_record["id"]
@@ -342,10 +354,10 @@ def test_deletion_removes_citation_sources_without_orphans(
 
 
 def test_chat_and_process_are_blocked_while_deleting(
-    client, fake_vectors, repositories
+    client, app, fake_vectors, repositories
 ):
     """The deleting state blocks new chat and ingestion with a 409."""
-    filename = upload_process_chat(client)
+    filename = upload_process_chat(client, app)
     fake_vectors.fail_delete = True
     assert client.delete(f"/files/remove?path={filename}").status_code == 500
     fake_vectors.fail_delete = False
@@ -363,10 +375,10 @@ def test_chat_and_process_are_blocked_while_deleting(
 
 
 def test_listing_exposes_deletion_state_for_retry_ui(
-    client, fake_vectors, repositories
+    client, app, fake_vectors, repositories
 ):
     """The file listing carries the failed-deletion state the UI renders."""
-    filename = upload_process_chat(client)
+    filename = upload_process_chat(client, app)
     assert client.get("/files").get_json()["files"][0]["deletion_state"] == "active"
 
     fake_vectors.fail_delete = True
@@ -384,7 +396,7 @@ def test_concurrent_deletes_serialize_to_one_clean_final_state(
     """Two simultaneous deletions cannot leave or recreate document data."""
     import threading
 
-    filename = upload_process_chat(client)
+    filename = upload_process_chat(client, app)
     results = []
     results_lock = threading.Lock()
 

@@ -78,9 +78,21 @@ traceback.
 
 ## Run
 
+The API and the ingestion worker are separate processes. Both need the same
+database and services:
+
 ```bash
-uv run python app.py
+uv run python app.py        # API on http://127.0.0.1:3000 (GET /health)
+uv run python worker.py     # claims and processes ingestion jobs
 ```
+
+Upload stores the PDF and creates one queued ingestion job in the same
+transaction, then returns immediately. The worker claims queued jobs, moves
+them through parsing, embedding, indexing, and validation while refreshing a
+heartbeat, and records stage, progress, attempt count, and a safe error
+category. A worker that stops leaves a running job that the next worker
+requeues once the heartbeat goes stale, so interrupted work is recoverable.
+`uv run python worker.py --once` drains the current queue and exits.
 
 ## Tests
 
@@ -105,8 +117,7 @@ ground-truth fixture (`evaluation/fixture.json`): ten questions over two
 sample documents in `evaluation/sample_docs/` — one authored in-repo
 (CC0), one published paper (CC BY 4.0). The evaluator reports
 `hit@5`/`recall@5` (k=5, 50 candidates fetched internally) + per-question breakdown and
-ingest `sec/PDF` (parse/embed/upsert wall time via `evaluation/evaluator.py`;
-`POST /process-file` also logs `parse/embed/upsert/total` per file).
+ingest `sec/PDF` (parse/embed/upsert wall time via `evaluation/evaluator.py`).
 `uv run pytest` exercises the scoring on deterministic fakes and stays
 headless (no Qdrant/LLM, heavy models mocked).
 

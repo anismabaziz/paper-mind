@@ -1,5 +1,5 @@
 import client, { apiBaseUrl } from "./client";
-import { File as FileType } from "@/types/db";
+import { File as FileType, IngestionJob } from "@/types/db";
 
 interface IGetFiles {
   files: FileType[];
@@ -11,6 +11,7 @@ export async function getFiles() {
 interface IUploadFile {
   message: string;
   file: FileType;
+  job: IngestionJob | null;
 }
 export async function uploadFile(file: File) {
   const formData = new FormData();
@@ -30,9 +31,9 @@ export async function deleteFile(file: FileType) {
     })
   ).data;
 }
-
 interface ICheckIsProcessed {
   is_processed: boolean;
+  ingestion: IngestionJob | null;
 }
 
 export async function checkIsProcessed(file: FileType) {
@@ -43,15 +44,11 @@ export async function checkIsProcessed(file: FileType) {
   ).data;
 }
 
-interface IProcessFile {
-  message: string;
-}
-export async function processFile(file: FileType) {
-  return (
-    await client.post<IProcessFile>("/process-file", {
-      filename: file.name,
-    })
-  ).data;
+export async function retryIngestionJob(name: string) {
+  const response = await client.post<{ job: IngestionJob }>(
+    `/ingestion-jobs/${encodeURIComponent(name)}/retry`
+  );
+  return response.data.job;
 }
 
 interface IMarkOpened {
