@@ -16,6 +16,11 @@ from services.parsing.document_parser import (
     UnknownDocumentFormat,
     resolve_parser,
 )
+from services.retrieval.hybrid import (
+    SPARSE_METHOD,
+    TOKENIZER_VERSION,
+    build_sparse_vector,
+)
 from services.retrieval.vector_service import (
     MAX_RETRIEVED_SOURCES,
     VectorService,
@@ -135,6 +140,51 @@ class TestDocumentParser:
         return doc.tobytes()
 
 
+def test_sparse_vector_aggregates_hash_collisions():
+    """Colliding token hashes produce one weighted sparse index."""
+    vector = build_sparse_vector("acc acr")
+
+    assert vector == {"indices": [1750], "values": [2.0]}
+
+
+def test_query_without_sparse_terms_selects_dense_explicitly():
+    """A stopword-only query records the dense method it selected."""
+    index = FakeVectorIndex([])
+
+    result = VectorService(index).query_vectors([0.1], "doc.pdf", query_text="the and")
+
+    assert result.method == "dense"
+    assert result.outcome == "empty"
+    assert index.queries[0]["kwargs"]["method"] == "dense"
+    assert "sparse_vector" not in index.queries[0]["kwargs"]
+
+
+def test_service_records_the_selected_retrieval_method():
+    """A shaped result names the retrieval method that ran."""
+    index = FakeVectorIndex(
+        [
+            {
+                "id": "point-1",
+                "score": 0.5,
+                "metadata": {
+                    "content": "keyword evidence",
+                    "pdf_name": "doc.pdf",
+                    "chunk_index": 0,
+                },
+            }
+        ]
+    )
+
+    result = VectorService(index).query_vectors(
+        [0.1], "doc.pdf", query_text="keyword", method="sparse"
+    )
+
+    assert result.method == "sparse"
+    assert result.outcome == "success"
+    assert result.sources[0]["content"] == "keyword evidence"
+    assert index.queries[0]["kwargs"]["method"] == "sparse"
+
+
 class FakeVectorIndex:
     """FakeVectorIndex."""
 
@@ -143,10 +193,15 @@ class FakeVectorIndex:
         self._matches = matches
         self.queries = []
 
-    def query(self, vector, top_k, include_metadata, filter):
+    def query(self, vector, top_k, include_metadata, filter, **kwargs):
         """Do query."""
-        self.queries.append({"top_k": top_k, "filter": filter})
-        return {"matches": self._matches}
+        self.queries.append({"top_k": top_k, "filter": filter, "kwargs": kwargs})
+        method = kwargs.get("method", "dense")
+        return {
+            "matches": self._matches,
+            "method": method,
+            "outcome": "success" if self._matches else "empty",
+        }
 
 
 @pytest.fixture
@@ -167,7 +222,7 @@ class TestRetrievalShaping:
     def run_shaping(self, service_factory, matches):
         """Do run shaping."""
         service, index = service_factory(matches)
-        return service.query_vectors([0.1], "doc.pdf"), index
+        return service.query_vectors([0.1], "doc.pdf").sources, index
 
     @staticmethod
     def match(content, score, chunk_index=0, document="doc.pdf"):
@@ -259,6 +314,8 @@ class TestChunkMetadata:
             "chunk_index": 1,
             "page_no": 7,
             "content_hash": "world-hash",
+            "sparse_method": SPARSE_METHOD,
+            "sparse_tokenizer_version": TOKENIZER_VERSION,
         }
 
     def test_upsert_includes_page_no_and_content_hash(self):

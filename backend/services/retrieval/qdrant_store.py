@@ -1,48 +1,127 @@
-"""
-Qdrant backend adapter.
+"""Qdrant adapter for durable dense and hashed term-frequency retrieval."""
 
-Provides ``upsert``/``query``/``delete`` so ``VectorService`` and
-``evaluation/evaluator.py`` share one store interface.
+from __future__ import annotations
 
-Collection ``pdf-index`` (the Settings vector index name) is created lazily with:
-
-* dense vector ``size 1024`` ``distance Cosine``
-* ``sparse_vectors`` with ``modifier IDF`` (BM25 sparse via ``rank-bm25``)
-"""
-
+import math
 import threading
 import uuid
+from typing import Any, NoReturn, cast
 
-from services.retrieval.base import VectorDimensionError, VectorStore
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    Modifier,
+    PointStruct,
+    Prefetch,
+    Rrf,
+    RrfQuery,
+    SparseIndexParams,
+    SparseVector,
+    SparseVectorParams,
+    VectorParams,
+)
 
-_QDRANT_DENSE_SIZE = 1024
-# Bounded in-memory caches for sparse/python fallback: filtered deletes only prune,
-# never lost on dimension mismatch, and capped to avoid unbounded growth.
-_MAX_CACHE_ENTRIES = 10000
+from services.retrieval.base import (
+    RetrievalMethod,
+    VectorDimensionError,
+    VectorStore,
+    VectorStoreConfigurationError,
+    VectorStoreError,
+    VectorStoreUnavailableError,
+)
+from services.retrieval.hybrid import RRF_K
+
+DENSE_SIZE = 1024
+DENSE_VECTOR_NAME = "dense"
+SPARSE_VECTOR_NAME = "sparse"
 
 
 class QdrantIndexAdapter(VectorStore):
-    """
-    Thin wrapper around a ``qdrant_client.QdrantClient`` implementing the.
-
-    ``upsert``/``query``/``delete`` store API used in this repo, plus hybrid
-    sparse support for ``VectorService``.
-    """
+    """Store and retrieve named dense and sparse vectors in Qdrant."""
 
     def __init__(self, client, collection_name: str):
-        """Initialize."""
+        """Bind the adapter to one Qdrant client and collection."""
         self._client = client
         self._collection = collection_name
         self._ensured = False
         self._lock = threading.RLock()
-        # Cache sparse vectors for python-side fallback when server hybrid
-        # is not available or for offline tests with a stub client.
-        self._sparse_by_id: dict[str, dict] = {}
-        self._payload_by_id: dict[str, dict] = {}
 
-    # ------------------------------------------------------------------ internals
+    @staticmethod
+    def _raise_operation_error(
+        exc: Exception,
+        *,
+        operation: str,
+        vector: Any = None,
+    ) -> NoReturn:
+        if isinstance(exc, VectorStoreError):
+            raise exc
+        message = str(exc).lower()
+        if "dimension" in message or "vector size" in message:
+            got = len(vector) if hasattr(vector, "__len__") else None
+            raise VectorDimensionError(expected=DENSE_SIZE, got=got) from exc
+        if any(
+            marker in message
+            for marker in (
+                "401",
+                "403",
+                "unauthorized",
+                "forbidden",
+                "api key",
+                "credential",
+            )
+        ):
+            raise VectorStoreConfigurationError(
+                "Qdrant authentication or authorization failed"
+            ) from exc
+        if operation == "create_collection" and any(
+            marker in message
+            for marker in ("invalid", "schema", "vector name", "modifier")
+        ):
+            raise VectorStoreConfigurationError(
+                f"Collection {exc!s} has an invalid vector schema"
+            ) from exc
+        raise VectorStoreUnavailableError(
+            f"Vector store is unavailable during {operation}"
+        ) from exc
 
-    def _ensure_collection(self):
+    @staticmethod
+    def _enum_value(value: Any) -> str:
+        return str(getattr(value, "value", value)).lower()
+
+    def _validate_existing_collection(self) -> None:
+        try:
+            collection = self._client.get_collection(self._collection)
+        except Exception as exc:
+            self._raise_operation_error(exc, operation="get_collection")
+        params = getattr(getattr(collection, "config", None), "params", None)
+        vectors = getattr(params, "vectors", None)
+        sparse_vectors = getattr(params, "sparse_vectors", None)
+        if not isinstance(vectors, dict) or not isinstance(sparse_vectors, dict):
+            raise VectorStoreConfigurationError(
+                f"Collection {self._collection!r} has an invalid vector schema"
+            )
+        dense = vectors.get(DENSE_VECTOR_NAME)
+        sparse = sparse_vectors.get(SPARSE_VECTOR_NAME)
+        if (
+            dense is None
+            or getattr(dense, "size", None) != DENSE_SIZE
+            or self._enum_value(getattr(dense, "distance", None))
+            != self._enum_value(Distance.COSINE)
+        ):
+            raise VectorStoreConfigurationError(
+                f"Collection {self._collection!r} has an incompatible dense vector schema"
+            )
+        if (
+            sparse is None
+            or self._enum_value(getattr(sparse, "modifier", None)) != "idf"
+        ):
+            raise VectorStoreConfigurationError(
+                f"Collection {self._collection!r} has an incompatible sparse vector schema"
+            )
+
+    def _ensure_collection(self, *, create: bool = True) -> None:
         if self._ensured:
             return
         with self._lock:
@@ -50,515 +129,268 @@ class QdrantIndexAdapter(VectorStore):
                 return
             try:
                 exists = self._client.collection_exists(self._collection)
-            except Exception:
-                exists = False
+            except Exception as exc:
+                self._raise_operation_error(exc, operation="collection_exists")
             if exists:
+                self._validate_existing_collection()
                 self._ensured = True
                 return
-
-            from qdrant_client.models import (
-                Distance,
-                SparseIndexParams,
-                SparseVectorParams,
-                VectorParams,
-            )
-
+            if not create:
+                raise VectorStoreConfigurationError(
+                    f"Collection {self._collection!r} does not exist"
+                )
             try:
                 self._client.create_collection(
                     collection_name=self._collection,
-                    vectors_config=VectorParams(
-                        size=_QDRANT_DENSE_SIZE, distance=Distance.COSINE
-                    ),
+                    vectors_config={
+                        DENSE_VECTOR_NAME: VectorParams(
+                            size=DENSE_SIZE,
+                            distance=Distance.COSINE,
+                        )
+                    },
                     sparse_vectors_config={
-                        "sparse": SparseVectorParams(
+                        SPARSE_VECTOR_NAME: SparseVectorParams(
                             index=SparseIndexParams(on_disk=False),
-                            modifier="idf",
+                            modifier=Modifier.IDF,
                         )
                     },
                 )
             except Exception as exc:
-                # If another worker created it concurrently, treat as success
-                msg = str(exc).lower()
-                if "already exists" in msg or "exists" in msg:
+                message = str(exc).lower()
+                if "already exists" in message or "exists" in message:
+                    self._validate_existing_collection()
                     self._ensured = True
                     return
-                raise
+                self._raise_operation_error(exc, operation="create_collection")
             self._ensured = True
 
     @staticmethod
-    def _to_filter(filter_dict):
+    def _to_filter(filter_dict: dict | None) -> Filter | None:
         if not filter_dict:
             return None
-        try:
-            from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-            must = []
-            for key, value in filter_dict.items():
-                must.append(FieldCondition(key=key, match=MatchValue(value=value)))
-            return Filter(must=must)
-        except Exception:
-            # Offline / no qdrant_client: return dict as fallback filter
-            return filter_dict
+        return Filter(
+            must=[
+                FieldCondition(key=key, match=MatchValue(value=value))
+                for key, value in filter_dict.items()
+            ]
+        )
 
     @staticmethod
-    def _sparse_dot(query_sparse: dict, doc_sparse: dict) -> float:
-        if not query_sparse or not doc_sparse:
-            return 0.0
-        q_map = dict(
-            zip(query_sparse.get("indices", []), query_sparse.get("values", []))
-        )
-        d_map = dict(zip(doc_sparse.get("indices", []), doc_sparse.get("values", [])))
-        # Qdrant's sparse modifier IDF is applied server-side; for the
-        # Python brute fallback we approximate BM25 via dot product. When
-        # rank-bm25 is available the full BM25 scoring is used in
-        # _brute_sparse_query via bm25_scores, so this dot is only the TF proxy.
-        return sum(q_map[i] * d_map.get(i, 0.0) for i in q_map)
-
-    def _brute_sparse_query(
-        self, sparse_vector: dict, top_k: int, q_filter
-    ) -> list[dict]:
-        """
-        Fallback sparse scoring over the locally cached sparse map.
-
-        Only used when the server cannot execute a sparse query.
-        """
-        # Filter by pdf_name if present
-        # q_filter is a Qdrant Filter object – extract pdf_name from it
-        pdf_filter = None
-        if q_filter is not None:
-            try:
-                if isinstance(q_filter, dict):
-                    pdf_filter = q_filter.get("pdf_name")
-                else:
-                    for cond in getattr(q_filter, "must", []) or []:
-                        if getattr(cond, "key", None) == "pdf_name":
-                            pdf_filter = getattr(
-                                getattr(cond, "match", None), "value", None
-                            )
-            except Exception:
-                pass
-
-        scored: list[dict] = []
-        # Snapshot caches under lock for thread safety
-        with self._lock:
-            sparse_items = list(self._sparse_by_id.items())
-            payload_snapshot = dict(self._payload_by_id)
-        for vid, doc_sparse in sparse_items:
-            payload = payload_snapshot.get(vid, {})
-            if pdf_filter is not None and payload.get("pdf_name") != pdf_filter:
-                continue
-            score = self._sparse_dot(sparse_vector, doc_sparse)
-            if score == 0:
-                continue
-            scored.append({"id": vid, "score": float(score), "metadata": dict(payload)})
-        scored.sort(key=lambda m: m["score"], reverse=True)
-        return scored[:top_k]
-
-    # ------------------------------------------------------------------ store API
-
-    def _enforce_cache_bounds(self):
-        """Evict oldest entries when caches exceed max size (FIFO)."""
-        while len(self._payload_by_id) > _MAX_CACHE_ENTRIES:
-            oldest = next(iter(self._payload_by_id))
-            self._payload_by_id.pop(oldest, None)
-            self._sparse_by_id.pop(oldest, None)
-        # Keep sparse map in sync — if it somehow grew larger
-        while len(self._sparse_by_id) > _MAX_CACHE_ENTRIES:
-            oldest = next(iter(self._sparse_by_id))
-            self._sparse_by_id.pop(oldest, None)
-            self._payload_by_id.pop(oldest, None)
-
-    def _commit_pending(
-        self, pending_sparse: dict[str, dict | None], pending_payload: dict[str, dict]
-    ) -> None:
-        """Merge staged sparse/payload entries into bounded caches (lock held)."""
-        with self._lock:
-            for vid, sparse in pending_sparse.items():
-                if sparse is not None:
-                    self._sparse_by_id[vid] = sparse
-                else:
-                    self._sparse_by_id.pop(vid, None)
-                self._payload_by_id[vid] = pending_payload[vid]
-            self._enforce_cache_bounds()
-
-    def upsert(self, vectors):
-        """``vectors``: list of ``{"id": str, "values": list[float], "metadata": dict, "sparse_vector": {"indices": [], "values": []}}``."""
-        if not vectors:
-            return {"upserted": 0}
-        self._ensure_collection()
-        try:
-            from qdrant_client.models import PointStruct, SparseVector
-        except Exception:
-            PointStruct = None  # type: ignore
-            SparseVector = None  # type: ignore
-
-        points = []
-        pending_sparse: dict[str, dict | None] = {}
-        pending_payload: dict[str, dict] = {}
-        for v in vectors:
-            vid = v.get("id") or str(uuid.uuid4())
-            # Qdrant accepts UUID strings or ints; ensure valid UUID
-            try:
-                uuid.UUID(vid)
-            except ValueError:
-                vid = str(uuid.uuid5(uuid.NAMESPACE_URL, vid))
-            values = v.get("values") or []
-            payload = dict(v.get("metadata") or {})
-            sparse = v.get("sparse_vector") or v.get("sparse")
-            # Stage cache entries — only committed on successful upsert so a
-            # dimension mismatch never wipes or pollutes the existing caches.
-            if sparse:
-                # normalise to dict shape
-                if hasattr(sparse, "indices"):
-                    sparse = {
-                        "indices": list(sparse.indices),
-                        "values": list(sparse.values),
-                    }
-                pending_sparse[vid] = dict(sparse)
-            else:
-                pending_sparse[vid] = None
-            pending_payload[vid] = dict(payload)
-
-            if PointStruct is None:
-                # No qdrant_client available (offline tests via stub client)
-                continue
-
-            # Try to include sparse_vector if the model supports it
-            try:
-                if (
-                    sparse
-                    and SparseVector is not None
-                    and hasattr(PointStruct, "__init__")
-                ):
-                    sparse_obj = SparseVector(
-                        indices=sparse["indices"], values=sparse["values"]
-                    )
-                    # Prefer explicit sparse_vector field if supported
-                    try:
-                        points.append(
-                            PointStruct(
-                                id=vid,
-                                vector=values,
-                                payload=payload,
-                                sparse_vector=sparse_obj,
-                            )
-                        )
-                        continue
-                    except TypeError:
-                        pass
-                    # Fallback: named vector dict
-                    try:
-                        points.append(
-                            PointStruct(
-                                id=vid,
-                                vector={"dense": values, "sparse": sparse_obj},
-                                payload=payload,
-                            )
-                        )
-                        continue
-                    except Exception:
-                        pass
-                points.append(PointStruct(id=vid, vector=values, payload=payload))
-            except Exception:
-                # Last resort plain dense
-                points.append(PointStruct(id=vid, vector=values, payload=payload))
-
-        if PointStruct is None:
-            # Offline / stub client: commit pending caches directly (bounded)
-            self._commit_pending(pending_sparse, pending_payload)
-            return {"upserted": len(vectors)}
-
-        if points:
-            try:
-                self._client.upsert(
-                    collection_name=self._collection, points=points, wait=True
-                )
-            except Exception as exc:
-                msg = str(exc).lower()
-                if (
-                    "vector size" in msg
-                    or "dimension" in msg
-                    or "wrong vector size" in msg
-                    or ("vector" in msg and "size" in msg)
-                ):
-                    # Fail fast — do NOT delete collection or clear caches.
-                    # Infer sizes for the typed error hint.
-                    inferred = None
-                    if points:
-                        vec = getattr(points[0], "vector", None)
-                        if isinstance(vec, dict):
-                            dense = vec.get("dense")
-                            if dense is not None and hasattr(dense, "__len__"):
-                                inferred = len(dense)
-                        elif hasattr(vec, "__len__"):
-                            inferred = len(vec)
-                    raise VectorDimensionError(
-                        expected=_QDRANT_DENSE_SIZE, got=inferred
-                    ) from exc
-                raise
-            # Success — commit staged caches and bound them
-            self._commit_pending(pending_sparse, pending_payload)
+    def _normalize_sparse(sparse: Any) -> dict[str, list]:
+        if hasattr(sparse, "indices") and hasattr(sparse, "values"):
+            indices = list(sparse.indices)
+            values = list(sparse.values)
+        elif isinstance(sparse, dict):
+            indices = list(sparse.get("indices", []))
+            values = list(sparse.get("values", []))
         else:
-            # No points (empty vectors edge) still need to stage if offline? Already handled
-            self._commit_pending(pending_sparse, pending_payload)
-        return {"upserted": len(vectors)}
-
-    def _dense_search(self, vector, top_k, q_filter):
-        # Qdrant Python client: query_points is preferred in recent versions
-        # Fall back to search for older clients
-        try:
-            result = self._client.query_points(
-                collection_name=self._collection,
-                query=vector,
-                limit=top_k,
-                query_filter=q_filter,
-                with_payload=True,
+            raise VectorStoreConfigurationError("Sparse query vector is missing")
+        if len(indices) != len(values):
+            raise VectorStoreConfigurationError(
+                "Sparse vector indices and values must have equal length"
             )
-            points = getattr(result, "points", result)
-        except AttributeError:
-            points = []
-        except Exception:
-            # Fallback to legacy search
-            try:
-                points = self._client.search(
-                    collection_name=self._collection,
-                    query_vector=vector,
-                    limit=top_k,
-                    query_filter=q_filter,
-                    with_payload=True,
-                )
-            except Exception:
-                # Collection empty / not found
-                return []
+        if any(
+            not isinstance(index, int) or isinstance(index, bool) for index in indices
+        ):
+            raise VectorStoreConfigurationError(
+                "Sparse vector indices must be integers"
+            )
+        if any(index < 0 for index in indices):
+            raise VectorStoreConfigurationError(
+                "Sparse vector indices must be non-negative"
+            )
+        if indices != sorted(set(indices)):
+            raise VectorStoreConfigurationError(
+                "Sparse vector indices must be sorted and unique"
+            )
+        if any(not isinstance(value, (int, float)) for value in values):
+            raise VectorStoreConfigurationError("Sparse vector values must be numbers")
+        finite_values = [float(value) for value in values]
+        if not all(math.isfinite(value) for value in finite_values):
+            raise VectorStoreConfigurationError("Sparse vector values must be finite")
+        return {"indices": indices, "values": finite_values}
+
+    @staticmethod
+    def _to_matches(points) -> list[dict]:
         matches = []
-        for p in points or []:
-            if isinstance(p, dict):
-                payload = p.get("payload") or p.get("metadata") or {}
-                score = p.get("score", 0.0)
-                pid = p.get("id")
+        for point in points or []:
+            if isinstance(point, dict):
+                payload = point.get("payload") or point.get("metadata") or {}
+                score = point.get("score", 0.0)
+                point_id = point.get("id")
             else:
-                payload = getattr(p, "payload", {}) or {}
-                score = getattr(p, "score", 0.0) or 0.0
-                pid = getattr(p, "id", None)
+                payload = getattr(point, "payload", {}) or {}
+                score = getattr(point, "score", 0.0) or 0.0
+                point_id = getattr(point, "id", None)
             matches.append(
                 {
-                    "id": str(pid) if pid is not None else "",
+                    "id": str(point_id) if point_id is not None else "",
                     "score": float(score),
                     "metadata": dict(payload),
                 }
             )
         return matches
 
-    def _sparse_search(self, sparse_vector: dict, top_k: int, q_filter):
-        # Try server-side sparse query
-        try:
-            from qdrant_client.models import SparseVector
-        except Exception:
-            SparseVector = None  # type: ignore
-
-        if SparseVector is not None:
+    def upsert(self, vectors) -> dict:
+        """Store dense and sparse representations for each vector record."""
+        if not vectors:
+            return {"upserted": 0}
+        self._ensure_collection()
+        points = []
+        for vector in vectors:
+            point_id = vector.get("id") or str(uuid.uuid4())
             try:
-                sparse_q = SparseVector(
-                    indices=sparse_vector.get("indices", []),
-                    values=sparse_vector.get("values", []),
+                uuid.UUID(point_id)
+            except (AttributeError, TypeError, ValueError):
+                point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(point_id)))
+            dense = vector.get("values")
+            if not isinstance(dense, (list, tuple)):
+                raise VectorStoreConfigurationError("Dense vector values are missing")
+            if len(dense) != DENSE_SIZE:
+                raise VectorDimensionError(expected=DENSE_SIZE, got=len(dense))
+            sparse = self._normalize_sparse(
+                vector.get("sparse_vector") or vector.get("sparse")
+            )
+            sparse_query = SparseVector(
+                indices=sparse["indices"],
+                values=sparse["values"],
+            )
+            points.append(
+                PointStruct(
+                    id=point_id,
+                    vector={
+                        DENSE_VECTOR_NAME: list(dense),
+                        SPARSE_VECTOR_NAME: sparse_query,
+                    },
+                    payload=dict(vector.get("metadata") or {}),
                 )
-                # New API: query_points with using="sparse"
+            )
+        try:
+            self._client.upsert(
+                collection_name=self._collection,
+                points=points,
+                wait=True,
+            )
+        except Exception as exc:
+            self._raise_operation_error(exc, operation="upsert", vector=dense)
+        return {"upserted": len(vectors)}
+
+    def _query_points(
+        self,
+        vector,
+        sparse: dict[str, list],
+        method: RetrievalMethod,
+        top_k: int,
+        q_filter: Filter | None,
+    ) -> list[dict]:
+        try:
+            if method == "hybrid":
+                sparse_query = SparseVector(
+                    indices=sparse["indices"],
+                    values=sparse["values"],
+                )
                 result = self._client.query_points(
                     collection_name=self._collection,
-                    query=sparse_q,
-                    using="sparse",
+                    prefetch=[
+                        Prefetch(
+                            query=vector,
+                            using=DENSE_VECTOR_NAME,
+                            limit=top_k,
+                        ),
+                        Prefetch(
+                            query=sparse_query,
+                            using=SPARSE_VECTOR_NAME,
+                            limit=top_k,
+                        ),
+                    ],
+                    query=RrfQuery(rrf=Rrf(k=RRF_K)),
                     limit=top_k,
                     query_filter=q_filter,
                     with_payload=True,
                 )
-                points = getattr(result, "points", result)
-                matches = []
-                for p in points or []:
-                    if isinstance(p, dict):
-                        payload = p.get("payload") or p.get("metadata") or {}
-                        score = p.get("score", 0.0)
-                        pid = p.get("id")
-                    else:
-                        payload = getattr(p, "payload", {}) or {}
-                        score = getattr(p, "score", 0.0) or 0.0
-                        pid = getattr(p, "id", None)
-                    matches.append(
-                        {
-                            "id": str(pid) if pid is not None else "",
-                            "score": float(score),
-                            "metadata": dict(payload),
-                        }
-                    )
-                if matches:
-                    return matches
-            except Exception:
-                pass
-
-            # Fallback via search with sparse vector (older API)
-            try:
-                points = self._client.search(
+            elif method == "sparse":
+                result = self._client.query_points(
                     collection_name=self._collection,
-                    query_vector=sparse_q,
+                    query=SparseVector(
+                        indices=sparse["indices"],
+                        values=sparse["values"],
+                    ),
+                    using=SPARSE_VECTOR_NAME,
                     limit=top_k,
                     query_filter=q_filter,
                     with_payload=True,
                 )
-                matches = []
-                for p in points or []:
-                    payload = getattr(p, "payload", {}) or {}
-                    score = getattr(p, "score", 0.0) or 0.0
-                    pid = getattr(p, "id", None)
-                    matches.append(
-                        {
-                            "id": str(pid) if pid is not None else "",
-                            "score": float(score),
-                            "metadata": dict(payload),
-                        }
-                    )
-                if matches:
-                    return matches
-            except Exception:
-                pass
-
-        # Pure python fallback over cached sparse map
-        return self._brute_sparse_query(sparse_vector, top_k, q_filter)
-
-    def query(self, vector, top_k, include_metadata=True, filter=None, **kwargs):
-        """Do query."""
-        self._ensure_collection()
-        q_filter = self._to_filter(filter)
-
-        sparse_vector = kwargs.get("sparse_vector") or kwargs.get("sparse")
-        # Normalise sparse_vector from object to dict if needed
-        if sparse_vector is not None and hasattr(sparse_vector, "indices"):
-            sparse_vector = {
-                "indices": list(sparse_vector.indices),
-                "values": list(sparse_vector.values),
-            }
-
-        # No hybrid requested -> dense only (backwards compat)
-        if not sparse_vector:
-            matches = self._dense_search(vector, top_k, q_filter)
-            return {"matches": matches}
-
-        # Try single Qdrant hybrid query (dense + BM25 sparse via rank-bm25 on
-        # the ``sparse`` field) with RRF(k=60). Falls back to two searches + RRF.
-        single = self._single_hybrid_query(vector, sparse_vector, top_k, q_filter)
-        if single is not None:
-            return {"matches": single}
-
-        # Fallback: dense + sparse then fuse via RRF(k=60)
-        dense_matches = self._dense_search(vector, top_k, q_filter)
-        sparse_matches = self._sparse_search(sparse_vector, top_k, q_filter)
-
-        # If one side returned nothing, return the other side
-        if not dense_matches:
-            return {"matches": sparse_matches[:top_k]}
-        if not sparse_matches:
-            return {"matches": dense_matches[:top_k]}
-
-        try:
-            from services.retrieval.hybrid import rrf_fusion
-
-            fused = rrf_fusion([dense_matches, sparse_matches], limit=top_k)
-            return {"matches": fused}
-        except Exception:
-            # Fallback to dense if fusion fails
-            return {"matches": dense_matches}
-
-    def _single_hybrid_query(self, vector, sparse_vector, top_k, q_filter):
-        """Attempt a single Qdrant hybrid query with RRF fusion."""
-        try:
-            from qdrant_client.models import FusionQuery, Fusion, Prefetch, SparseVector
-        except Exception:
-            return None
-        try:
-            sparse_q = SparseVector(
-                indices=sparse_vector.get("indices", []),
-                values=sparse_vector.get("values", []),
-            )
-            prefetch = [
-                Prefetch(query=vector, limit=top_k),
-                Prefetch(query=sparse_q, using="sparse", limit=top_k),
-            ]
-            result = self._client.query_points(
-                collection_name=self._collection,
-                prefetch=prefetch,
-                query=FusionQuery(fusion=Fusion.RRF),
-                with_payload=True,
-                query_filter=q_filter,
-            )
-            points = getattr(result, "points", result) or []
-            matches = []
-            for p in points:
-                if isinstance(p, dict):
-                    payload = p.get("payload") or p.get("metadata") or {}
-                    score = p.get("score", 0.0)
-                    pid = p.get("id")
-                else:
-                    payload = getattr(p, "payload", {}) or {}
-                    score = getattr(p, "score", 0.0) or 0.0
-                    pid = getattr(p, "id", None)
-                matches.append(
-                    {
-                        "id": str(pid) if pid is not None else "",
-                        "score": float(score),
-                        "metadata": dict(payload),
-                    }
+            else:
+                result = self._client.query_points(
+                    collection_name=self._collection,
+                    query=vector,
+                    using=DENSE_VECTOR_NAME,
+                    limit=top_k,
+                    query_filter=q_filter,
+                    with_payload=True,
                 )
-            if matches:
-                return matches[:top_k]
-        except Exception:
-            return None
-        return None
+        except Exception as exc:
+            self._raise_operation_error(exc, operation="query", vector=vector)
+        return self._to_matches(getattr(result, "points", result))
 
-    def delete(self, filter=None, delete_all=False):
-        """Do delete."""
+    def query(
+        self,
+        vector,
+        top_k,
+        include_metadata=True,
+        filter=None,
+        **kwargs,
+    ) -> dict:
+        """Run the selected retrieval method and report its outcome."""
+        self._ensure_collection(create=False)
+        sparse_value = kwargs.get("sparse_vector") or kwargs.get("sparse")
+        sparse = (
+            self._normalize_sparse(sparse_value) if sparse_value is not None else None
+        )
+        method_value = kwargs.get("method") or ("hybrid" if sparse else "dense")
+        if method_value not in {"dense", "sparse", "hybrid"}:
+            raise VectorStoreConfigurationError(
+                f"Unsupported retrieval method: {method_value}"
+            )
+        method = cast(RetrievalMethod, method_value)
+        if method != "dense" and (sparse is None or not sparse["indices"]):
+            raise VectorStoreConfigurationError(
+                f"{method} retrieval requires a non-empty sparse query vector"
+            )
+        matches = self._query_points(
+            vector,
+            sparse or {"indices": [], "values": []},
+            method,
+            top_k,
+            self._to_filter(filter),
+        )
+        return {
+            "matches": matches,
+            "method": method,
+            "outcome": "success" if matches else "empty",
+        }
+
+    def delete(self, filter=None, delete_all=False) -> dict:
+        """Delete all points or the points matching one payload filter."""
         self._ensure_collection()
         if delete_all:
-            # Fast path: delete collection and recreate empty one
             try:
                 self._client.delete_collection(collection_name=self._collection)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._raise_operation_error(exc, operation="delete_collection")
             with self._lock:
                 self._ensured = False
-                self._sparse_by_id.clear()
-                self._payload_by_id.clear()
             self._ensure_collection()
             return {"deleted": "all"}
-
-        if filter is None:
-            return {"deleted": 0}
-
-        # Handle delete_all passed via dict: accept
-        # ``delete(delete_all=True)`` – our caller uses keyword.
         q_filter = self._to_filter(filter)
         if q_filter is None:
             return {"deleted": 0}
-        # Also prune local cache for filtered deletes by pdf_name (bounded,
-        # only filtered deletes touch the caches — never on dimension mismatch)
-        if filter and "pdf_name" in filter:
-            target = filter["pdf_name"]
-            with self._lock:
-                to_remove = [
-                    vid
-                    for vid, payload in self._payload_by_id.items()
-                    if payload.get("pdf_name") == target
-                ]
-                for vid in to_remove:
-                    self._sparse_by_id.pop(vid, None)
-                    self._payload_by_id.pop(vid, None)
         try:
             self._client.delete(
-                collection_name=self._collection, points_selector=q_filter, wait=True
+                collection_name=self._collection,
+                points_selector=q_filter,
+                wait=True,
             )
-        except Exception:
-            # Fallback: try delete with filter keyword variant
-            try:
-                self._client.delete(
-                    collection_name=self._collection, filter=q_filter, wait=True
-                )
-            except Exception:
-                pass
+        except Exception as exc:
+            self._raise_operation_error(exc, operation="delete")
         return {"deleted": "filtered"}

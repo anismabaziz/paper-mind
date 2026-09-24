@@ -21,11 +21,18 @@ parse/embed/upsert wall time). Free local path uses Qdrant on
 
 import json
 from dataclasses import asdict, dataclass, field
+from typing import cast
 from pathlib import Path
 
 from evaluation import judge as judge_module
 from evaluation.metrics import RetrievalReport, hit_at_k, recall_at_k, summarize
 from services.parsing.document_parser import DocumentIngestor
+from services.retrieval.base import (
+    RetrievalMethod,
+    RetrievalResult,
+    VectorStoreConfigurationError,
+)
+from services.retrieval.hybrid import DEFAULT_FETCH_K, build_sparse_vector
 from services.retrieval.reranker import RerankerService
 from services.retrieval.vector_service import (
     build_vectors_from_chunks,
@@ -64,10 +71,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 FIXTURE_PATH = Path(__file__).parent / "fixture.json"
 SAMPLE_DOCS_DIR = Path(__file__).parent / "sample_docs"
 
-# Retrieval is fetched generously and scored at k; the index top_k also
-# goes through source shaping, which needs headroom to dedupe.
-# Aligned with production VectorService.FETCH_K=50 so eval numbers describe prod.
-FETCH_K = 50
+FETCH_K = DEFAULT_FETCH_K
 DEFAULT_K = 5
 
 
@@ -108,7 +112,8 @@ def index_document(
         live run can namespace them under an eval- prefix without changing
         which file is read. Uses the same parser and vector shape as the
         /process-file route, so the evaluator exercises the real ingestion
-        path. Sparse BM25 vectors are stored alongside dense for hybrid retrieval.
+        path. Hashed term-frequency vectors are stored alongside dense vectors
+        for hybrid retrieval.
         Returns chunk count; timing is logged via :func:`index_document_timed`
         for gate reports (sec/PDF).
     """
@@ -154,62 +159,50 @@ def retrieve(
     rerank=None,
     reranker=None,
 ):
-    """
-    Fetch candidates and shape them exactly like the /response route.
-
-    When ``query_text`` is provided a hybrid dense+BM25 sparse query is
-    issued (single Qdrant hybrid via RRF), mirroring ``VectorService``.
-    When the reranker is enabled (or ``rerank=True``) the FETCH_K candidates
-    are reranked with a local cross-encoder before shaping to ``k`` (top 5).
-    Entirely local CPU, no API. ``reranker`` injects a pre-built service;
-    without one a settings-built reranker is used.
-    """
+    """Fetch and shape candidates without changing the selected method."""
     sparse = None
+    method: RetrievalMethod = "dense"
     if query_text is not None:
-        try:
-            from services.retrieval.hybrid import build_sparse_vector
-
-            sparse = build_sparse_vector(query_text)
-            if not sparse["indices"]:
-                sparse = None
-        except Exception:
+        sparse = build_sparse_vector(query_text)
+        if sparse["indices"]:
+            method = "hybrid"
+        else:
             sparse = None
-
-    if sparse is not None:
-        try:
-            results = index.query(
-                vector=query_embedding,
-                top_k=FETCH_K,
-                include_metadata=True,
-                filter={"pdf_name": f"{prefix}{filename}"},
-                sparse_vector=sparse,
-            )
-        except TypeError:
-            results = index.query(
-                vector=query_embedding,
-                top_k=FETCH_K,
-                include_metadata=True,
-                filter={"pdf_name": f"{prefix}{filename}"},
-            )
-    else:
-        results = index.query(
-            vector=query_embedding,
-            top_k=FETCH_K,
-            include_metadata=True,
-            filter={"pdf_name": f"{prefix}{filename}"},
+    if method == "hybrid" and sparse is None:
+        raise VectorStoreConfigurationError(
+            "Hybrid retrieval requires a non-empty sparse query vector"
         )
+    query_args = {
+        "vector": query_embedding,
+        "top_k": FETCH_K,
+        "include_metadata": True,
+        "filter": {"pdf_name": f"{prefix}{filename}"},
+        "method": method,
+    }
+    if sparse is not None:
+        query_args["sparse_vector"] = sparse
+    results = index.query(**query_args)
     matches = (
         results.get("matches", [])
         if isinstance(results, dict)
         else getattr(results, "matches", [])
     )
+    actual_method: RetrievalMethod = method
+    if isinstance(results, dict) and "method" in results:
+        actual_method = cast(RetrievalMethod, results["method"])
+    if actual_method not in {"dense", "sparse", "hybrid"}:
+        raise VectorStoreConfigurationError(
+            f"Vector store reported an invalid retrieval method: {actual_method}"
+        )
     sources = matches_to_sources(matches, filename)
-
-    # Gated local reranker mirroring VectorService — single shared gate
     rerank_service = reranker if reranker is not None else _reranker_from_settings()
     sources = rerank_service.maybe_rerank(query_text, sources, enabled=rerank)
-
-    return shape_sources(sources)[:k]
+    shaped = shape_sources(sources)[:k]
+    return RetrievalResult(
+        sources=shaped,
+        method=actual_method,
+        outcome="success" if shaped else "empty",
+    )
 
 
 def evaluate(
@@ -245,7 +238,7 @@ def evaluate(
         filename = item["document"]
         query_embedding = embed_fn([item["question"]])[0]
         t0 = time.time()
-        sources = retrieve(
+        retrieval_result = retrieve(
             query_embedding,
             filename,
             index,
@@ -255,6 +248,7 @@ def evaluate(
             rerank=rerank,
             reranker=rerank_service,
         )
+        sources = retrieval_result.sources
         # Record latency delta proxy: rerank timing is printed inside reranker,
         # but we also capture per-query retrieval time for the report if rerank on
         if rerank is True or (rerank is None and _is_rerank_enabled()):
@@ -267,7 +261,12 @@ def evaluate(
             "recall_at_k": recall_at_k(retrieved_texts, item["gold_snippets"], k),
         }
 
-        detail = {"id": item["id"], **result, "retrieved_chunks": len(retrieved_texts)}
+        detail = {
+            "id": item["id"],
+            **result,
+            "retrieved_chunks": len(retrieved_texts),
+            "retrieval_method": retrieval_result.method,
+        }
 
         if judge_fn is not None:
             context = "\n\n".join(retrieved_texts)

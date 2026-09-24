@@ -74,10 +74,20 @@ export interface ISource {
   page: number | null;
 }
 
+export interface IRetrievalResult {
+  method: "dense" | "sparse" | "hybrid";
+  outcome: "success" | "empty";
+}
+
+export interface IChatDone {
+  sources: ISource[];
+  retrieval?: IRetrievalResult;
+}
+
 interface IStreamHandlers {
   onToken: (text: string) => void;
   onError: (message: string) => void;
-  onDone: (sources: ISource[]) => void;
+  onDone: (result: IChatDone) => void;
 }
 
 export async function chatStream(
@@ -119,7 +129,10 @@ export async function chatStream(
       if (event.name === "token") handlers.onToken(event.data.text as string);
       else if (event.name === "error") handlers.onError(event.data.error as string);
       else if (event.name === "done")
-        handlers.onDone((event.data.sources as ISource[]) ?? []);
+        handlers.onDone({
+          sources: (event.data.sources as ISource[]) ?? [],
+          retrieval: event.data.retrieval as IRetrievalResult | undefined,
+        });
     }
   }
 }

@@ -18,7 +18,10 @@ from db import Conversation, Message, Source
 from services.embeddings.local_embeddings import EmbeddingService
 from services.llm.base import LLMProvider
 from services.retrieval.base import VectorStore
+from services.retrieval.hybrid import SPARSE_METHOD, TOKENIZER_VERSION
+from services.retrieval.qdrant_store import QdrantIndexAdapter
 from services.retrieval.reranker import Reranker
+from services.retrieval.vector_service import VectorService
 from settings import (
     AuthSettings,
     ChunkingSettings,
@@ -204,6 +207,58 @@ def test_migrations_apply_to_an_empty_postgres_database(migrated_database):
 
 
 @pytest.mark.full_stack
+def test_qdrant_vectors_and_all_retrieval_methods_survive_adapter_restart(
+    full_stack_app,
+):
+    """Stored named vectors answer every mode through a fresh adapter."""
+    harness = full_stack_app
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+
+    collection = harness.qdrant.get_collection(harness.collection_name)
+    dense_schema = collection.config.params.vectors
+    sparse_schema = collection.config.params.sparse_vectors
+    assert set(dense_schema) == {"dense"}
+    assert set(sparse_schema) == {"sparse"}
+    assert dense_schema["dense"].size == 1024
+
+    points, _ = harness.qdrant.scroll(
+        collection_name=harness.collection_name,
+        limit=100,
+        with_payload=True,
+        with_vectors=True,
+    )
+    assert points
+    assert all(set(point.vector) == {"dense", "sparse"} for point in points)
+    assert all(point.vector["dense"] for point in points)
+    assert all(point.vector["sparse"].indices for point in points)
+    assert all(point.payload["sparse_method"] == SPARSE_METHOD for point in points)
+    assert all(
+        point.payload["sparse_tokenizer_version"] == TOKENIZER_VERSION
+        for point in points
+    )
+
+    restarted_store = QdrantIndexAdapter(harness.qdrant, harness.collection_name)
+    service = VectorService(restarted_store)
+    query_text = "What are the five stages of a RAG pipeline?"
+    embedding = harness.embeddings.embed_texts(query_text)[0]
+
+    for method in ("dense", "sparse", "hybrid"):
+        result = service.query_vectors(
+            embedding,
+            filename,
+            query_text=query_text,
+            method=method,
+        )
+        assert result.method == method
+        assert result.outcome == "success"
+        assert any(
+            "A RAG pipeline has five stages" in source["content"]
+            for source in result.sources
+        )
+
+
+@pytest.mark.full_stack
 def test_pdf_flow_persists_across_http_postgres_qdrant_and_storage(
     full_stack_app,
 ):
@@ -261,11 +316,13 @@ def test_pdf_flow_persists_across_http_postgres_qdrant_and_storage(
     terminal = events[-1]
     assert terminal[0] == "done"
     assert terminal[1]["done"] is True
+    assert terminal[1]["retrieval"] == {"method": "hybrid", "outcome": "success"}
     assert any(
         "A RAG pipeline has five stages" in source["content"]
         for source in terminal[1]["sources"]
     )
     assert "A RAG pipeline has five stages" in harness.chat.streamed[-1][1]
+    assert any("rerank_score" in source for source in terminal[1]["sources"])
 
     history = harness.client.get(f"/messages?filename={filename}")
     assert history.status_code == 200
@@ -369,4 +426,8 @@ def test_injected_service_failures_reach_visible_http_responses(
         events = parse_sse(response.text)
         assert [name for name, _ in events] == ["error", "done"]
         assert events[0][1]["error"]
-        assert events[1][1] == {"done": True, "sources": []}
+        assert events[1][1] == {
+            "done": True,
+            "sources": [],
+            "retrieval": {"method": "hybrid", "outcome": "success"},
+        }

@@ -4,15 +4,22 @@ import hashlib
 import uuid
 
 from services.concurrency import map_batches_concurrently
-from services.retrieval.base import VectorStore
-from services.retrieval.hybrid import build_sparse_vector, build_sparse_vectors
+from services.retrieval.base import (
+    RetrievalMethod,
+    RetrievalResult,
+    VectorStore,
+    VectorStoreConfigurationError,
+)
+from services.retrieval.hybrid import (
+    DEFAULT_FETCH_K,
+    SPARSE_METHOD,
+    TOKENIZER_VERSION,
+    build_sparse_vector,
+    build_sparse_vectors,
+)
 from services.retrieval.reranker import Reranker
 
-# How many candidates the index is asked for vs. how many survive shaping.
-# Asking for more than we keep gives dedupe room to work.
-TOP_K = 8
-FETCH_K = 50
-RRF_K = 60
+FETCH_K = DEFAULT_FETCH_K
 MAX_RETRIEVED_SOURCES = 5
 
 
@@ -87,6 +94,8 @@ def build_vectors_from_chunks(
             "chunk_index": chunk.chunk_index,
             "page_no": chunk.page_no,
             "content_hash": chunk.content_hash,
+            "sparse_method": SPARSE_METHOD,
+            "sparse_tokenizer_version": TOKENIZER_VERSION,
         }
         sparse = (
             sparse_batch[j] if j < len(sparse_batch) else {"indices": [], "values": []}
@@ -165,77 +174,75 @@ class VectorService:
         return self.upsert_chunks(embeddings, chunks, filename)
 
     def query_vectors(
-        self, embedding, filename, top_k=FETCH_K, query_text=None, rerank=None
-    ):
+        self,
+        embedding,
+        filename,
+        top_k=FETCH_K,
+        query_text=None,
+        rerank=None,
+        method: RetrievalMethod | None = None,
+    ) -> RetrievalResult:
         """
-        Return shaped sources: deduped, score-ordered, bounded.
+        Return shaped sources with an explicit method and empty or success outcome.
 
-        When ``query_text`` is provided the method issues a hybrid query:
-        dense embedding + BM25 sparse (``sparse_vectors`` via ``rank-bm25``)
-        fused with ``RRF(k=60)`` by Qdrant.
-        ``FETCH_K=50`` candidates are fetched before shaping to ``5``.
-
-        When the injected reranker is enabled (or ``rerank=True`` explicitly)
-        and ``query_text`` is present, the 50 hybrid candidates are reranked
-        with a local cross-encoder (``ms-marco-MiniLM-L-6-v2`` 22M fast or
-        ``bge-reranker-v2-m3`` quality) before ``shape_sources`` keeps top 5.
-        Entirely local CPU, no API. ``rerank=False`` preserves legacy order
-        even when the reranker is enabled (used by tests/evaluator).
+        Queries without usable sparse terms select dense retrieval and record
+        that choice in the result.
         """
-        sparse: dict | None = None
-        if query_text is not None:
+        if method not in {None, "dense", "sparse", "hybrid"}:
+            raise VectorStoreConfigurationError(
+                f"Unsupported retrieval method: {method}"
+            )
+
+        sparse = None
+        if query_text is not None and method != "dense":
             sparse = build_sparse_vector(query_text)
             if not sparse["indices"]:
                 sparse = None
-        else:
-            sparse = None
 
-        if sparse is not None:
-            try:
-                # Single Qdrant hybrid query: dense + BM25 sparse via
-                # rank-bm25 on the ``sparse`` field, fused with RRF(k=60)
-                search_results = self._store.query(
-                    vector=embedding,
-                    top_k=top_k,
-                    include_metadata=True,
-                    filter={"pdf_name": filename},
-                    sparse_vector=sparse,
-                )
-            except TypeError as exc:
-                # Explicit warning instead of silent fallback – hybrid is
-                # degraded, helps surface mis-wired fakes in tests.
-                print(
-                    f"VectorService hybrid query degraded to dense (TypeError): {exc}"
-                )
-                search_results = self._store.query(
-                    vector=embedding,
-                    top_k=top_k,
-                    include_metadata=True,
-                    filter={"pdf_name": filename},
-                )
-        else:
-            search_results = self._store.query(
-                vector=embedding,
-                top_k=top_k,
-                include_metadata=True,
-                filter={"pdf_name": filename},
+        if method is None:
+            selected_method: RetrievalMethod = (
+                "hybrid" if sparse is not None else "dense"
             )
+        else:
+            selected_method = method
+            if selected_method != "dense" and sparse is None:
+                raise VectorStoreConfigurationError(
+                    f"{selected_method} retrieval requires query text"
+                )
+
+        query_args = {
+            "vector": embedding,
+            "top_k": top_k,
+            "include_metadata": True,
+            "filter": {"pdf_name": filename},
+            "method": selected_method,
+        }
+        if sparse is not None:
+            query_args["sparse_vector"] = sparse
+        search_results = self._store.query(**query_args)
 
         matches = (
             search_results.get("matches", [])
             if isinstance(search_results, dict)
             else getattr(search_results, "matches", [])
         )
-
         sources = matches_to_sources(matches, filename)
-
-        # Gated local reranker over FETCH_K candidates before shaping to 5.
-        # Centralised in the reranker's maybe_rerank so VectorService and
-        # evaluator share one gate; entirely local CPU, no API.
         if self._reranker is not None:
             sources = self._reranker.maybe_rerank(query_text, sources, enabled=rerank)
-
-        return shape_sources(sources)
+        shaped = shape_sources(sources)
+        actual_method = selected_method
+        if isinstance(search_results, dict) and "method" in search_results:
+            reported_method = search_results["method"]
+            if reported_method not in {"dense", "sparse", "hybrid"}:
+                raise VectorStoreConfigurationError(
+                    f"Vector store reported an invalid retrieval method: {reported_method}"
+                )
+            actual_method = reported_method
+        return RetrievalResult(
+            sources=shaped,
+            method=actual_method,
+            outcome="success" if shaped else "empty",
+        )
 
     def delete_by_filename(self, filename):
         """Delete every vector stored for one document."""
