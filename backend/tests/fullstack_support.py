@@ -21,6 +21,7 @@ from app import create_app
 from composition import Services
 from repositories import build_repositories
 from services.embeddings.local_embeddings import EmbeddingService
+from services.ingestion.worker import IngestionWorker
 from services.llm.base import ChatCredentials, LLMProvider
 from services.parsing.document_parser import DocumentIngestor
 from services.retrieval.base import VectorStore
@@ -129,6 +130,7 @@ class ControlledRepositories:
     files: ControlledRepository
     app_settings: ControlledRepository
     conversations: ControlledRepository
+    ingestion_jobs: Any
 
 
 class ControlledEmbeddingService(EmbeddingService):
@@ -315,6 +317,15 @@ class ApplicationHarness:
     reranker: ControlledReranker
     vector_store: ControlledVectorStore
     chat: DeterministicChatFactory
+    worker_factory: Any
+
+    def build_worker(self, worker_id: str = "full-stack-worker"):
+        """Build a worker over the same dependencies the app serves with."""
+        return self.worker_factory(worker_id)
+
+    def drain(self, worker_id: str = "full-stack-worker") -> int:
+        """Process the current ingestion queue through a worker."""
+        return self.build_worker(worker_id).drain()
 
     def close(self) -> None:
         """Stop HTTP serving and remove Qdrant and file-system test data."""
@@ -342,6 +353,7 @@ def build_application(
         files=ControlledRepository(repositories.files),
         app_settings=ControlledRepository(repositories.app_settings),
         conversations=ControlledRepository(repositories.conversations),
+        ingestion_jobs=repositories.ingestion_jobs,
     )
     embeddings = ControlledEmbeddingService()
     reranker = ControlledReranker()
@@ -364,6 +376,17 @@ def build_application(
         api_key_verifier=chat.verify,
     )
     application = create_app(app_settings, services=services)
+
+    def worker_factory(worker_id: str):
+        return IngestionWorker(
+            repositories=controlled_repositories,
+            storage=storage,
+            parser=services.parser,
+            embedding_service=embeddings,
+            vector_service=VectorService(vector_store, reranker),
+            worker_id=worker_id,
+        )
+
     server = make_server("127.0.0.1", 0, application, threaded=True)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
@@ -395,4 +418,5 @@ def build_application(
         reranker=reranker,
         vector_store=vector_store,
         chat=chat,
+        worker_factory=worker_factory,
     )

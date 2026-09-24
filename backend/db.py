@@ -7,11 +7,13 @@ from typing import Any
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     create_engine,
     func,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -57,6 +59,56 @@ class FileRecord(Base):
     deletion_attempts: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class IngestionJob(Base):
+    """Durable ingestion work for one stored document."""
+
+    __tablename__ = "ingestion_jobs"
+    __table_args__ = (
+        Index(
+            "uq_ingestion_jobs_one_active",
+            "file_id",
+            unique=True,
+            sqlite_where=text("state IN ('queued', 'running')"),
+            postgresql_where=text("state IN ('queued', 'running')"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), index=True)
+    generation: Mapped[int] = mapped_column(default=1)
+    state: Mapped[str] = mapped_column(String(16), default="queued")
+    stage: Mapped[str] = mapped_column(String(32), default="queued")
+    progress: Mapped[int] = mapped_column(default=0)
+    attempt: Mapped[int] = mapped_column(default=1)
+    error_category: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
+    error_message: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    worker_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
 
 

@@ -4,17 +4,18 @@ import os
 import pathlib
 import subprocess
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 
 import psycopg
 import pytest
 from psycopg import sql
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
-from db import Conversation, Message, Source
+from db import Conversation, IngestionJob, Message, Source
 from services.embeddings.local_embeddings import EmbeddingService
 from services.llm.base import LLMProvider
 from services.retrieval.base import VectorStore
@@ -179,9 +180,35 @@ def _upload_sample(harness: ApplicationHarness) -> str:
 
 
 def _process(harness: ApplicationHarness, filename: str) -> None:
-    """Process an uploaded PDF through the HTTP route."""
+    """Queue indexing for an uploaded PDF, then run the worker to ready."""
     response = harness.client.post("/process-file", json={"filename": filename})
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    assert harness.drain() == 1
+
+
+def _claim_in_parallel(jobs, *worker_ids: str) -> list[dict | None]:
+    """Race several workers claiming the queue at the same time."""
+    barrier = threading.Barrier(len(worker_ids))
+    results: list[dict | None] = []
+    lock = threading.Lock()
+
+    def claim(worker_id: str) -> None:
+        barrier.wait()
+        try:
+            job = jobs.claim_next(worker_id)
+        except Exception:
+            job = None
+        with lock:
+            results.append(job)
+
+    threads = [
+        threading.Thread(target=claim, args=(worker_id,)) for worker_id in worker_ids
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    return results
 
 
 @pytest.mark.full_stack
@@ -225,14 +252,22 @@ def test_migrations_apply_to_an_empty_postgres_database(migrated_database):
         "app_settings",
         "conversations",
         "files",
+        "ingestion_jobs",
         "messages",
         "sources",
     }
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "e7a1c3d5f908"
+            "f2b4c6d8a013"
         )
-        for table in ("app_settings", "conversations", "files", "messages", "sources"):
+        for table in (
+            "app_settings",
+            "conversations",
+            "files",
+            "ingestion_jobs",
+            "messages",
+            "sources",
+        ):
             assert connection.scalar(text(f"SELECT count(*) FROM {table}")) == 0
 
 
@@ -304,7 +339,8 @@ def test_pdf_flow_persists_across_http_postgres_qdrant_and_storage(
         json={"filename": filename},
     )
     assert unprocessed.status_code == 200
-    assert unprocessed.json() == {"is_processed": False}
+    assert unprocessed.json()["is_processed"] is False
+    assert unprocessed.json()["ingestion"]["state"] == "queued"
 
     _process(harness, filename)
     assert harness.repositories.files.get_file(filename)["is_processed"] is True
@@ -559,3 +595,119 @@ def test_chat_and_process_are_blocked_while_deletion_failed(full_stack_app):
     assert process.json()["category"] == "document_delete_failed"
 
     assert harness.client.delete(f"/files/remove?path={filename}").status_code == 200
+
+
+@pytest.mark.full_stack
+def test_upload_reaches_ready_through_a_durable_job(full_stack_app):
+    """Upload returns queued work and the worker finishes the index."""
+    harness = full_stack_app
+    filename = _upload_sample(harness)
+
+    queued = harness.client.get(f"/ingestion-jobs/{filename}").json()["job"]
+    assert queued["state"] == "queued"
+    assert queued["progress"] == 0
+    assert harness.embeddings.calls == [], "the request must not embed inline"
+    assert (
+        harness.client.post(
+            "/file/is-processed", json={"filename": filename}
+        ).json()["is_processed"]
+        is False
+    )
+
+    assert harness.client.post(
+        "/process-file", json={"filename": filename}
+    ).status_code == 202
+    assert harness.drain("worker-1") == 1
+
+    ready = harness.client.get(f"/ingestion-jobs/{filename}").json()["job"]
+    assert ready["state"] == "ready"
+    assert ready["progress"] == 100
+    assert ready["worker_id"] == "worker-1"
+    assert ready["started_at"] and ready["finished_at"]
+    assert ready["error_category"] is None
+    assert (
+        harness.client.post(
+            "/file/is-processed", json={"filename": filename}
+        ).json()["is_processed"]
+        is True
+    )
+
+    points, _ = harness.qdrant.scroll(
+        collection_name=harness.collection_name,
+        limit=100,
+        with_payload=True,
+    )
+    assert points, "the worker must index the parsed passages"
+    assert {point.payload["pdf_name"] for point in points} == {filename}
+
+
+@pytest.mark.full_stack
+def test_worker_restart_recovers_an_interrupted_job(full_stack_app):
+    """A job abandoned by a stopped worker is picked up by the next worker."""
+    harness = full_stack_app
+    filename = _upload_sample(harness)
+    assert harness.client.post(
+        "/process-file", json={"filename": filename}
+    ).status_code == 202
+
+    jobs = harness.repositories.ingestion_jobs
+    claimed = jobs.claim_next("worker-stopped")
+    assert claimed is not None
+    assert claimed["state"] == "running"
+
+    with jobs._session_factory() as session, session.begin():
+        record = session.get(IngestionJob, claimed["id"])
+        record.heartbeat_at = record.heartbeat_at.replace(year=2000)
+
+    assert harness.client.get(f"/ingestion-jobs/{filename}").json()["job"][
+        "state"
+    ] == "running", "the running job stays visible while it is recoverable"
+
+    assert harness.drain("worker-restarted") == 1
+
+    recovered = harness.client.get(f"/ingestion-jobs/{filename}").json()["job"]
+    assert recovered["state"] == "ready"
+    assert recovered["worker_id"] == "worker-restarted"
+    assert recovered["attempt"] == 1, "recovery continues the same attempt"
+    assert jobs.count_active() == 0
+
+
+@pytest.mark.full_stack
+def test_postgres_allows_one_active_job_per_document(full_stack_app):
+    """Racing workers claim each document once, and retries conflict."""
+    harness = full_stack_app
+    first_name = _upload_sample(harness)
+    second_name = _upload_sample(harness)
+    jobs = harness.repositories.ingestion_jobs
+    first_file = harness.repositories.files.get_file(first_name)
+    second_file = harness.repositories.files.get_file(second_name)
+
+    # Four workers race for two queued documents. Each document must be
+    # claimed exactly once: FOR UPDATE SKIP LOCKED plus the partial unique
+    # index make a second claim of the same document impossible.
+    claimed = _claim_in_parallel(
+        jobs, "worker-1", "worker-2", "worker-3", "worker-4"
+    )
+    winners = [job for job in claimed if job]
+    assert len(winners) == 2
+    assert {job["file_id"] for job in winners} == {
+        first_file["id"],
+        second_file["id"],
+    }
+    assert {job["state"] for job in winners} == {"running"}
+
+    for job in winners:
+        conflict = harness.client.post(f"/ingestion-jobs/{job['filename']}/retry")
+        assert conflict.status_code == 409
+        assert conflict.json()["category"] == "ingestion_job_active"
+        assert jobs.get_active(job["file_id"])["id"] == job["id"]
+
+    assert jobs.count_active() == 2
+
+    for job in winners:
+        assert jobs.mark_ready(job["id"], job["worker_id"]) is not None
+    assert jobs.count_active() == 0
+
+    for job in winners:
+        assert harness.client.post(f"/ingestion-jobs/{job['filename']}/retry").status_code == 201
+    assert harness.drain() == 2

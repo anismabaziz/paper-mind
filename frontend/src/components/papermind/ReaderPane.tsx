@@ -10,14 +10,21 @@ import {
   MoreHorizontal,
   PanelLeft,
   MessageSquare,
+  Loader2,
+  RotateCw,
 } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
 import useMobileUi from "@/store/mobile-ui";
-import { useFileStatus, useFileMeta, useDeleteFile } from "@/hooks/useFiles";
+import {
+  useFileStatus,
+  useFileMeta,
+  useDeleteFile,
+  useRetryIngestion,
+} from "@/hooks/useFiles";
 import { cn } from "@/lib/utils";
 import { isDetached } from "@/lib/bytes";
-import { displayTitle } from "@/types/db";
+import { displayTitle, ingestionStageLabel, isIngestionActive } from "@/types/db";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -150,7 +157,13 @@ export function ReaderPane() {
   });
   const deleteError = deleteMutation.error instanceof Error ? deleteMutation.error.message : null;
 
+  const retryIngestion = useRetryIngestion();
+  const retryError = retryIngestion.error instanceof Error ? retryIngestion.error.message : null;
+
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
+  const ingestionJob = checkProcessedQuery.data?.ingestion ?? null;
+  const isJobActive = isIngestionActive(ingestionJob?.state);
+  const isJobFailed = ingestionJob?.state === "failed";
   const outline = metaQuery.data?.outline ?? [];
   const metaPageCount = metaQuery.data?.pageCount ?? null;
   const { setLibraryOpen, setChatOpen } = useMobileUi();
@@ -297,6 +310,14 @@ export function ReaderPane() {
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
+      {retryIngestion.isError && file && (
+        <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
+          <p className="text-xs font-medium text-destructive">Retry failed</p>
+          <p className="mt-0.5 text-[0.65rem] text-ink-soft">
+            {retryError ?? "The document could not be queued for indexing again."}
+          </p>
+        </div>
+      )}
       {deleteMutation.isError && file && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
           <p className="text-xs font-medium text-destructive">Delete failed — the document was kept.</p>
@@ -336,7 +357,7 @@ export function ReaderPane() {
               {file ? displayTitle(file) : "Document Viewer"}
             </p>
             <p className="label-meta truncate">
-              {file ? `${file.metadata.content_type} · ${file.deletion_state === "deleting" ? "Deleting" : file.deletion_state === "delete_failed" ? "Delete failed" : isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
+              {file ? `${file.metadata.content_type} · ${file.deletion_state === "deleting" ? "Deleting" : file.deletion_state === "delete_failed" ? "Delete failed" : isProcessed ? "Indexed" : isJobActive ? `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} ${ingestionJob?.progress ?? 0}%` : isJobFailed ? "Indexing failed" : "Indexing"}` : "No document selected"}
             </p>
           </div>
         </div>
@@ -561,7 +582,7 @@ export function ReaderPane() {
                       isProcessed ? "border-marker bg-marker-soft text-marker" : "border-rule bg-canvas text-ink-faint",
                     )}
                   >
-                    {isProcessed ? "Ready for questions" : "Indexing… answers paused"}
+                    {isProcessed ? "Ready for questions" : isJobFailed ? "Indexing failed" : `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} · ${ingestionJob?.progress ?? 0}%`}
                   </span>
                   <span className="font-mono text-[0.62rem] text-ink-faint">Page {String(page).padStart(2, "0")}</span>
                 </div>
@@ -599,10 +620,36 @@ export function ReaderPane() {
                     </Suspense>
                   </div>
                   {!isProcessed && (
-                    <div className="pointer-events-none absolute inset-3 grid place-items-center bg-paper/70 backdrop-blur-[1px]">
+                    <div className="absolute inset-3 grid place-items-center bg-paper/70 backdrop-blur-[1px]">
                       <div className="rounded-sm border border-rule bg-paper px-4 py-3 text-center shadow-sheet">
-                        <p className="font-mono text-xs font-medium">Indexing document…</p>
-                        <p className="mt-1 text-xs text-ink-soft">Semantic vectors are being generated — chat will unlock when this pass finishes.</p>
+                        <p className="font-mono text-xs font-medium" role="status">
+                          {isJobFailed
+                            ? "Indexing failed"
+                            : `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} · ${
+                                ingestionJob?.progress ?? 0
+                              }%`}
+                        </p>
+                        <p className="mt-1 text-xs text-ink-soft">
+                          {isJobFailed
+                            ? (ingestionJob?.error_message ??
+                              "Indexing failed before this document was ready.")
+                            : "Semantic vectors are being generated — chat will unlock when this pass finishes."}
+                        </p>
+                        {isJobFailed && file && (
+                          <button
+                            type="button"
+                            onClick={() => retryIngestion.mutate(file.name)}
+                            disabled={retryIngestion.isPending}
+                            className="mt-3 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90 disabled:opacity-40"
+                          >
+                            {retryIngestion.isPending ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <RotateCw className="size-3" />
+                            )}
+                            Retry indexing
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}

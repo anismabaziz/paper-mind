@@ -5,8 +5,9 @@ from typing import Any
 
 from sqlalchemy import select
 
-from db import FileRecord
+from db import FileRecord, IngestionJob
 from repositories.base import BaseRepository, to_record_dict
+from repositories.ingestion_jobs import ingestion_job_to_dict
 
 
 class FileRepository(BaseRepository):
@@ -28,6 +29,34 @@ class FileRepository(BaseRepository):
             session.add(record)
             session.flush()
             return self._to_dict(record)
+
+    def create_file_with_job(
+        self,
+        filename: str,
+        title: str | None = None,
+        original_filename: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Create the document and its first ingestion job in one commit."""
+        with self._session_factory() as session, session.begin():
+            record = FileRecord(
+                filename=filename,
+                title=title,
+                original_filename=original_filename,
+            )
+            session.add(record)
+            session.flush()
+            job = IngestionJob(
+                file_id=record.id,
+                filename=filename,
+                generation=1,
+                state="queued",
+                stage="queued",
+                progress=0,
+                attempt=1,
+            )
+            session.add(job)
+            session.flush()
+            return self._to_dict(record), ingestion_job_to_dict(job)
 
     def set_file_title(self, filename: str, title: str) -> None:
         """Replace the derived title for a stored document."""

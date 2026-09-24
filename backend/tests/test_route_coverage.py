@@ -22,6 +22,7 @@ from app import create_app
 from composition import Services
 from db import Base, FileRecord
 from repositories import build_repositories
+from tests.ingestion_helpers import build_test_worker
 from services.accounts.secrets_service import encrypt_api_key
 from services.parsing.document_parser import Chunk
 from services.retrieval.base import RetrievalResult
@@ -174,16 +175,25 @@ def app(
     fake_chat,
     settings_obj,
 ):
+    parser = FakeParser()
     services = replace(
         Services.from_settings(settings_obj),
         repositories=repositories,
         storage=fake_storage,
-        parser=FakeParser(),
+        parser=parser,
         embedding_service=fake_embeddings,
         vector_service=fake_vectors,
         chat_provider_factory=fake_chat,
     )
-    return create_app(settings_obj, services=services)
+    application = create_app(settings_obj, services=services)
+    application.config.update(
+        TEST_REPOSITORIES=repositories,
+        TEST_STORAGE=fake_storage,
+        TEST_PARSER=parser,
+        TEST_EMBEDDINGS=fake_embeddings,
+        TEST_VECTORS=fake_vectors,
+    )
+    return application
 
 
 @pytest.fixture
@@ -277,7 +287,7 @@ def test_storage_path_accepts_plain_names(tmp_path):
 
 
 def test_process_retry_after_embed_failure_succeeds(
-    client, fake_vectors, fake_embeddings
+    client, app, fake_vectors, fake_embeddings
 ):
     filename = upload(client).get_json()["file"]["name"]
 
@@ -285,7 +295,8 @@ def test_process_retry_after_embed_failure_succeeds(
         raise RuntimeError("embed down")
 
     fake_embeddings.embed_texts = _boom
-    assert client.post("/process-file", json={"filename": filename}).status_code == 500
+    assert client.post("/process-file", json={"filename": filename}).status_code == 202
+    assert build_test_worker(app).drain() == 1
     assert (
         client.post("/file/is-processed", json={"filename": filename}).get_json()[
             "is_processed"
@@ -294,11 +305,10 @@ def test_process_retry_after_embed_failure_succeeds(
     )
     deletes_after_failure = list(fake_vectors.deleted)
 
-    real_embed = FakeEmbeddingService().embed_texts
-    fake_embeddings.embed_texts = real_embed
-    response = client.post("/process-file", json={"filename": filename})
-
-    assert response.status_code == 200
+    fake_embeddings.embed_texts = FakeEmbeddingService().embed_texts
+    retry = client.post(f"/ingestion-jobs/{filename}/retry")
+    assert retry.status_code == 201
+    assert build_test_worker(app).drain() == 1
     # The retry cleaned stale vectors before writing again.
     assert len(fake_vectors.deleted) > len(deletes_after_failure)
     assert fake_vectors.upserts and fake_vectors.upserts[0][2] == filename
@@ -310,9 +320,10 @@ def test_process_retry_after_embed_failure_succeeds(
     )
 
 
-def test_sse_error_path_yields_error_and_empty_sources(client, fake_chat):
+def test_sse_error_path_yields_error_and_empty_sources(client, app, fake_chat):
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
+    build_test_worker(app).drain()
     fake_chat.provider_error = RuntimeError("provider down")
 
     response = client.post("/response", json={"query": "what?", "filename": filename})

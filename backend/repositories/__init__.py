@@ -9,6 +9,7 @@ from db import get_session_factory
 from repositories.app_settings import AppSettingsRepository
 from repositories.conversations import ConversationRepository
 from repositories.files import FileRepository
+from repositories.ingestion_jobs import IngestionJobRepository
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class Repositories:
     files: FileRepository
     app_settings: AppSettingsRepository
     conversations: ConversationRepository
+    ingestion_jobs: IngestionJobRepository
 
 
 def build_repositories(
@@ -29,6 +31,7 @@ def build_repositories(
         files=FileRepository(factory),
         app_settings=AppSettingsRepository(factory),
         conversations=ConversationRepository(factory),
+        ingestion_jobs=IngestionJobRepository(factory),
     )
 
 
@@ -36,6 +39,7 @@ __all__ = [
     "AppSettingsRepository",
     "ConversationRepository",
     "FileRepository",
+    "IngestionJobRepository",
     "Repositories",
     "build_repositories",
 ]

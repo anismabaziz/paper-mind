@@ -52,11 +52,15 @@ def fake_repositories():
         def get_file(self, filename):
             return None
 
+        def get_latest(self, filename):
+            return None
+
     repository = _Repo()
     return SimpleNamespace(
         files=repository,
         app_settings=repository,
         conversations=repository,
+        ingestion_jobs=repository,
     )
 
 
