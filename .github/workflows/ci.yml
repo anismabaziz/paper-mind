@@ -45,7 +45,7 @@ jobs:
           VITE_API_URL: http://127.0.0.1:3000
 
   backend:
-    name: Backend (pytest)
+    name: Backend (lint + types + tests)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -59,6 +59,11 @@ jobs:
         uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
         with:
           enable-cache: true
+          # Pinned to the minimum supported Python (requires-python >=3.11,
+          # mypy targets 3.11): the lockfile resolves numpy 2.5+ on 3.12,
+          # whose stubs use `type` syntax that mypy under a 3.11 target
+          # rejects.
+          python-version: "3.11"
 
       - name: Install dependencies
         run: uv sync --dev
