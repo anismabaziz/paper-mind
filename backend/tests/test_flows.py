@@ -771,9 +771,9 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     } <= tables
     assert {"users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "b7c9e2f4a1d6",
+        "c4d2e9a1b5f6",
     )
-    assert {"title", "original_filename", "is_processed"} <= {
+    assert {"title", "original_filename", "is_processed", "last_opened_at"} <= {
         row[1] for row in connection.execute("pragma table_info(files)")
     }
     assert "page" in {

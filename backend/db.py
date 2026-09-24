@@ -47,6 +47,9 @@ class FileRecord(Base):
         String(255), nullable=True, default=None
     )
     is_processed: Mapped[bool] = mapped_column(default=False)
+    last_opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

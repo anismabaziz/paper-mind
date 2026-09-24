@@ -54,6 +54,18 @@ export async function processFile(file: FileType) {
   ).data;
 }
 
+interface IMarkOpened {
+  last_opened_at: string | null;
+}
+
+export async function markFileOpened(file: FileType) {
+  return (
+    await client.post<IMarkOpened>("/file/opened", {
+      filename: file.name,
+    })
+  ).data;
+}
+
 export interface ISource {
   content: string;
   document: string;

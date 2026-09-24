@@ -1,5 +1,6 @@
 """Persistence for stored document metadata."""
 
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -62,6 +63,18 @@ class FileRepository(BaseRepository):
             if record:
                 record.is_processed = status
 
+    def touch_opened(self, filename: str) -> dict[str, Any] | None:
+        """Mark a document as opened now; drives the recent-readings order."""
+        with self._session_factory() as session, session.begin():
+            record = session.scalars(
+                select(FileRecord).where(FileRecord.filename == filename)
+            ).first()
+            if not record:
+                return None
+            record.last_opened_at = datetime.now(timezone.utc)
+            session.flush()
+            return self._to_dict(record)
+
     def delete_file(self, file_id: str) -> None:
         """Delete metadata for one document."""
         with self._session_factory() as session, session.begin():
@@ -71,10 +84,12 @@ class FileRepository(BaseRepository):
 
     @staticmethod
     def _to_dict(record: FileRecord) -> dict[str, Any]:
+        opened = record.last_opened_at
         return to_record_dict(
             record,
             filename=record.filename,
             title=record.title,
             original_filename=record.original_filename,
             is_processed=record.is_processed,
+            last_opened_at=opened.isoformat() if opened else None,
         )

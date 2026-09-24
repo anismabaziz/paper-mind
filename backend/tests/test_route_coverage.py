@@ -333,6 +333,28 @@ def test_sse_error_path_yields_error_and_empty_sources(client, fake_chat):
     assert history[-1]["text"] == by_name["error"]["error"]
 
 
+def test_mark_opened_tracks_recents(client):
+    filename = upload(client).get_json()["file"]["name"]
+
+    listing = client.get("/files").get_json()["files"]
+    entry = next(f for f in listing if f["name"] == filename)
+    assert entry["last_opened_at"] is None
+
+    assert client.post("/file/opened", json={}).status_code == 400
+    assert client.post("/file/opened", json={"filename": "nope.pdf"}).status_code == 404
+    assert client.post(
+        "/file/opened", json={"filename": "../evil.pdf"}
+    ).status_code in (400, 403, 404)
+
+    response = client.post("/file/opened", json={"filename": filename})
+    assert response.status_code == 200
+    assert response.get_json()["last_opened_at"]
+
+    listing = client.get("/files").get_json()["files"]
+    entry = next(f for f in listing if f["name"] == filename)
+    assert entry["last_opened_at"]
+
+
 def test_backfilled_title_serves_meta(client, fake_storage, repositories):
     pdf = _make_pdf()
     hex_name = "ab12cd34" * 4 + ".pdf"
