@@ -1,11 +1,10 @@
 """
 Shared test fixtures.
 
-Convention: tests never talk to real Qdrant, LLM, or Postgres, and every
-upload goes through a fake storage object. A pinned test Settings is
-installed for every test; fakes are constructed per-test and injected
-through the app factory or service constructors rather than patched onto
-modules.
+The default suite uses fake Qdrant, chat, and storage adapters with in-memory
+SQLite. The separately marked full-stack suite explicitly uses real Postgres
+and Qdrant with deterministic model adapters. A pinned Settings instance keeps
+developer environment values out of both suites.
 """
 
 from pathlib import Path

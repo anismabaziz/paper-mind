@@ -9,7 +9,7 @@ All branches use fakes injected through constructors: the cross-encoder is a
 fake model object, the index a fake store, so pytest stays fast and offline.
 """
 
-from services.retrieval.reranker import RerankerService
+from services.retrieval.reranker import Reranker, RerankerService
 from services.retrieval.vector_service import VectorService
 from evaluation import evaluator
 
@@ -77,6 +77,11 @@ def make_reranker(enabled=True, model=None) -> RerankerService:
 def make_service(matches, reranker=None) -> VectorService:
     """Return a VectorService over a fake store with an injected reranker."""
     return VectorService(FakeIndex(matches), reranker)
+
+
+def test_local_service_implements_reranker_interface():
+    """The production adapter satisfies the reranker interface used by retrieval."""
+    assert isinstance(make_reranker(), Reranker)
 
 
 class TestRerankerGate:

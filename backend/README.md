@@ -82,13 +82,19 @@ uv run python app.py
 
 ## Tests
 
+The default suite is fast and uses fakes with in-memory SQLite:
+
 ```bash
 uv run pytest
 ```
 
-Tests never talk to real Qdrant, LLM, Postgres, or the real upload
-directory — `tests/conftest.py` provides dummy environment values, and the
-flow tests in `tests/test_flows.py` run against fakes and in-memory sqlite.
+The full-stack suite serves the Flask app over HTTP, starts pinned disposable Postgres and Qdrant containers, and applies every migration to a fresh database:
+
+```bash
+./run-full-stack-tests.sh
+```
+
+Its embedding, reranking, and chat providers are deterministic and local. The test uploads and parses the sample PDF, indexes it in Qdrant, streams an answer, inspects Postgres and Qdrant state, injects service failures, and removes all test data and containers on exit. No model API key is required.
 
 ## Evaluation
 
