@@ -71,7 +71,7 @@ except the chat LLM, which is configured once in Settings:
 |---|---|
 | Vector store | Qdrant on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`), collection `pdf-index` |
 | Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached locally via `HF_HOME` (`~/.cache/huggingface`) — no API key |
-| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
+| Retrieval | Hybrid 1,024-d dense + hashed term-frequency sparse with Qdrant IDF, fused by one Qdrant query using `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
 | Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata |
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
 | Chat LLM | Single-instance Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest via `APP_SECRET` |
@@ -211,4 +211,4 @@ The evaluator (`backend/evaluation/`) measures retrieval against
 - Embeddings: BGE-M3 local via `sentence-transformers` (CPU, 1024d, no key)
 - LLM: Google Gemini or Groq, single-instance via the Settings dialog (BYO key, encrypted at rest)
 - Chunking: `tiktoken` `cl100k_base`, `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50`
-- Retrieval: hybrid dense + BM25 (`rank-bm25`) with RRF, gated local cross-encoder reranker
+- Retrieval: named dense vectors plus hashed term-frequency sparse vectors with Qdrant IDF and RRF, gated local cross-encoder reranker

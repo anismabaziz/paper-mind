@@ -1,17 +1,35 @@
-"""
-The ``VectorStore`` abstraction every vector backend implements.
-
-The store API is intentionally small — upsert, query, delete — so swapping
-Qdrant for another backend means implementing one class, not touching
-retrieval code. ``query`` accepts an optional sparse vector for hybrid
-dense+BM25 retrieval; backends without sparse support raise ``TypeError``
-so the caller can degrade explicitly.
-"""
+"""Vector-store contracts, retrieval outcomes, and typed failures."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Literal
+
+RetrievalMethod = Literal["dense", "sparse", "hybrid"]
+RetrievalOutcome = Literal["success", "empty"]
 
 
-class VectorDimensionError(ValueError):
+@dataclass(frozen=True)
+class RetrievalResult:
+    """Shaped evidence plus the method and outcome that produced it."""
+
+    sources: list[dict]
+    method: RetrievalMethod
+    outcome: RetrievalOutcome
+
+
+class VectorStoreError(RuntimeError):
+    """Base error for vector-store operations."""
+
+
+class VectorStoreUnavailableError(VectorStoreError):
+    """The configured vector store cannot be reached."""
+
+
+class VectorStoreConfigurationError(VectorStoreError):
+    """The vector store or collection is configured incorrectly."""
+
+
+class VectorDimensionError(VectorStoreError, ValueError):
     """Typed error for embedding dimension mismatch — never auto-heals by wiping."""
 
     def __init__(
@@ -38,7 +56,7 @@ class VectorDimensionError(ValueError):
 
 
 class VectorStore(ABC):
-    """Dense (and optionally sparse-hybrid) vector index."""
+    """Dense, sparse, and hybrid vector index."""
 
     @abstractmethod
     def upsert(self, vectors) -> dict:
@@ -52,10 +70,11 @@ class VectorStore(ABC):
     @abstractmethod
     def query(self, vector, top_k, include_metadata=True, filter=None, **kwargs):
         """
-        Return ``{"matches": [...]}`` with id/score/metadata entries.
+        Return matches with the method and empty or success outcome.
 
-        ``kwargs`` may carry ``sparse_vector`` for a hybrid dense+BM25 query;
-        a backend that cannot execute it raises ``TypeError``.
+        ``kwargs`` may carry ``sparse_vector`` and an explicit dense, sparse,
+        or hybrid ``method``. Invalid requests and service failures raise typed
+        errors rather than changing the selected method.
         """
 
     @abstractmethod

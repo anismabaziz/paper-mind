@@ -15,6 +15,7 @@ from app import create_app
 from composition import Services
 from db import Base, FileRecord
 from repositories import build_repositories
+from services.retrieval.base import RetrievalResult
 from services.titles import derive_title, is_hex_like_title
 
 
@@ -76,7 +77,7 @@ class FakeVectorService:
         pass
 
     def query_vectors(self, *a, **k):
-        return []
+        return RetrievalResult(sources=[], method="dense", outcome="empty")
 
     def delete_by_filename(self, *a, **k):
         pass

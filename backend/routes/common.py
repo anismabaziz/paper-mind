@@ -6,7 +6,31 @@ from typing import Any
 
 from flask import jsonify, request
 
+from services.retrieval.base import (
+    VectorStoreConfigurationError,
+    VectorStoreUnavailableError,
+)
+
 log = logging.getLogger(__name__)
+
+
+def vector_store_error_response(error: Exception):
+    """Return the stable HTTP response for a vector-store failure category."""
+    if isinstance(error, VectorStoreUnavailableError):
+        return jsonify(
+            {
+                "error": "Vector store is unavailable",
+                "category": "vector_store_unavailable",
+            }
+        ), 503
+    if isinstance(error, VectorStoreConfigurationError):
+        return jsonify(
+            {
+                "error": "Vector store configuration is invalid",
+                "category": "vector_store_configuration",
+            }
+        ), 500
+    raise TypeError("Unsupported vector-store error")
 
 
 def file_url(storage: Any, filename: str) -> str:

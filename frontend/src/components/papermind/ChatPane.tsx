@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, Settings, FileText } from "lucide-react";
-import { chatStream, type ISource } from "@/services/files";
+import { chatStream, type IRetrievalResult, type ISource } from "@/services/files";
 import { useFileStatus, useFileMessages } from "@/hooks/useFiles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import usePdfStore from "@/store/pdf-state";
@@ -12,6 +12,7 @@ type ChatMessage = {
   text: string;
   sender: "user" | "bot";
   sources?: ISource[];
+  retrieval?: IRetrievalResult;
   failed?: boolean;
   needsSettings?: boolean;
 };
@@ -180,9 +181,9 @@ export function ChatPane() {
               ),
             );
           },
-          onDone: (sources) => {
+          onDone: ({ sources, retrieval }) => {
             if (isStale()) return;
-            setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources } : msg)));
+            setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources, retrieval } : msg)));
           },
         },
         { signal: controller.signal },

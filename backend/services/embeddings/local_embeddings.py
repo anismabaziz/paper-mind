@@ -7,7 +7,7 @@ downloaded on first use and cached to the Hugging Face cache directory
 that cache to a persistent volume so the download only happens once.
 
 The model supports 8192 context and Matryoshka truncation to 1024d, which
-matches the Qdrant collection (``qdrant_store._QDRANT_DENSE_SIZE``). Keeping
+matches the Qdrant collection (``qdrant_store.DENSE_SIZE``). Keeping
 dimensions at 1024 keeps storage and latency low (~15ms vs ~42ms at 3072)
 while preserving quality.
 

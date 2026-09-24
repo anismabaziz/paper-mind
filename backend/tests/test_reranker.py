@@ -91,7 +91,9 @@ class TestRerankerGate:
         """Do test flag off preserves legacy order."""
         service = make_service(_matches(10), make_reranker(enabled=False))
 
-        sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="test query")
+        sources = service.query_vectors(
+            [0.1] * 8, "doc.pdf", query_text="test query"
+        ).sources
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
 
     def test_flag_on_reranked_order_differs_deduped_and_score_ordered(self):
@@ -102,7 +104,7 @@ class TestRerankerGate:
 
         sources_on = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="test query"
-        )
+        ).sources
         # InvertingModel gives chunk 9 highest, so top 5 should be 9..5
         assert [s["content"] for s in sources_on] == [
             f"chunk {i}" for i in range(9, 4, -1)
@@ -150,11 +152,11 @@ class TestRerankerGate:
         )
         before = dup_service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
-        )
+        ).sources
         assert len(before) == 2  # deduped legacy still 2
         deduped = dup_service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=True
-        )
+        ).sources
         assert len(deduped) == 2
         assert deduped[0]["content"] == "dup"
         assert deduped[0]["score"] == 0.9
@@ -168,12 +170,12 @@ class TestRerankerGate:
 
         legacy = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
-        )
+        ).sources
         assert [s["content"] for s in legacy] == [f"chunk {i}" for i in range(5)]
 
         reranked = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=True
-        )
+        ).sources
         assert [s["content"] for s in reranked] != [s["content"] for s in legacy]
 
     def test_no_query_text_never_reranks(self):
@@ -228,7 +230,7 @@ class TestRerankerGate:
         )
         service = make_service(_matches(5), reranker_svc)
 
-        sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="q")
+        sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="q").sources
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
         assert "degraded" in capsys.readouterr().out.lower()
 
@@ -260,7 +262,7 @@ class TestEvaluatorReranker:
             query_text="q",
             rerank=False,
             reranker=make_reranker(enabled=True, model=InvertingModel()),
-        )
+        ).sources
         assert [s["content"] for s in off] == [f"chunk {i}" for i in range(5)]
 
         on = evaluator.retrieve(
@@ -271,7 +273,7 @@ class TestEvaluatorReranker:
             query_text="q",
             rerank=True,
             reranker=make_reranker(enabled=True, model=InvertingModel()),
-        )
+        ).sources
         assert [s["content"] for s in on] == [f"chunk {i}" for i in range(9, 4, -1)]
 
     def test_hit5_faithfulness_logged_with_and_without_reranking_and_latency_delta(

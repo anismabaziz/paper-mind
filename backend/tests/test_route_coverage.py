@@ -24,6 +24,8 @@ from db import Base, FileRecord
 from repositories import build_repositories
 from services.accounts.secrets_service import encrypt_api_key
 from services.parsing.document_parser import Chunk
+from services.retrieval.base import RetrievalResult
+from services.retrieval.hybrid import build_sparse_vector
 from storage import LocalStorage
 from tests.sse import parse_sse
 
@@ -83,14 +85,24 @@ class FakeVectorService:
         self.upserts.append((embeddings, chunks, filename))
 
     def query_vectors(self, embedding, filename, **kwargs):
-        return [
-            {
-                "content": "chunk about topic",
-                "document": filename,
-                "chunk_index": 0,
-                "score": 0.9,
-            }
-        ]
+        query_text = kwargs.get("query_text")
+        method = (
+            "hybrid"
+            if query_text and build_sparse_vector(query_text)["indices"]
+            else "dense"
+        )
+        return RetrievalResult(
+            sources=[
+                {
+                    "content": "chunk about topic",
+                    "document": filename,
+                    "chunk_index": 0,
+                    "score": 0.9,
+                }
+            ],
+            method=method,
+            outcome="success",
+        )
 
     def delete_by_filename(self, filename):
         self.deleted.append(filename)
@@ -311,7 +323,11 @@ def test_sse_error_path_yields_error_and_empty_sources(client, fake_chat):
     by_name = {name: data for name, data in events}
     assert "error" in by_name
     assert by_name["error"]["error"]
-    assert by_name["done"] == {"done": True, "sources": []}
+    assert by_name["done"] == {
+        "done": True,
+        "sources": [],
+        "retrieval": {"method": "dense", "outcome": "success"},
+    }
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
     assert [m["sender"] for m in history] == ["user", "bot"]

@@ -6,12 +6,21 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from routes.common import scrub_api_key_from_text, traversal_check
+from routes.common import (
+    scrub_api_key_from_text,
+    traversal_check,
+    vector_store_error_response,
+)
 from services.accounts.secrets_service import (
     SecretsResaveRequiredError,
     decrypt_api_key,
 )
 from services.llm.base import ChatCredentials
+from services.retrieval.base import (
+    VectorDimensionError,
+    VectorStoreConfigurationError,
+    VectorStoreUnavailableError,
+)
 
 if TYPE_CHECKING:
     from composition import Services
@@ -107,11 +116,26 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
 
         try:
             query_embedding = embedding_service.embed_texts(query)[0]
-            raw_sources = vector_service.query_vectors(
+            retrieval_result = vector_service.query_vectors(
                 query_embedding, filename, query_text=query
             )
-            sources = [_normalize_source(source) for source in raw_sources]
+            retrieval = {
+                "method": retrieval_result.method,
+                "outcome": retrieval_result.outcome,
+            }
+            sources = [_normalize_source(source) for source in retrieval_result.sources]
             context = "\n\n".join(source["content"] for source in sources)
+        except (
+            VectorStoreUnavailableError,
+            VectorStoreConfigurationError,
+        ) as exc:
+            log.exception("/response vector store failed for %s", filename)
+            return vector_store_error_response(exc)
+        except VectorDimensionError as exc:
+            log.warning("/response vector dimension mismatch for %s: %s", filename, exc)
+            return jsonify(
+                {"error": str(exc), "category": "vector_dimension_mismatch"}
+            ), 409
         except Exception:
             log.exception("/response retrieval failed for %s", filename)
             return jsonify({"error": "Internal server error"}), 500
@@ -143,7 +167,9 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 except Exception:
                     log.exception("failed to persist error reply for %s", filename)
                 yield event("error", {"error": failure})
-                yield event("done", {"done": True, "sources": []})
+                yield event(
+                    "done", {"done": True, "sources": [], "retrieval": retrieval}
+                )
                 return
 
             answer = (
@@ -155,7 +181,10 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 )
             except Exception:
                 log.exception("failed to persist answer for %s", filename)
-            yield event("done", {"done": True, "sources": sources})
+            yield event(
+                "done",
+                {"done": True, "sources": sources, "retrieval": retrieval},
+            )
 
         return Response(
             stream_with_context(generate()),
