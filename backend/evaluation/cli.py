@@ -10,7 +10,7 @@ docker compose up qdrant                          # or `docker compose up` (expo
 uv run python -m evaluation.cli --live --no-judge  # hit@5/recall@5 only, no LLM
 
 With generation + LLM judge (needs a chat key):
-uv run python -m evaluation.cli --live --provider google --model gemini-2.0-flash --api-key ...
+uv run python -m evaluation.cli --live --provider google --model gemini-2.5-flash --api-key ...
 
 Qdrant local URL is ``http://localhost:6333`` on the host
 (``http://qdrant:6333`` inside compose, via ``QDRANT_URL``).
@@ -22,6 +22,13 @@ import sys
 
 import settings
 from providers import get_vector_index
+from services.accounts.chat_settings_service import (
+    DEFAULT_MODEL,
+    DEFAULT_PROVIDER,
+    SettingsError,
+    model_for,
+    validate,
+)
 
 from evaluation.evaluator import (
     DEFAULT_K,
@@ -34,8 +41,25 @@ from evaluation.evaluator import (
 EVAL_PREFIX = "eval-"
 
 
-def make_live_components(provider: str, model: str, api_key: str):
+def _validate_judge_provider(provider: str, judge: bool) -> None:
+    """Reject a judge run that would use a different provider."""
+    if judge and provider != "google":
+        raise SettingsError(
+            "LLM-as-judge currently supports Google only. Use --no-judge "
+            "for a Groq generation run."
+        )
+
+
+def make_live_components(
+    provider: str,
+    model: str,
+    api_key: str,
+    judge_enabled: bool = True,
+):
     """Wire the evaluator to the chosen per-run provider settings."""
+    validate(provider, model)
+    _validate_judge_provider(provider, judge_enabled)
+    model_definition = model_for(provider, model)
     # Reuse the app's own embedding and generation paths (prompt, factory)
     # so the numbers describe what users actually get.
     from settings import get_settings
@@ -43,7 +67,7 @@ def make_live_components(provider: str, model: str, api_key: str):
     from services.embeddings.local_embeddings import LocalEmbeddingService
     from services.llm.base import ChatCredentials
     from services.llm.factory import build_chat_provider
-    from services.llm.google_provider import _client as google_client
+    from google import genai
     from google.genai import types
 
     embed_fn = LocalEmbeddingService(
@@ -52,7 +76,13 @@ def make_live_components(provider: str, model: str, api_key: str):
 
     chat_provider = (
         build_chat_provider(
-            ChatCredentials(provider=provider, model=model, api_key=api_key)
+            ChatCredentials(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                verification_timeout_seconds=model_definition.timeout_seconds,
+            ),
+            use_cache=False,
         )
         if api_key
         else None
@@ -68,13 +98,18 @@ def make_live_components(provider: str, model: str, api_key: str):
         """Do judge fn."""
         if not api_key:
             return "unparseable"
-        result = google_client(api_key).models.generate_content(
-            model=model,
-            config=types.GenerateContentConfig(
-                system_instruction="You are a strict evaluation judge. Follow the output format exactly."
-            ),
-            contents=[prompt],
-        )
+        try:
+            result = genai.Client(api_key=api_key).models.generate_content(
+                model=model,
+                config=types.GenerateContentConfig(
+                    system_instruction="You are a strict evaluation judge. Follow the output format exactly."
+                ),
+                contents=[prompt],
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Evaluation judge failed: {type(exc).__name__}"
+            ) from None
         return result.text or ""
 
     return embed_fn, generate_fn, judge_fn
@@ -84,8 +119,8 @@ def run(
     live: bool,
     judge: bool,
     k: int,
-    provider: str = "google",
-    model: str = "gemini-2.0-flash",
+    provider: str = DEFAULT_PROVIDER,
+    model: str = DEFAULT_MODEL,
     api_key: str = "",
     rerank=None,
     compare_rerank: bool = False,
@@ -97,17 +132,25 @@ def run(
             "Refusing to run a live evaluation by default. Add --live to "
             "embed, retrieve, generate, and judge against the real providers."
         )
-
-    fixture = load_fixture()
-    # Retrieval-only (--no-judge) must not need a chat key: the chat
-    # provider is per-user settings now, not boot config.
+    validate(provider, model)
     if judge and not api_key:
         sys.exit(
             "LLM generation and judging need an API key. Pass --api-key with "
             "the key for the chosen --provider, or run with --no-judge."
         )
+    try:
+        _validate_judge_provider(provider, judge)
+    except SettingsError as exc:
+        sys.exit(str(exc))
+
+    fixture = load_fixture()
     settings.validate()
-    embed_fn, generate_fn, judge_fn = make_live_components(provider, model, api_key)
+    embed_fn, generate_fn, judge_fn = make_live_components(
+        provider,
+        model,
+        api_key,
+        judge_enabled=judge,
+    )
     if not judge:
         judge_fn = None
 
@@ -169,13 +212,13 @@ def main(argv=None):
     )
     parser.add_argument(
         "--provider",
-        default="google",
+        default=DEFAULT_PROVIDER,
         help="chat provider for generation (google|groq), default google",
     )
     parser.add_argument(
         "--model",
-        default="gemini-2.0-flash",
-        help="chat model for generation, default gemini-2.0-flash",
+        default=DEFAULT_MODEL,
+        help=f"chat model for generation, default {DEFAULT_MODEL}",
     )
     parser.add_argument(
         "--api-key",
@@ -198,6 +241,10 @@ def main(argv=None):
         help="run with and without reranking and log hit@k/faithfulness + latency delta for 50 docs",
     )
     args = parser.parse_args(argv)
+    try:
+        validate(args.provider, args.model)
+    except SettingsError as exc:
+        parser.error(str(exc))
 
     # Tri-state: None respects env, True/False forces
     rerank = None
