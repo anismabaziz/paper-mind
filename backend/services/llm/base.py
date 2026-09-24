@@ -12,7 +12,38 @@ in the factory map.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Iterator
+from threading import Thread
+from typing import Callable, Iterator, TypeVar
+
+#: Bound for verify round-trips so a hung provider cannot hang the route.
+VERIFY_TIMEOUT_SECONDS = 15.0
+
+#: Bound for one-shot generation; streaming stays unbounded by design.
+GENERATE_TIMEOUT_SECONDS = 60.0
+
+_T = TypeVar("_T")
+
+
+def call_with_timeout(fn: Callable[[], _T], timeout: float) -> _T:
+    """Run ``fn`` with a bound, raising TimeoutError when it overruns."""
+    box: dict[str, _T | BaseException] = {}
+
+    def _run() -> None:
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # propagate, including Cancelled
+            box["error"] = exc
+
+    # Daemon so a hung provider call never blocks process exit; the
+    # abandoned call keeps running in the background until it returns.
+    worker = Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise TimeoutError(f"provider call exceeded {timeout:.1f}s")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -56,7 +87,10 @@ class LLMProvider(ABC):
     def generate_response(self, query: str, context: str) -> str:
         """Generate a full answer, falling back to the retrieved context."""
         try:
-            return self._generate_response(query, context)
+            return call_with_timeout(
+                lambda: self._generate_response(query, context),
+                GENERATE_TIMEOUT_SECONDS,
+            )
         except Exception as e:
             print(f"AI Generation Error ({self.name}): {e}")
             if context and context.strip():
@@ -78,6 +112,10 @@ class LLMProvider(ABC):
     @abstractmethod
     def verify(self) -> None:
         """Raise if the API key cannot run a one-token completion."""
+
+    def _verify_with_timeout(self, ping: Callable[[], None]) -> None:
+        """Run a provider ping under the shared verify bound."""
+        call_with_timeout(ping, VERIFY_TIMEOUT_SECONDS)
 
     @abstractmethod
     def _generate_response(self, query: str, context: str) -> str:

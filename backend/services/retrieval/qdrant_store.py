@@ -10,11 +10,15 @@ Collection ``pdf-index`` (the Settings vector index name) is created lazily with
 * ``sparse_vectors`` with ``modifier IDF`` (BM25 sparse via ``rank-bm25``)
 """
 
+import threading
 import uuid
 
-from services.retrieval.base import VectorStore
+from services.retrieval.base import VectorDimensionError, VectorStore
 
 _QDRANT_DENSE_SIZE = 1024
+# Bounded in-memory caches for sparse/python fallback: filtered deletes only prune,
+# never lost on dimension mismatch, and capped to avoid unbounded growth.
+_MAX_CACHE_ENTRIES = 10000
 
 
 class QdrantIndexAdapter(VectorStore):
@@ -30,6 +34,7 @@ class QdrantIndexAdapter(VectorStore):
         self._client = client
         self._collection = collection_name
         self._ensured = False
+        self._lock = threading.RLock()
         # Cache sparse vectors for python-side fallback when server hybrid
         # is not available or for offline tests with a stub client.
         self._sparse_by_id: dict[str, dict] = {}
@@ -40,42 +45,45 @@ class QdrantIndexAdapter(VectorStore):
     def _ensure_collection(self):
         if self._ensured:
             return
-        try:
-            exists = self._client.collection_exists(self._collection)
-        except Exception:
-            exists = False
-        if exists:
-            self._ensured = True
-            return
-
-        from qdrant_client.models import (
-            Distance,
-            SparseIndexParams,
-            SparseVectorParams,
-            VectorParams,
-        )
-
-        try:
-            self._client.create_collection(
-                collection_name=self._collection,
-                vectors_config=VectorParams(
-                    size=_QDRANT_DENSE_SIZE, distance=Distance.COSINE
-                ),
-                sparse_vectors_config={
-                    "sparse": SparseVectorParams(
-                        index=SparseIndexParams(on_disk=False),
-                        modifier="idf",
-                    )
-                },
-            )
-        except Exception as exc:
-            # If another worker created it concurrently, treat as success
-            msg = str(exc).lower()
-            if "already exists" in msg or "exists" in msg:
+        with self._lock:
+            if self._ensured:
+                return
+            try:
+                exists = self._client.collection_exists(self._collection)
+            except Exception:
+                exists = False
+            if exists:
                 self._ensured = True
                 return
-            raise
-        self._ensured = True
+
+            from qdrant_client.models import (
+                Distance,
+                SparseIndexParams,
+                SparseVectorParams,
+                VectorParams,
+            )
+
+            try:
+                self._client.create_collection(
+                    collection_name=self._collection,
+                    vectors_config=VectorParams(
+                        size=_QDRANT_DENSE_SIZE, distance=Distance.COSINE
+                    ),
+                    sparse_vectors_config={
+                        "sparse": SparseVectorParams(
+                            index=SparseIndexParams(on_disk=False),
+                            modifier="idf",
+                        )
+                    },
+                )
+            except Exception as exc:
+                # If another worker created it concurrently, treat as success
+                msg = str(exc).lower()
+                if "already exists" in msg or "exists" in msg:
+                    self._ensured = True
+                    return
+                raise
+            self._ensured = True
 
     @staticmethod
     def _to_filter(filter_dict):
@@ -131,8 +139,12 @@ class QdrantIndexAdapter(VectorStore):
                 pass
 
         scored: list[dict] = []
-        for vid, doc_sparse in self._sparse_by_id.items():
-            payload = self._payload_by_id.get(vid, {})
+        # Snapshot caches under lock for thread safety
+        with self._lock:
+            sparse_items = list(self._sparse_by_id.items())
+            payload_snapshot = dict(self._payload_by_id)
+        for vid, doc_sparse in sparse_items:
+            payload = payload_snapshot.get(vid, {})
             if pdf_filter is not None and payload.get("pdf_name") != pdf_filter:
                 continue
             score = self._sparse_dot(sparse_vector, doc_sparse)
@@ -143,6 +155,31 @@ class QdrantIndexAdapter(VectorStore):
         return scored[:top_k]
 
     # ------------------------------------------------------------------ store API
+
+    def _enforce_cache_bounds(self):
+        """Evict oldest entries when caches exceed max size (FIFO)."""
+        while len(self._payload_by_id) > _MAX_CACHE_ENTRIES:
+            oldest = next(iter(self._payload_by_id))
+            self._payload_by_id.pop(oldest, None)
+            self._sparse_by_id.pop(oldest, None)
+        # Keep sparse map in sync — if it somehow grew larger
+        while len(self._sparse_by_id) > _MAX_CACHE_ENTRIES:
+            oldest = next(iter(self._sparse_by_id))
+            self._sparse_by_id.pop(oldest, None)
+            self._payload_by_id.pop(oldest, None)
+
+    def _commit_pending(
+        self, pending_sparse: dict[str, dict | None], pending_payload: dict[str, dict]
+    ) -> None:
+        """Merge staged sparse/payload entries into bounded caches (lock held)."""
+        with self._lock:
+            for vid, sparse in pending_sparse.items():
+                if sparse is not None:
+                    self._sparse_by_id[vid] = sparse
+                else:
+                    self._sparse_by_id.pop(vid, None)
+                self._payload_by_id[vid] = pending_payload[vid]
+            self._enforce_cache_bounds()
 
     def upsert(self, vectors):
         """``vectors``: list of ``{"id": str, "values": list[float], "metadata": dict, "sparse_vector": {"indices": [], "values": []}}``."""
@@ -156,6 +193,8 @@ class QdrantIndexAdapter(VectorStore):
             SparseVector = None  # type: ignore
 
         points = []
+        pending_sparse: dict[str, dict | None] = {}
+        pending_payload: dict[str, dict] = {}
         for v in vectors:
             vid = v.get("id") or str(uuid.uuid4())
             # Qdrant accepts UUID strings or ints; ensure valid UUID
@@ -166,7 +205,8 @@ class QdrantIndexAdapter(VectorStore):
             values = v.get("values") or []
             payload = dict(v.get("metadata") or {})
             sparse = v.get("sparse_vector") or v.get("sparse")
-            # Cache for python-side fallback
+            # Stage cache entries — only committed on successful upsert so a
+            # dimension mismatch never wipes or pollutes the existing caches.
             if sparse:
                 # normalise to dict shape
                 if hasattr(sparse, "indices"):
@@ -174,10 +214,10 @@ class QdrantIndexAdapter(VectorStore):
                         "indices": list(sparse.indices),
                         "values": list(sparse.values),
                     }
-                self._sparse_by_id[vid] = dict(sparse)
+                pending_sparse[vid] = dict(sparse)
             else:
-                self._sparse_by_id.pop(vid, None)
-            self._payload_by_id[vid] = dict(payload)
+                pending_sparse[vid] = None
+            pending_payload[vid] = dict(payload)
 
             if PointStruct is None:
                 # No qdrant_client available (offline tests via stub client)
@@ -223,9 +263,12 @@ class QdrantIndexAdapter(VectorStore):
                 # Last resort plain dense
                 points.append(PointStruct(id=vid, vector=values, payload=payload))
 
-        if PointStruct is not None and points:
-            # Handle size mismatch for backwards compat: if collection was created
-            # with 1024 but vectors are different size, recreate with correct size.
+        if PointStruct is None:
+            # Offline / stub client: commit pending caches directly (bounded)
+            self._commit_pending(pending_sparse, pending_payload)
+            return {"upserted": len(vectors)}
+
+        if points:
             try:
                 self._client.upsert(
                     collection_name=self._collection, points=points, wait=True
@@ -236,56 +279,28 @@ class QdrantIndexAdapter(VectorStore):
                     "vector size" in msg
                     or "dimension" in msg
                     or "wrong vector size" in msg
+                    or ("vector" in msg and "size" in msg)
                 ):
-                    # Recreate with the incoming size; preserve sparse config
-                    from qdrant_client.models import (
-                        Distance,
-                        SparseIndexParams,
-                        SparseVectorParams,
-                        VectorParams,
-                    )
-
-                    try:
-                        self._client.delete_collection(collection_name=self._collection)
-                    except Exception:
-                        pass
-                    # Infer dense size: if points use dict vector, try "dense"
-                    inferred = _QDRANT_DENSE_SIZE
+                    # Fail fast — do NOT delete collection or clear caches.
+                    # Infer sizes for the typed error hint.
+                    inferred = None
                     if points:
                         vec = getattr(points[0], "vector", None)
                         if isinstance(vec, dict):
-                            # named vector case
                             dense = vec.get("dense")
                             if dense is not None and hasattr(dense, "__len__"):
                                 inferred = len(dense)
                         elif hasattr(vec, "__len__"):
                             inferred = len(vec)
-                    if not isinstance(inferred, int) or inferred <= 0:
-                        inferred = _QDRANT_DENSE_SIZE
-                    self._client.create_collection(
-                        collection_name=self._collection,
-                        vectors_config=VectorParams(
-                            size=inferred, distance=Distance.COSINE
-                        ),
-                        sparse_vectors_config={
-                            "sparse": SparseVectorParams(
-                                index=SparseIndexParams(on_disk=False),
-                                modifier="idf",
-                            )
-                        },
-                    )
-                    self._ensured = True
-                    self._sparse_by_id.clear()
-                    self._payload_by_id.clear()
-                    for p in points:
-                        self._sparse_by_id[getattr(p, "id", str(uuid.uuid4()))] = (
-                            self._sparse_by_id.get(getattr(p, "id", ""), {})
-                        )
-                    self._client.upsert(
-                        collection_name=self._collection, points=points, wait=True
-                    )
-                else:
-                    raise
+                    raise VectorDimensionError(
+                        expected=_QDRANT_DENSE_SIZE, got=inferred
+                    ) from exc
+                raise
+            # Success — commit staged caches and bound them
+            self._commit_pending(pending_sparse, pending_payload)
+        else:
+            # No points (empty vectors edge) still need to stage if offline? Already handled
+            self._commit_pending(pending_sparse, pending_payload)
         return {"upserted": len(vectors)}
 
     def _dense_search(self, vector, top_k, q_filter):
@@ -506,9 +521,10 @@ class QdrantIndexAdapter(VectorStore):
                 self._client.delete_collection(collection_name=self._collection)
             except Exception:
                 pass
-            self._ensured = False
-            self._sparse_by_id.clear()
-            self._payload_by_id.clear()
+            with self._lock:
+                self._ensured = False
+                self._sparse_by_id.clear()
+                self._payload_by_id.clear()
             self._ensure_collection()
             return {"deleted": "all"}
 
@@ -520,17 +536,19 @@ class QdrantIndexAdapter(VectorStore):
         q_filter = self._to_filter(filter)
         if q_filter is None:
             return {"deleted": 0}
-        # Also prune local cache for filtered deletes by pdf_name
+        # Also prune local cache for filtered deletes by pdf_name (bounded,
+        # only filtered deletes touch the caches — never on dimension mismatch)
         if filter and "pdf_name" in filter:
             target = filter["pdf_name"]
-            to_remove = [
-                vid
-                for vid, payload in self._payload_by_id.items()
-                if payload.get("pdf_name") == target
-            ]
-            for vid in to_remove:
-                self._sparse_by_id.pop(vid, None)
-                self._payload_by_id.pop(vid, None)
+            with self._lock:
+                to_remove = [
+                    vid
+                    for vid, payload in self._payload_by_id.items()
+                    if payload.get("pdf_name") == target
+                ]
+                for vid in to_remove:
+                    self._sparse_by_id.pop(vid, None)
+                    self._payload_by_id.pop(vid, None)
         try:
             self._client.delete(
                 collection_name=self._collection, points_selector=q_filter, wait=True

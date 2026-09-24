@@ -24,12 +24,17 @@ def shape_sources(sources, limit=MAX_RETRIEVED_SOURCES):
     Dedupe by content, order by score, and bound the result.
 
         The returned order is the order the LLM receives as context and the
-    order the Sources panel shows, so both always agree.
+    order the Sources panel shows, so both always agree. Dedupe uses raw
+    ``content`` without stripping so whitespace variants are treated as
+    distinct Passages.
     """
-    shaped = {}
+    shaped: dict[str, dict] = {}
     for source in sorted(sources, key=lambda s: s["score"], reverse=True):
-        key = source["content"].strip()
-        if key and key not in shaped:
+        content = source.get("content", "")
+        if not content or not content.strip():
+            continue
+        key = content
+        if key not in shaped:
             shaped[key] = source
     return list(shaped.values())[:limit]
 
@@ -66,6 +71,36 @@ def matches_to_sources(matches, filename):
     return sources
 
 
+def build_vectors_from_chunks(
+    embeddings, chunks, filename: str, offset: int = 0
+) -> list[dict]:
+    """Build dense and sparse index records from chunks and their embeddings."""
+    vectors = []
+    batch_chunks = [chunks[offset + j] for j in range(len(embeddings))]
+    sparse_batch = build_sparse_vectors([chunk.text for chunk in batch_chunks])
+    for j, embedding in enumerate(embeddings):
+        chunk = batch_chunks[j]
+        metadata = {
+            "content": chunk.text,
+            "pdf_name": filename,
+            "chunk_index": chunk.chunk_index,
+            "page_no": chunk.page_no,
+            "content_hash": chunk.content_hash,
+        }
+        sparse = (
+            sparse_batch[j] if j < len(sparse_batch) else {"indices": [], "values": []}
+        )
+        vectors.append(
+            {
+                "id": str(uuid.uuid4()),
+                "values": embedding,
+                "sparse_vector": sparse,
+                "metadata": metadata,
+            }
+        )
+    return vectors
+
+
 class VectorService:
     """
     Indexing and retrieval over an injected :class:`VectorStore`.
@@ -84,59 +119,6 @@ class VectorService:
         self._store = store
         self._reranker = reranker
 
-    @staticmethod
-    def _build_vectors_from_chunks(batch_embeddings, chunks, filename, offset):
-        """Build vectors from bundled :class:`Chunk` objects (data-clump fix)."""
-        vectors = []
-        batch_chunks = [chunks[offset + j] for j in range(len(batch_embeddings))]
-        # Chunk.text already carries the raw text for BM25
-        sparse_batch = build_sparse_vectors([c.text for c in batch_chunks])
-        for j, embedding in enumerate(batch_embeddings):
-            chunk = batch_chunks[j]
-            metadata = {
-                "content": chunk.text,
-                "pdf_name": filename,
-                "chunk_index": chunk.chunk_index,
-                "page_no": chunk.page_no,
-                "content_hash": chunk.content_hash,
-            }
-            sparse = (
-                sparse_batch[j]
-                if j < len(sparse_batch)
-                else {"indices": [], "values": []}
-            )
-            vectors.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "values": embedding,
-                    "sparse_vector": sparse,
-                    "metadata": metadata,
-                }
-            )
-        return vectors
-
-    @staticmethod
-    def _build_vectors(batch_embeddings, texts, filename, page_numbers, offset):
-        # Backward-compatible helper: bundle parallel lists into Chunk, then delegate.
-        # The parallel lists are a data clump; new code should call
-        # `_build_vectors_from_chunks` with a `list[Chunk]`.
-        from services.parsing.document_parser import Chunk
-
-        chunks = [
-            Chunk(
-                text=texts[offset + j],
-                page_no=page_numbers[offset + j]
-                if page_numbers is not None and offset + j < len(page_numbers)
-                else None,
-                chunk_index=offset + j,
-                content_hash=_content_hash(texts[offset + j]),
-            )
-            for j in range(len(batch_embeddings))
-        ]
-        return VectorService._build_vectors_from_chunks(
-            batch_embeddings, chunks, filename, offset
-        )
-
     def upsert_chunks(self, embeddings, chunks, filename):
         """Preferred entry: ``chunks`` is a ``list[Chunk]`` (bundled)."""
         if not embeddings:
@@ -145,12 +127,12 @@ class VectorService:
             self.UPSERT_BATCH_SIZE
         )
         if num_batches <= 1:
-            vectors = self._build_vectors_from_chunks(embeddings, chunks, filename, 0)
+            vectors = build_vectors_from_chunks(embeddings, chunks, filename)
             return self._store.upsert(vectors)
         batches: list[list[dict]] = []
         for start in range(0, len(embeddings), self.UPSERT_BATCH_SIZE):
             batch_embeddings = embeddings[start : start + self.UPSERT_BATCH_SIZE]
-            vectors = self._build_vectors_from_chunks(
+            vectors = build_vectors_from_chunks(
                 batch_embeddings, chunks, filename, start
             )
             batches.append(vectors)
@@ -199,6 +181,7 @@ class VectorService:
         Entirely local CPU, no API. ``rerank=False`` preserves legacy order
         even when the reranker is enabled (used by tests/evaluator).
         """
+        sparse: dict | None = None
         if query_text is not None:
             sparse = build_sparse_vector(query_text)
             if not sparse["indices"]:
@@ -220,7 +203,9 @@ class VectorService:
             except TypeError as exc:
                 # Explicit warning instead of silent fallback – hybrid is
                 # degraded, helps surface mis-wired fakes in tests.
-                print(f"VectorService hybrid query degraded to dense (TypeError): {exc}")
+                print(
+                    f"VectorService hybrid query degraded to dense (TypeError): {exc}"
+                )
                 search_results = self._store.query(
                     vector=embedding,
                     top_k=top_k,

@@ -29,9 +29,7 @@ def validate(provider: str, model: str) -> None:
             f"{sorted(SUPPORTED_MODELS)}"
         )
     if model not in SUPPORTED_MODELS[provider]:
-        raise SettingsError(
-            f"Unsupported model {model!r} for provider {provider!r}"
-        )
+        raise SettingsError(f"Unsupported model {model!r} for provider {provider!r}")
 
 
 def mask_key(api_key: str) -> str:

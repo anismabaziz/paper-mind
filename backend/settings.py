@@ -2,11 +2,12 @@
 Typed, validated application settings.
 
 A single pydantic-settings object reads every environment variable the
-backend consumes, grouped by concern. This is the only module allowed to
-read the environment for application configuration; everything else
-consumes a ``Settings`` instance. Importing this module never builds a
-client or touches an external service — clients live in ``providers`` and
-are built lazily on first use.
+backend consumes, grouped by concern. Application modules consume a
+``Settings`` instance rather than reading the environment themselves.
+Alembic reads ``DATABASE_URL`` directly so database upgrades do not import
+application code. Importing this module never builds a client or touches an
+external service. Clients live in ``providers`` and are built lazily on first
+use.
 
 Field names generally mirror their environment variable
 (``chunk_size_tokens`` ← ``CHUNK_SIZE_TOKENS``) so validation failures
@@ -14,6 +15,7 @@ name the variable to set.
 """
 
 import sys
+import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -144,13 +146,40 @@ class AuthSettings(BaseSettings):
     """
     App secret for encrypting stored provider API keys.
 
-    The Fernet key is derived from ``APP_SECRET`` (SHA-256, urlsafe base64).
-    Changing it invalidates previously encrypted keys.
+    The Fernet key is derived from ``APP_SECRET`` via HKDF-SHA256 with a
+    versioned info string (urlsafe base64). Changing it invalidates
+    previously encrypted keys.
     """
 
     model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
 
     app_secret: str | None = Field(default=None, validation_alias="APP_SECRET")
+
+
+class UploadSettings(BaseSettings):
+    """Upload limits and allowed content types."""
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    max_upload_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        validation_alias=AliasChoices("MAX_UPLOAD_BYTES", "MAX_CONTENT_LENGTH"),
+    )
+    allowed_extensions: set[str] = {".pdf"}
+    allowed_mime_types: set[str] = {"application/pdf"}
+
+
+class FrontendSettings(BaseSettings):
+    """Frontend origin for CORS allowlist."""
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    frontend_origin: str = Field(
+        default="http://localhost:5173",
+        validation_alias=AliasChoices(
+            "FRONTEND_ORIGIN", "FRONTEND_URL", "CORS_ALLOWED_ORIGINS"
+        ),
+    )
 
 
 class Settings(BaseSettings):
@@ -170,33 +199,38 @@ class Settings(BaseSettings):
     )
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    upload: UploadSettings = Field(default_factory=UploadSettings)
+    frontend: FrontendSettings = Field(default_factory=FrontendSettings)
 
 
 _settings: Settings | None = None
+_settings_lock = threading.RLock()
 
 
 def get_settings() -> Settings:
     """Return the process-wide settings instance, building it once."""
     global _settings
     if _settings is None:
-        _settings = Settings()
+        with _settings_lock:
+            if _settings is None:
+                _settings = Settings()
     return _settings
 
 
 def set_settings(settings: Settings | None) -> None:
     """Install or clear the process-wide instance (app boot and tests)."""
     global _settings
-    _settings = settings
+    with _settings_lock:
+        _settings = settings
 
 
 def app_secret_warning(settings: Settings) -> str | None:
-    """Return a warning when APP_SECRET is unset (keys won't survive restarts)."""
+    """Return a warning when APP_SECRET is unset (keys need it to decrypt)."""
     if settings.auth.app_secret:
         return None
     return (
-        "Warning: APP_SECRET is unset; stored provider keys are encrypted "
-        "with a per-process fallback and will not decrypt after a restart. "
-        "Set APP_SECRET in .env."
+        "Warning: APP_SECRET is unset; stored provider keys cannot be "
+        "encrypted or decrypted without it. Set APP_SECRET in .env."
     )
 
 

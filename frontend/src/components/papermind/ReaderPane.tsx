@@ -14,9 +14,9 @@ import {
 import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
 import useMobileUi from "@/store/mobile-ui";
-import { checkIsProcessed, deleteFile, getFileMeta } from "@/services/files";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useFileStatus, useFileMeta, useDeleteFile } from "@/hooks/useFiles";
 import { cn } from "@/lib/utils";
+import { isDetached, sharedView } from "@/lib/bytes";
 import { displayTitle } from "@/types/db";
 import {
   DropdownMenu,
@@ -67,13 +67,15 @@ function ThumbnailPlaceholder({ count }: { count: number }) {
 
 function usePdfFileData(file: { url: string } | null) {
   const [data, setData] = useState<Uint8Array | null>(null);
+  const [generation, setGeneration] = useState(0);
+  const fileUrl = file?.url ?? null;
 
   useEffect(() => {
-    if (!file) {
+    if (!fileUrl) {
       setData(null);
       return;
     }
-    const url = file.url;
+    const url = fileUrl;
     let cancelled = false;
     const controller = new AbortController();
     async function load() {
@@ -92,14 +94,17 @@ function usePdfFileData(file: { url: string } | null) {
       cancelled = true;
       controller.abort();
     };
-  }, [file?.url]);
+  }, [fileUrl, generation]);
 
-  return data;
+  // Refetch fresh bytes after pdf.js detached the shared buffer (e.g. the
+  // thumbnail strip remounts when reopened). Stable across renders.
+  const reload = useCallback(() => setGeneration((g) => g + 1), []);
+
+  return { data, reload };
 }
 
 export function ReaderPane() {
   const { file, citationTarget } = usePdfStore();
-  const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const outlineStripRef = useRef<HTMLDivElement>(null);
@@ -110,28 +115,31 @@ export function ReaderPane() {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [flashedPage, setFlashedPage] = useState<number | null>(null);
   const flashTimeoutRef = useRef<number | null>(null);
-  const fileData = usePdfFileData(file);
+  // A citation jump that arrived before its page mounted. Retried until the
+  // page element exists instead of being dropped mid-render.
+  const [pendingCitation, setPendingCitation] = useState<{ page: number; key: number } | null>(null);
+  const { data: fileData, reload: reloadFileData } = usePdfFileData(file);
 
-  const thumbnailFileData = useMemo(() => (fileData ? { data: fileData.slice() } : null), [fileData, showOutline]);
+  // Single shared buffer for the sheet and the thumbnail strip. The strip
+  // gets a view over the same ArrayBuffer (no .slice() copy) and the memo
+  // intentionally ignores the outline toggle so opening/closing the strip
+  // never reallocates tens of megabytes.
+  const thumbnailFileData = useMemo(() => (fileData ? { data: sharedView(fileData) } : null), [fileData]);
+
+  // Reopening the strip remounts its Document. If the worker already
+  // detached the shared buffer, refetch fresh bytes so thumbnails reload
+  // instead of rendering from a dead view.
+  useEffect(() => {
+    if (showOutline && fileData && isDetached(fileData)) reloadFileData();
+  }, [showOutline, fileData, reloadFileData]);
   const isProgrammaticRef = useRef(false);
   const programmaticTimeoutRef = useRef<number | null>(null);
 
-  const checkProcessedQuery = useQuery({
-    queryKey: [file?.name, "is-processed"],
-    queryFn: () => checkIsProcessed(file!),
-    enabled: !!file,
-  });
+  const checkProcessedQuery = useFileStatus(file);
 
-  const metaQuery = useQuery({
-    queryKey: [file?.name, "meta"],
-    queryFn: () => getFileMeta(file!.name),
-    enabled: !!file,
-  });
+  const metaQuery = useFileMeta(file);
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteFile,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
-  });
+  const deleteMutation = useDeleteFile();
 
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
   const outline = metaQuery.data?.outline ?? [];
@@ -160,6 +168,8 @@ export function ReaderPane() {
     setPage(1);
     setNumPages(null);
     setProgress(0);
+    setPendingCitation(null);
+    setFlashedPage(null);
     if (stripRef.current) stripRef.current.scrollLeft = 0;
     if (outlineStripRef.current) outlineStripRef.current.scrollLeft = 0;
   }, [file?.id]);
@@ -240,18 +250,34 @@ export function ReaderPane() {
     };
   }, [numPages, file?.id, zoom, fileData]);
 
-  // Citation page-jump: ChatPane sets citationTarget → scroll Page N into view
+  // Citation page-jump: ChatPane sets citationTarget → scroll Page N into view.
+  // Queued until the page element is mounted so jumps issued while rendering
+  // is still in progress land instead of being dropped.
   useEffect(() => {
-    if (citationTarget == null || citationTarget.page == null) return;
-    const target = citationTarget.page;
-    if (!Number.isFinite(target) || target < 1) return;
-    if (numPages != null && target > numPages) return;
+    if (citationTarget != null) setPendingCitation(citationTarget);
+  }, [citationTarget]);
+
+  useEffect(() => {
+    if (pendingCitation == null) return;
+    const target = pendingCitation.page;
+    if (!Number.isFinite(target) || target < 1) {
+      setPendingCitation(null);
+      return;
+    }
+    if (numPages != null && target > numPages) {
+      setPendingCitation(null);
+      return;
+    }
+    const container = scrollRef.current;
+    const mounted = container?.querySelector<HTMLElement>(`[data-page="${target}"]`);
+    if (!mounted || !fileData) return; // retry when pages mount
     setPage(target);
     setFlashedPage(target);
     if (flashTimeoutRef.current) window.clearTimeout(flashTimeoutRef.current);
     flashTimeoutRef.current = window.setTimeout(() => setFlashedPage(null), 1700);
     requestAnimationFrame(() => scrollToPage(target));
-  }, [citationTarget, numPages, scrollToPage]);
+    setPendingCitation(null);
+  }, [pendingCitation, numPages, fileData, scrollToPage]);
 
   useEffect(() => {
     return () => {
@@ -400,6 +426,8 @@ export function ReaderPane() {
                         setPage(o.page);
                         scrollToPage(o.page);
                       }}
+                      aria-label={`Jump to ${o.title}, page ${o.page}`}
+                      aria-current={page === o.page ? "true" : undefined}
                       className={cn(
                         "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs leading-none transition-colors",
                         page === o.page
@@ -424,7 +452,7 @@ export function ReaderPane() {
               }
               return (
                 <Document
-                  key={`${file.id}-thumbs-${showOutline ? "open" : "closed"}`}
+                  key={`${file.id}-thumbs`}
                   file={thumbnailFileData}
                   options={thumbnailOptions}
                   loading={<ThumbnailPlaceholder count={stripCount} />}
@@ -440,6 +468,8 @@ export function ReaderPane() {
                         setPage(n);
                         scrollToPage(n);
                       }}
+                      aria-label={`Go to page ${n}`}
+                      aria-current={page === n ? "true" : undefined}
                       className={cn(
                         "group relative flex h-28 shrink-0 aspect-[3/4] items-center justify-center overflow-hidden rounded-[2px] border bg-paper transition-all",
                         page === n ? "border-marker shadow-sheet" : "border-rule opacity-70 hover:opacity-100",
@@ -532,6 +562,7 @@ export function ReaderPane() {
                         data={fileData}
                         activePage={page}
                         flashedPage={flashedPage}
+                        pendingPage={pendingCitation?.page ?? null}
                       />
                     </Suspense>
                   </div>

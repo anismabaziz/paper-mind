@@ -1,12 +1,8 @@
-"""
-Database engine, ORM models, and the repository.
-
-All relational access goes through :class:`Repository`; routes and services
-never touch a Session directly.
-"""
+"""Database engine and ORM models."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     DateTime,
@@ -16,7 +12,6 @@ from sqlalchemy import (
     Text,
     create_engine,
     func,
-    select,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -33,18 +28,15 @@ def _new_id():
     return uuid.uuid4().hex
 
 
-# Singleton PK for the global app_settings row.
 APP_SETTINGS_ID = "app"
 
 
 class Base(DeclarativeBase):
-    """Base."""
-
-    pass
+    """Base for all persisted models."""
 
 
 class FileRecord(Base):
-    """FileRecord."""
+    """Metadata for one stored document."""
 
     __tablename__ = "files"
 
@@ -61,11 +53,13 @@ class FileRecord(Base):
 
 
 class AppSettings(Base):
-    """Global application settings (single-row, no user FK)."""
+    """Global application settings."""
 
     __tablename__ = "app_settings"
 
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: APP_SETTINGS_ID)
+    id: Mapped[str] = mapped_column(
+        String(32), primary_key=True, default=lambda: APP_SETTINGS_ID
+    )
     provider: Mapped[str] = mapped_column(String(32))
     model: Mapped[str] = mapped_column(String(128))
     encrypted_api_key: Mapped[str] = mapped_column(Text)
@@ -75,7 +69,7 @@ class AppSettings(Base):
 
 
 class Conversation(Base):
-    """Conversation."""
+    """Conversation tied to one stored document."""
 
     __tablename__ = "conversations"
 
@@ -87,7 +81,7 @@ class Conversation(Base):
 
 
 class Message(Base):
-    """Message."""
+    """Message in a document conversation."""
 
     __tablename__ = "messages"
 
@@ -103,7 +97,7 @@ class Message(Base):
 
 
 class Source(Base):
-    """Source."""
+    """Citation source attached to a message."""
 
     __tablename__ = "sources"
 
@@ -119,12 +113,9 @@ class Source(Base):
 
 
 def _engine_kwargs(url: str):
-    # Tests may use sqlite; only the in-memory variant needs special care.
     if url.startswith("sqlite"):
-        kwargs = {"connect_args": {"check_same_thread": False}}
+        kwargs: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
         if ":memory:" in url:
-            # Every session must share one connection or the schema
-            # disappears between sessions.
             kwargs["poolclass"] = StaticPool
         return kwargs
     return {}
@@ -135,246 +126,10 @@ SessionLocal = None
 
 
 def get_session_factory():
-    """Build the engine and session factory on first use, from Settings."""
+    """Build the engine and session factory on first use."""
     global _engine, SessionLocal
     if _engine is None:
         database_url = get_settings().database.database_url
         _engine = create_engine(database_url, **_engine_kwargs(database_url))
         SessionLocal = sessionmaker(bind=_engine)
     return SessionLocal
-
-
-def _to_dict(record, **extra):
-    created = record.created_at or datetime.now(timezone.utc)
-    data = {"id": record.id, "created_at": created.isoformat()}
-    data.update(extra)
-    return data
-
-
-class Repository:
-    """Repository: the only relational access point for the app."""
-
-    def __init__(self, session_factory=None):
-        # Resolved lazily so importing this module never requires env vars.
-        """Initialize."""
-        self._factory_override = session_factory
-        self._resolved = None
-
-    @property
-    def _session_factory(self):
-        if self._factory_override is not None:
-            return self._factory_override
-        if self._resolved is None:
-            self._resolved = get_session_factory()
-        return self._resolved
-
-    # -- files ----------------------------------------------------------
-
-    def create_file(
-        self,
-        filename: str,
-        title: str | None = None,
-        original_filename: str | None = None,
-    ) -> dict:
-        """Do create file."""
-        with self._session_factory() as session, session.begin():
-            record = FileRecord(
-                filename=filename, title=title, original_filename=original_filename
-            )
-            session.add(record)
-            session.flush()
-            return self._file_dict(record)
-
-    def set_file_title(self, filename: str, title: str) -> None:
-        """Persist a derived title for the file identified by storage filename."""
-        with self._session_factory() as session, session.begin():
-            record = session.scalars(
-                select(FileRecord).where(FileRecord.filename == filename)
-            ).first()
-            if record:
-                record.title = title
-
-    def get_file(self, filename: str) -> dict | None:
-        """Do get file."""
-        with self._session_factory() as session:
-            record = session.scalars(
-                select(FileRecord).where(FileRecord.filename == filename)
-            ).first()
-            return self._file_dict(record) if record else None
-
-    def list_files(self) -> list[dict]:
-        """Do list files."""
-        with self._session_factory() as session:
-            records = session.scalars(
-                select(FileRecord).order_by(FileRecord.created_at)
-            ).all()
-            return [self._file_dict(r) for r in records]
-
-    def set_processed(self, filename: str, status: bool = True) -> None:
-        """Do set processed."""
-        with self._session_factory() as session, session.begin():
-            record = session.scalars(
-                select(FileRecord).where(FileRecord.filename == filename)
-            ).first()
-            if record:
-                record.is_processed = status
-
-    def delete_file(self, file_id: str) -> None:
-        """Do delete file."""
-        with self._session_factory() as session, session.begin():
-            record = session.get(FileRecord, file_id)
-            if record:
-                session.delete(record)
-
-    @staticmethod
-    def _file_dict(record):
-        return _to_dict(
-            record,
-            filename=record.filename,
-            title=record.title,
-            original_filename=record.original_filename,
-            is_processed=record.is_processed,
-        )
-
-    # -- app settings -----------------------------------------------------
-
-    @staticmethod
-    def _app_settings_dict(record: "AppSettings") -> dict:
-        return {
-            "id": record.id,
-            "provider": record.provider,
-            "model": record.model,
-            "encrypted_api_key": record.encrypted_api_key,
-            "updated_at": (
-                record.updated_at.isoformat() if record.updated_at else None
-            ),
-        }
-
-    @staticmethod
-    def _app_settings_row(session) -> "AppSettings | None":
-        """Fetch the singleton row, handling legacy PKs."""
-        record = session.get(AppSettings, APP_SETTINGS_ID)
-        if record is None:
-            record = session.scalars(select(AppSettings).limit(1)).first()
-        return record
-
-    def get_app_settings(self) -> dict | None:
-        """Return the global app settings row, or None if not yet configured."""
-        with self._session_factory() as session:
-            record = self._app_settings_row(session)
-            if not record:
-                return None
-            return self._app_settings_dict(record)
-
-    def upsert_app_settings(
-        self, provider: str, model: str, encrypted_api_key: str
-    ) -> dict:
-        """Create or update the singleton app settings row."""
-        with self._session_factory() as session, session.begin():
-            record = self._app_settings_row(session)
-            if record is None:
-                record = AppSettings(id=APP_SETTINGS_ID)
-                session.add(record)
-            record.provider = provider
-            record.model = model
-            record.encrypted_api_key = encrypted_api_key
-            session.flush()
-            return self._app_settings_dict(record)
-
-    # -- conversations ----------------------------------------------------
-
-    def create_conversation(self, file_id: str) -> str:
-        """Do create conversation."""
-        with self._session_factory() as session, session.begin():
-            conversation = Conversation(file_id=file_id)
-            session.add(conversation)
-            session.flush()
-            return conversation.id
-
-    def get_conversation_id(self, file_id: str) -> str | None:
-        """Do get conversation id."""
-        with self._session_factory() as session:
-            return session.scalars(
-                select(Conversation.id).where(Conversation.file_id == file_id)
-            ).first()
-
-    def delete_conversation(self, conversation_id: str) -> None:
-        """Do delete conversation."""
-        with self._session_factory() as session, session.begin():
-            conversation = session.get(Conversation, conversation_id)
-            if conversation:
-                session.delete(conversation)
-
-    # -- messages ---------------------------------------------------------
-
-    def add_message(
-        self, conversation_id: str, sender: str, text: str, sources=None
-    ) -> str:
-        """Do add message."""
-        with self._session_factory() as session, session.begin():
-            message = Message(conversation_id=conversation_id, sender=sender, text=text)
-            session.add(message)
-            session.flush()
-            for source in sources or []:
-                session.add(
-                    Source(
-                        message_id=message.id,
-                        content=source["content"],
-                        document=source["document"],
-                        chunk_index=source["chunk_index"],
-                        score=source["score"],
-                        page=source.get("page", source.get("page_no")),
-                    )
-                )
-            return message.id
-
-    def get_messages(self, conversation_id: str) -> list[dict]:
-        """Do get messages."""
-        with self._session_factory() as session:
-            rows = session.scalars(
-                select(Message)
-                .where(Message.conversation_id == conversation_id)
-                .order_by(Message.created_at)
-            ).all()
-            return [
-                {
-                    "id": m.id,
-                    "text": m.text,
-                    "sender": m.sender,
-                    "sources": [
-                        self._source_dict(s) for s in self._sources_for(session, m.id)
-                    ],
-                    "created_at": m.created_at.isoformat() if m.created_at else None,
-                }
-                for m in rows
-            ]
-
-    @staticmethod
-    def _sources_for(session, message_id: str) -> list[Source]:
-        # Score order mirrors the retrieval order the LLM received, so the
-        # Sources panel shows the same ranking for stored and fresh answers.
-        return list(
-            session.scalars(
-                select(Source)
-                .where(Source.message_id == message_id)
-                .order_by(Source.score.desc(), Source.chunk_index)
-            ).all()
-        )
-
-    @staticmethod
-    def _source_dict(source: Source) -> dict:
-        return {
-            "content": source.content,
-            "document": source.document,
-            "chunk_index": source.chunk_index,
-            "score": source.score,
-            "page": source.page,
-        }
-
-    def delete_messages(self, conversation_id: str) -> None:
-        """Do delete messages."""
-        with self._session_factory() as session, session.begin():
-            session.query(Message).where(
-                Message.conversation_id == conversation_id
-            ).delete(synchronize_session=False)
-

@@ -12,6 +12,8 @@ entry ingestion callers use.
 """
 
 import hashlib
+import io
+import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -21,12 +23,38 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from services.parsing.pdf_heuristics import should_use_docling
 
+log = logging.getLogger(__name__)
+
 # cl100k_base is the tokenizer for gpt-4 / embeddings; stable, no download.
 _ENCODING = tiktoken.get_encoding("cl100k_base")
 
 
 def _token_len(text: str) -> int:
     return len(_ENCODING.encode(text))
+
+
+def _pdf_page_count(file_bytes: bytes) -> int:
+    """Count PDF pages; 0 when uncountable, which callers treat as unverified."""
+    try:
+        import pymupdf
+
+        with pymupdf.open("pdf", io.BytesIO(file_bytes)) as doc:
+            return len(doc)
+    except Exception as exc:
+        log.warning(
+            "page count unavailable, treating provenance as unverified: %s", exc
+        )
+        return 0
+
+
+@dataclass(frozen=True)
+class ParseResult:
+    """Chunks plus whether page provenance survived parsing."""
+
+    chunks: list[str]
+    page_numbers: list[int | None]
+    degraded: bool
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -121,8 +149,8 @@ def resolve_parser(
             from services.parsing.docling_parser import DoclingParser
 
             return DoclingParser()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("docling parser unavailable for %r: %s", filename, exc)
     from services.parsing.pdf_service import PDFParser
 
     return PDFParser()
@@ -161,6 +189,16 @@ class DocumentIngestor:
         breaks. Prefer :meth:`get_chunk_objects` for new code — the parallel
         lists are a data clump.
         """
+        result = self.get_chunks_with_status(filename, file_bytes)
+        return result.chunks, result.page_numbers
+
+    def get_chunks_with_status(self, filename: str, file_bytes: bytes) -> ParseResult:
+        """
+        Parse and chunk, reporting whether page provenance was degraded.
+
+        ``degraded`` is True when page numbers fell back to null so callers
+        can surface a warning; ``reason`` names the failed branch.
+        """
         # Try heuristic Docling branch first when warranted, before the plain
         # extension lookup. This keeps two-column / table PDFs correct without
         # paying Docling cost for single-column born-digital PDFs.
@@ -173,9 +211,28 @@ class DocumentIngestor:
                 chunks = [c for c, _ in chunks_with_page]
                 page_numbers = [p for _, p in chunks_with_page]
                 if chunks:
-                    return chunks, page_numbers
-            except Exception:
-                pass
+                    if len(page_texts) == 1 and _pdf_page_count(file_bytes) != 1:
+                        # Provenance collapsed: one chunk-page for a multi-page
+                        # (or uncountable) document. Page 1 would be false
+                        # provenance, so propagate null pages as degraded.
+                        log.warning(
+                            "docling collapsed %r to a single page without "
+                            "provenance; chunks carry null page numbers",
+                            filename,
+                        )
+                        return ParseResult(
+                            chunks=chunks,
+                            page_numbers=[None] * len(chunks),
+                            degraded=True,
+                            reason="docling-provenance-unavailable",
+                        )
+                    return ParseResult(
+                        chunks=chunks, page_numbers=page_numbers, degraded=False
+                    )
+            except Exception as exc:
+                log.warning(
+                    "docling branch failed for %r, trying fast path: %s", filename, exc
+                )
 
         parser = self.resolve(filename, file_bytes)
         try:
@@ -184,12 +241,30 @@ class DocumentIngestor:
             chunks = [c for c, _ in chunks_with_page]
             page_numbers = [p for _, p in chunks_with_page]
             if chunks:
-                return chunks, page_numbers
-        except Exception:
-            pass
+                return ParseResult(
+                    chunks=chunks, page_numbers=page_numbers, degraded=False
+                )
+        except Exception as exc:
+            log.warning(
+                "page-aware parse failed for %r, falling back to flat text "
+                "with null pages: %s",
+                filename,
+                exc,
+            )
         text = parser.extract_text(file_bytes)
         chunks = self._chunker.split_text(text)
-        return chunks, [None] * len(chunks)
+        if chunks:
+            log.warning(
+                "degraded parse for %r: %d chunks carry null page numbers",
+                filename,
+                len(chunks),
+            )
+        return ParseResult(
+            chunks=chunks,
+            page_numbers=[None] * len(chunks),
+            degraded=True,
+            reason="page-extract-failed",
+        )
 
     def get_chunk_objects(self, filename: str, file_bytes: bytes) -> list[Chunk]:
         """Parse and chunk, returning bundled :class:`Chunk` objects."""

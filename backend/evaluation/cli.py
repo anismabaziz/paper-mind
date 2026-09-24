@@ -41,6 +41,7 @@ def make_live_components(provider: str, model: str, api_key: str):
     from settings import get_settings
 
     from services.embeddings.local_embeddings import LocalEmbeddingService
+    from services.llm.base import ChatCredentials
     from services.llm.factory import build_chat_provider
     from services.llm.google_provider import _client as google_client
     from google.genai import types
@@ -48,14 +49,25 @@ def make_live_components(provider: str, model: str, api_key: str):
     embed_fn = LocalEmbeddingService(
         get_settings().embedding.embedding_model
     ).embed_texts
-    chat_provider = build_chat_provider(provider, model, api_key)
+
+    chat_provider = (
+        build_chat_provider(
+            ChatCredentials(provider=provider, model=model, api_key=api_key)
+        )
+        if api_key
+        else None
+    )
 
     def generate_fn(query, context):
         """Do generate fn."""
+        if chat_provider is None:
+            return ""
         return chat_provider.generate_response(query, context)
 
     def judge_fn(prompt):
         """Do judge fn."""
+        if not api_key:
+            return "unparseable"
         result = google_client(api_key).models.generate_content(
             model=model,
             config=types.GenerateContentConfig(

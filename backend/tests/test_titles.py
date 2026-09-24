@@ -1,4 +1,4 @@
-"""Title derivation and surfacing tests for ticket 03."""
+"""Title derivation and surfacing tests."""
 
 # ruff: noqa: D100, D101, D102, D103, D104, D105, D107
 
@@ -11,12 +11,16 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import Services, create_app
-from db import Base, FileRecord, Repository
+from app import create_app
+from composition import Services
+from db import Base, FileRecord
+from repositories import build_repositories
 from services.titles import derive_title, is_hex_like_title
 
 
-def _make_pdf_with_title(text: str | None = None, metadata_title: str | None = None) -> bytes:
+def _make_pdf_with_title(
+    text: str | None = None, metadata_title: str | None = None
+) -> bytes:
     import pymupdf
 
     doc = pymupdf.open()
@@ -31,14 +35,14 @@ def _make_pdf_with_title(text: str | None = None, metadata_title: str | None = N
 
 
 @pytest.fixture
-def repo():
+def repositories():
     engine = create_engine(
         "sqlite://",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    return Repository(sessionmaker(bind=engine))
+    return build_repositories(sessionmaker(bind=engine))
 
 
 class FakeStorage:
@@ -58,7 +62,10 @@ class FakeStorage:
         self.blobs.pop(filename, None)
 
     def list(self):
-        return [{"name": name, "size": len(data)} for name, data in sorted(self.blobs.items())]
+        return [
+            {"name": name, "size": len(data)}
+            for name, data in sorted(self.blobs.items())
+        ]
 
     def url(self, filename):
         return f"/storage/{filename}"
@@ -102,11 +109,11 @@ class FakeChatFactory:
 
 
 @pytest.fixture
-def app_and_client(repo, settings_obj):
+def app_and_client(repositories, settings_obj):
     storage = FakeStorage()
     services = replace(
         Services.from_settings(settings_obj),
-        repository=repo,
+        repositories=repositories,
         storage=storage,
         parser=FakeParser(),
         embedding_service=FakeEmbed(),
@@ -114,11 +121,13 @@ def app_and_client(repo, settings_obj):
         chat_provider_factory=FakeChatFactory(),
     )
     app = create_app(settings_obj, services=services)
-    return app, app.test_client(), storage, repo
+    return app, app.test_client(), storage, repositories
 
 
 def test_derive_title_priority_metadata_over_filename():
-    pdf = _make_pdf_with_title(text="First Heading", metadata_title="  Metadata Title  ")
+    pdf = _make_pdf_with_title(
+        text="First Heading", metadata_title="  Metadata Title  "
+    )
     assert derive_title(pdf, "ignored.pdf") == "Metadata Title"
     assert derive_title(pdf, None) == "Metadata Title"
 
@@ -186,10 +195,10 @@ def test_upload_filename_fallback_when_no_metadata(app_and_client):
 
 
 def test_lazy_backfill_null_title(app_and_client):
-    _, client, storage, repo = app_and_client
+    _, client, storage, repositories = app_and_client
     pdf = _make_pdf_with_title(text="Backfill Heading")
     hex_name = f"{uuid.uuid4().hex}.pdf"
-    with repo._session_factory() as sess, sess.begin():
+    with repositories.files._session_factory() as sess, sess.begin():
         sess.add(FileRecord(filename=hex_name, title=None, original_filename=None))
     storage.save(hex_name, pdf)
 
@@ -198,17 +207,19 @@ def test_lazy_backfill_null_title(app_and_client):
     entry = next(f for f in files if f["name"] == hex_name)
     assert entry["title"] == "Backfill Heading"
 
-    with repo._session_factory() as sess:
-        rec = sess.scalars(select(FileRecord).where(FileRecord.filename == hex_name)).first()
+    with repositories.files._session_factory() as sess:
+        rec = sess.scalars(
+            select(FileRecord).where(FileRecord.filename == hex_name)
+        ).first()
         assert rec.title == "Backfill Heading"
 
 
 def test_lazy_backfill_hex_like_title(app_and_client):
-    _, client, storage, repo = app_and_client
+    _, client, storage, repositories = app_and_client
     pdf = _make_pdf_with_title(text="Real Heading", metadata_title="Derived from Meta")
     hex_name = f"{uuid.uuid4().hex}.pdf"
     hex_title = uuid.uuid4().hex
-    with repo._session_factory() as sess, sess.begin():
+    with repositories.files._session_factory() as sess, sess.begin():
         sess.add(FileRecord(filename=hex_name, title=hex_title, original_filename=None))
     storage.save(hex_name, pdf)
 
@@ -217,13 +228,14 @@ def test_lazy_backfill_hex_like_title(app_and_client):
     entry = next(f for f in files if f["name"] == hex_name)
     assert entry["title"] == "Derived from Meta"
 
-    with repo._session_factory() as sess:
-        rec = sess.scalars(select(FileRecord).where(FileRecord.filename == hex_name)).first()
+    with repositories.files._session_factory() as sess:
+        rec = sess.scalars(
+            select(FileRecord).where(FileRecord.filename == hex_name)
+        ).first()
         assert rec.title == "Derived from Meta"
 
 
-def test_vectors_still_keyed_on_filename_not_title(app_and_client):
-    _, client, storage, repo = app_and_client
+def test_vectors_still_keyed_on_filename_not_title():
 
     class CapturingVectors(FakeVectorService):
         def __init__(self):
@@ -234,26 +246,21 @@ def test_vectors_still_keyed_on_filename_not_title(app_and_client):
 
     pdf = _make_pdf_with_title(text="Content", metadata_title="Titled Paper")
     vectors = CapturingVectors()
-    # rebuild app with capturing vectors
-    from app import Services as Svc
-
-    # need fresh repo/storage
     engine = create_engine(
         "sqlite://",
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    repo2 = Repository(sessionmaker(bind=engine))
-    stor2 = FakeStorage()
-    # use settings_obj from fixture via client? reuse app_and_client settings
+    fresh_repositories = build_repositories(sessionmaker(bind=engine))
+    storage = FakeStorage()
     import settings as sm
 
     settings_obj = sm.get_settings()
     svc = replace(
-        Svc.from_settings(settings_obj),
-        repository=repo2,
-        storage=stor2,
+        Services.from_settings(settings_obj),
+        repositories=fresh_repositories,
+        storage=storage,
         parser=FakeParser(),
         embedding_service=FakeEmbed(),
         vector_service=vectors,
@@ -262,7 +269,9 @@ def test_vectors_still_keyed_on_filename_not_title(app_and_client):
     app = create_app(settings_obj, services=svc)
     cl = app.test_client()
     data = {"file": (io.BytesIO(pdf), "titled.pdf")}
-    stored = cl.post("/upload", data=data, content_type="multipart/form-data").get_json()["file"]
+    stored = cl.post(
+        "/upload", data=data, content_type="multipart/form-data"
+    ).get_json()["file"]
     cl.post("/process-file", json={"filename": stored["name"]})
     assert vectors.last_filename == stored["name"]
     assert vectors.last_filename != stored["title"]

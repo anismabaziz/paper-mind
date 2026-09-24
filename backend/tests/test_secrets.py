@@ -9,7 +9,9 @@ from the ORM metadata.
 import pytest
 
 from services.accounts.secrets_service import (
+    RESAVE_MESSAGE,
     SecretsError,
+    SecretsResaveRequiredError,
     decrypt_api_key,
     encrypt_api_key,
 )
@@ -53,12 +55,47 @@ def test_each_encryption_is_unique(app_secret):
     assert decrypt_api_key(first) == decrypt_api_key(second) == "sk-test"
 
 
+def _legacy_encrypt(plaintext: str, secret: str) -> str:
+    """Encrypt with the pre-HKDF SHA-256 derivation (old rows on disk)."""
+    import base64
+    import hashlib
+
+    from cryptography.fernet import Fernet
+
+    digest = hashlib.sha256(secret.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(digest)).encrypt(plaintext.encode()).decode()
+
+
+def test_old_sha256_row_raises_resave(app_secret):
+    """Old derivation rows raise a re-save error instead of returning plaintext."""
+    legacy = _legacy_encrypt("sk-live-abc123", app_secret)
+    with pytest.raises(SecretsResaveRequiredError) as excinfo:
+        decrypt_api_key(legacy)
+    assert isinstance(excinfo.value, SecretsError)
+    assert str(excinfo.value) == RESAVE_MESSAGE
+
+
+def test_new_ciphertext_uses_hkdf_not_legacy_sha256(app_secret):
+    """New ciphertext must not open with the legacy SHA-256 key."""
+    import base64
+    import hashlib
+
+    from cryptography.fernet import Fernet, InvalidToken
+
+    ciphertext = encrypt_api_key("sk-live-abc123")
+    legacy_key = base64.urlsafe_b64encode(hashlib.sha256(app_secret.encode()).digest())
+    with pytest.raises(InvalidToken):
+        Fernet(legacy_key).decrypt(ciphertext.encode())
+    assert decrypt_api_key(ciphertext) == "sk-live-abc123"
+
+
 def test_app_settings_upsert_round_trip(app_secret):
-    """Global app settings round-trip via repository."""
+    """Global app settings round-trip through its repository."""
     from sqlalchemy import create_engine
     from sqlalchemy.pool import StaticPool
     from sqlalchemy.orm import sessionmaker
-    from db import Base, Repository
+    from db import Base
+    from repositories import AppSettingsRepository
 
     engine = create_engine(
         "sqlite://",
@@ -66,7 +103,7 @@ def test_app_settings_upsert_round_trip(app_secret):
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(engine)
-    repo = Repository(sessionmaker(bind=engine))
+    repo = AppSettingsRepository(sessionmaker(bind=engine))
 
     assert repo.get_app_settings() is None
 

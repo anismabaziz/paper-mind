@@ -30,7 +30,7 @@ The only required env vars are `DATABASE_URL` and `QDRANT_URL` (defaults to
 `http://localhost:6333`). Optional: `APP_SECRET` — the Fernet root that
 encrypts the stored provider key. Set it in any persistent deployment;
 changing it invalidates previously stored keys. With no `APP_SECRET`, a
-per-process fallback is used and a warning is printed. After boot, open
+warning is printed and stored keys cannot be encrypted or decrypted. After boot, open
 Settings in the app and paste your provider key.
 
 Keys path: provider, model, and API key are stored as a single global
@@ -96,7 +96,7 @@ flow tests in `tests/test_flows.py` run against fakes and in-memory sqlite.
 ground-truth fixture (`evaluation/fixture.json`): ten questions over two
 sample documents in `evaluation/sample_docs/` — one authored in-repo
 (CC0), one published paper (CC BY 4.0). The evaluator reports
-`hit@5`/`recall@5` (k=5, 10 candidates fetched internally) + per-question breakdown and
+`hit@5`/`recall@5` (k=5, 50 candidates fetched internally) + per-question breakdown and
 ingest `sec/PDF` (parse/embed/upsert wall time via `evaluation/evaluator.py`;
 `POST /process-file` also logs `parse/embed/upsert/total` per file).
 `uv run pytest` exercises the scoring on deterministic fakes and stays
