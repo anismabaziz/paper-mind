@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Clock3, Folder, Plus, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings } from "lucide-react";
+import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { processFile } from "@/services/files";
-import { useFiles, useUploadFile, useDeleteFile, useProcessFile } from "@/hooks/useFiles";
+import { useFiles, useUploadFile, useDeleteFile, useProcessFile, useTouchFileOpened } from "@/hooks/useFiles";
 import { formatFileSize } from "@/lib/format";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
@@ -17,17 +17,38 @@ import {
 import type { File as DbFile } from "@/types/db";
 import { displayTitle } from "@/types/db";
 
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+const MAX_RECENTS = 12;
+
 export function LibraryRail() {
   const queryClient = useQueryClient();
   const { file: selectedFile, setFile } = usePdfStore();
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"library" | "recent">("library");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openSettings = useSettingsUi((s) => s.open);
   const setLibraryOpen = useMobileUi((s) => s.setLibraryOpen);
   const filesQuery = useFiles();
+  const touchOpened = useTouchFileOpened();
 
   const files = filesQuery.data?.files ?? [];
+
+  const recents = useMemo(() => {
+    const opened = files.filter((f): f is DbFile & { last_opened_at: string } => f.last_opened_at != null);
+    return opened
+      .sort((a, b) => b.last_opened_at.localeCompare(a.last_opened_at))
+      .slice(0, MAX_RECENTS);
+  }, [files]);
+
+  function selectFile(item: DbFile) {
+    setFile(item);
+    touchOpened.mutate(item);
+    setLibraryOpen(false);
+  }
 
   useEffect(() => {
     if (!files.length) {
@@ -39,13 +60,17 @@ export function LibraryRail() {
       const next = files.find((f) => f.is_processed) ?? files[0];
       setFile(next);
     }
+    // No touch here: this fallback is system-initiated, not the user
+    // opening a paper, so it must not pollute the recent-readings order.
   }, [files, selectedFile, setFile]);
+
+  const viewFiles: DbFile[] = tab === "recent" ? recents : files;
 
   const filtered = useMemo(() => {
     const v = query.trim().toLowerCase();
-    if (!v) return files;
-    return files.filter((f) => displayTitle(f).toLowerCase().includes(v));
-  }, [files, query]);
+    if (!v) return viewFiles;
+    return viewFiles.filter((f) => displayTitle(f).toLowerCase().includes(v));
+  }, [viewFiles, query]);
 
   const uploadMutation = useUploadFile({
     onSuccess: async (data) => {
@@ -55,6 +80,8 @@ export function LibraryRail() {
         console.error("Indexing failed:", err);
         alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
+        // A fresh upload counts as opened so it enters Recent readings.
+        touchOpened.mutate(data.file);
         // ["files"] prefix covers the per-document status/messages/meta keys.
         queryClient.invalidateQueries({ queryKey: ["files"] });
       }
@@ -74,6 +101,13 @@ export function LibraryRail() {
     if (e.target.files?.[0]) uploadMutation.mutate(e.target.files[0]);
     if (e.target) e.target.value = "";
   }
+
+  const listTitle = tab === "recent" ? `Recent · ${filtered.length}` : `Papers · ${filtered.length}`;
+
+  const emptyCopy =
+    tab === "recent"
+      ? { title: "No recent readings", hint: "Open a paper and it will show up here." }
+      : { title: "No documents", hint: "Ingest a PDF to begin analysis." };
 
   return (
     <aside className="flex w-64 max-w-full min-w-0 shrink-0 flex-col overflow-x-hidden border-r border-rule bg-sidebar">
@@ -113,38 +147,48 @@ export function LibraryRail() {
       <nav className="scroll-slim flex-1 overflow-x-hidden overflow-y-auto min-w-0 max-w-full px-3 py-4">
         <p className="label-meta px-2 pb-2">Workspace</p>
         <ul className="mb-6 space-y-0.5">
-          {(
-            [
-              [Archive, "Library", String(files.length).padStart(2, "0")],
-              [Clock3, "Recent readings", "12"],
-              [Folder, "Collections", "03"],
-            ] as const
-          ).map(([Icon, label, count], index) => (
-            <li key={label}>
-              <button
-                type="button"
-                className={cn(
-                  "flex w-full items-center gap-2.5 px-2 py-2 text-left text-xs",
-                  index === 0 ? "bg-marker-soft font-medium text-marker" : "text-ink-soft hover:bg-canvas",
-                )}
-              >
-                <Icon className="size-3.5" />
-                <span className="flex-1">{String(label)}</span>
-                <span className="font-mono text-[0.6rem] text-ink-faint">{String(count)}</span>
-              </button>
-            </li>
-          ))}
+          <li>
+            <button
+              type="button"
+              onClick={() => setTab("library")}
+              className={cn(
+                "flex w-full items-center gap-2.5 px-2 py-2 text-left text-xs",
+                tab === "library" ? "bg-marker-soft font-medium text-marker" : "text-ink-soft hover:bg-canvas",
+              )}
+            >
+              <Archive className="size-3.5" />
+              <span className="flex-1">Library</span>
+              <span className="font-mono text-[0.6rem] text-ink-faint">{pad(files.length)}</span>
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
+              onClick={() => setTab("recent")}
+              className={cn(
+                "flex w-full items-center gap-2.5 px-2 py-2 text-left text-xs",
+                tab === "recent" ? "bg-marker-soft font-medium text-marker" : "text-ink-soft hover:bg-canvas",
+              )}
+            >
+              <Clock3 className="size-3.5" />
+              <span className="flex-1">Recent readings</span>
+              <span className="font-mono text-[0.6rem] text-ink-faint">{pad(recents.length)}</span>
+            </button>
+          </li>
         </ul>
 
         <div className="flex items-center justify-between px-2 pb-2">
-          <p className="label-meta">Current project</p>
-          <button type="button" className="text-ink-faint hover:text-marker" aria-label="New project" title="New project">
-            <Plus className="size-3.5" />
-          </button>
+          <p className="label-meta">{listTitle}</p>
+          {tab !== "library" && (
+            <button
+              type="button"
+              onClick={() => setTab("library")}
+              className="font-mono text-[0.6rem] text-ink-faint underline-offset-2 hover:text-marker hover:underline"
+            >
+              Show all
+            </button>
+          )}
         </div>
-        <p className="mb-4 px-2 text-xs font-medium">Agent governance / 2026</p>
-
-        <p className="label-meta px-2 pb-2">Papers · {filtered.length}</p>
 
         {filesQuery.isPending ? (
           <div className="space-y-2 px-1">
@@ -157,15 +201,26 @@ export function LibraryRail() {
             <div className="mx-auto grid size-8 place-items-center border border-rule bg-paper text-ink-faint">
               <File className="size-3.5" />
             </div>
-            <p className="mt-3 text-xs font-medium">No documents</p>
-            <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-faint">Ingest a PDF to begin analysis.</p>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-4 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
-            >
-              <Upload className="size-3" /> Ingest Document
-            </button>
+            <p className="mt-3 text-xs font-medium">{emptyCopy.title}</p>
+            <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-faint">{emptyCopy.hint}</p>
+            {tab === "library" && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-4 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
+              >
+                <Upload className="size-3" /> Ingest Document
+              </button>
+            )}
+            {tab !== "library" && (
+              <button
+                type="button"
+                onClick={() => setTab("library")}
+                className="mt-4 inline-flex items-center gap-1.5 border border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] hover:border-ink"
+              >
+                Back to library
+              </button>
+            )}
           </div>
         ) : (
           <ul className="min-w-0 max-w-full space-y-px overflow-hidden">
@@ -187,10 +242,7 @@ export function LibraryRail() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (!isProcessing) {
-                          setFile(item);
-                          setLibraryOpen(false);
-                        }
+                        if (!isProcessing) selectFile(item);
                       }}
                       className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isProcessing && "cursor-default")}
                     >

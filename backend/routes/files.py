@@ -199,6 +199,24 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             log.exception("check_processed failed")
             return jsonify({"error": "Internal server error"}), 500
 
+    @app.route("/file/opened", methods=["POST"])
+    def mark_opened():
+        try:
+            data = request.get_json()
+            filename = data.get("filename") if data else None
+            if not filename:
+                return jsonify({"error": "Filename is required"}), 400
+            guard = traversal_check(storage, filename)
+            if guard is not None:
+                return guard
+            touched = files_repository.touch_opened(filename)
+            if not touched:
+                return jsonify({"error": "File not found"}), 404
+            return jsonify({"last_opened_at": touched["last_opened_at"]}), 200
+        except Exception:
+            log.exception("mark_opened failed")
+            return jsonify({"error": "Internal server error"}), 500
+
     @app.route("/process-file", methods=["POST"])
     def process_file():
         filename = None
@@ -330,6 +348,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                         "original_filename": db_file["original_filename"],
                         "url": file_url(storage, filename),
                         "is_processed": db_file["is_processed"],
+                        "last_opened_at": db_file.get("last_opened_at"),
                         "metadata": {
                             "size": storage_item["size"] if storage_item else 0,
                             "content_type": "application/pdf",

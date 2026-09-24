@@ -7,6 +7,7 @@ import {
   checkIsProcessed,
   getMessages,
   getFileMeta,
+  markFileOpened,
 } from "@/services/files";
 import type { File as DbFile } from "@/types/db";
 
@@ -102,6 +103,16 @@ export function useProcessFile(options?: MutationCallbacks<ProcessResult, DbFile
     },
     onError: (err, variables) => {
       options?.onError?.(err, variables);
+    },
+  });
+}
+
+export function useTouchFileOpened() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: markFileOpened,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
     },
   });
 }
