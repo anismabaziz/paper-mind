@@ -11,7 +11,7 @@ Two model options via the rerank model setting:
 
 The service is intentionally lazy: ``sentence-transformers`` is only imported
 when reranking is actually requested, and the model is cached after first load
-(``HF_HOME`` / Docker volume ``hf_cache``). Tests inject a fake model through
+(``HF_HOME`` / ``~/.cache/huggingface``). Tests inject a fake model through
 the constructor, so ``pytest`` never downloads weights.
 """
 

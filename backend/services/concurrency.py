@@ -50,10 +50,7 @@ def map_batches_concurrently(
     # errors from ``func`` are not raised until ``future.result()`` below
     # and must not be masked.
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(func, batch): idx for idx, batch in enumerate(batches)
-            }
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     except Exception as exc:
         elapsed = time.time() - start
         print(
@@ -62,12 +59,34 @@ def map_batches_concurrently(
         )
         return [func(batch) for batch in batches]
 
-    # Business phase: collection. Let func errors propagate so a
-    # retry-exhausted embedding or an upsert rejection is not hidden.
-    ordered: list[R | None] = [None] * len(batches)
-    for future in concurrent.futures.as_completed(futures):
-        idx = futures[future]
-        ordered[idx] = future.result()
+    with executor:
+        try:
+            futures = {
+                executor.submit(func, batch): idx for idx, batch in enumerate(batches)
+            }
+        except Exception as exc:
+            elapsed = time.time() - start
+            print(
+                f"{label}: concurrent batching failed after {elapsed:.2f}s "
+                f"({exc}), falling back to sequential"
+            )
+            # Shut down without waiting so a stuck submit does not hang boot.
+            executor.shutdown(wait=False, cancel_futures=True)
+            return [func(batch) for batch in batches]
+
+        # Business phase: collection. Let func errors propagate so a
+        # retry-exhausted embedding or an upsert rejection is not hidden.
+        # Cancel the batches that have not started yet on the first
+        # failure so a half-indexed document is not left behind.
+        ordered: list[R | None] = [None] * len(batches)
+        try:
+            for future in concurrent.futures.as_completed(futures):
+                idx = futures[future]
+                ordered[idx] = future.result()
+        except Exception:
+            for pending in futures:
+                pending.cancel()
+            raise
 
     elapsed = time.time() - start
     print(

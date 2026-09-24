@@ -1,4 +1,4 @@
-import client from "./client";
+import client, { apiBaseUrl } from "./client";
 import { File as FileType } from "@/types/db";
 
 interface IGetFiles {
@@ -15,13 +15,7 @@ interface IUploadFile {
 export async function uploadFile(file: File) {
   const formData = new FormData();
   formData.append("file", file);
-  return (
-    await client.post<IUploadFile>("/upload", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    })
-  ).data;
+  return (await client.post<IUploadFile>("/upload", formData)).data;
 }
 
 interface IDeleteFile {
@@ -77,14 +71,16 @@ interface IStreamHandlers {
 export async function chatStream(
   query: string,
   filename: string,
-  handlers: IStreamHandlers
+  handlers: IStreamHandlers,
+  options?: { signal?: AbortSignal }
 ) {
-  const response = await fetch(`${client.defaults.baseURL}/response`, {
+  const response = await fetch(`${apiBaseUrl}/response`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query, filename }),
+    signal: options?.signal,
   });
 
   if (!response.ok || !response.body) {
@@ -116,7 +112,7 @@ export async function chatStream(
   }
 }
 
-function parseSSEBlock(block: string): { name: string; data: Record<string, unknown> } | null {
+export function parseSSEBlock(block: string): { name: string; data: Record<string, unknown> } | null {
   let name = "message";
   let data = "";
   for (const line of block.split("\n")) {

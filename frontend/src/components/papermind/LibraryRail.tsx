@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Clock3, Folder, Plus, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings } from "lucide-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getFiles, uploadFile, deleteFile, processFile } from "@/services/files";
+import { useQueryClient } from "@tanstack/react-query";
+import { processFile } from "@/services/files";
+import { useFiles, useUploadFile, useDeleteFile, useProcessFile } from "@/hooks/useFiles";
+import { formatFileSize } from "@/lib/format";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
 import useMobileUi from "@/store/mobile-ui";
@@ -23,14 +25,7 @@ export function LibraryRail() {
 
   const openSettings = useSettingsUi((s) => s.open);
   const setLibraryOpen = useMobileUi((s) => s.setLibraryOpen);
-  const filesQuery = useQuery({
-    queryKey: ["files"],
-    queryFn: getFiles,
-    refetchInterval: (q) => {
-      const hasUnprocessed = q.state.data?.files.some((f) => !f.is_processed);
-      return hasUnprocessed ? 3000 : false;
-    },
-  });
+  const filesQuery = useFiles();
 
   const files = filesQuery.data?.files ?? [];
 
@@ -52,18 +47,16 @@ export function LibraryRail() {
     return files.filter((f) => displayTitle(f).toLowerCase().includes(v));
   }, [files, query]);
 
-  const uploadMutation = useMutation({
-    mutationFn: uploadFile,
+  const uploadMutation = useUploadFile({
     onSuccess: async (data) => {
-      queryClient.invalidateQueries({ queryKey: ["files"] });
       try {
         await processFile(data.file);
       } catch (err) {
         console.error("Indexing failed:", err);
         alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
+        // ["files"] prefix covers the per-document status/messages/meta keys.
         queryClient.invalidateQueries({ queryKey: ["files"] });
-        queryClient.invalidateQueries({ queryKey: [data.file.name, "is-processed"] });
       }
     },
     onError: (err) => {
@@ -71,14 +64,9 @@ export function LibraryRail() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteFile,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
-  });
+  const deleteMutation = useDeleteFile();
 
-  const processMutation = useMutation({
-    mutationFn: processFile,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
+  const processMutation = useProcessFile({
     onError: (err) => alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`),
   });
 
@@ -86,12 +74,6 @@ export function LibraryRail() {
     if (e.target.files?.[0]) uploadMutation.mutate(e.target.files[0]);
     if (e.target) e.target.value = "";
   }
-
-  const formatSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1048576) return (bytes / 1024).toFixed(0) + " KB";
-    return (bytes / 1048576).toFixed(1) + " MB";
-  };
 
   return (
     <aside className="flex w-64 max-w-full min-w-0 shrink-0 flex-col overflow-x-hidden border-r border-rule bg-sidebar">
@@ -221,7 +203,7 @@ export function LibraryRail() {
                               {isRetrying ? "Re-indexing" : "Indexing"}
                             </span>
                           ) : (
-                            <span>{formatSize(item.metadata.size)}</span>
+                            <span>{formatFileSize(item.metadata.size)}</span>
                           )}
                         </span>
                       </span>
