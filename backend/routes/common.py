@@ -67,6 +67,36 @@ def is_safe_filename(storage: Any, filename: str) -> bool:
     return ".." not in filename and not filename.startswith("/")
 
 
+def is_deleting_record(file_record: dict | None) -> bool:
+    """Return whether a document is mid-deletion or failed deletion."""
+    if not file_record:
+        return False
+    return file_record.get("deletion_state") in ("deleting", "delete_failed")
+
+
+def deletion_blocked_response(file_record: dict):
+    """Return the stable 409 response blocking work on a deleting document."""
+    if file_record.get("deletion_state") == "delete_failed":
+        return jsonify(
+            {
+                "error": (
+                    "This document failed to delete. Retry deletion before "
+                    "using it again."
+                ),
+                "category": "document_delete_failed",
+                "deletion_state": "delete_failed",
+                "deletion_error": file_record.get("deletion_error"),
+            }
+        ), 409
+    return jsonify(
+        {
+            "error": "This document is being deleted.",
+            "category": "document_deleting",
+            "deletion_state": "deleting",
+        }
+    ), 409
+
+
 def scrub_api_key_from_text(text: str | None, api_key: str | None) -> str | None:
     """Remove raw, truncated, and URL-encoded API key forms from text."""
     if not text or not api_key:

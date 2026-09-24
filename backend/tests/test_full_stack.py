@@ -230,7 +230,7 @@ def test_migrations_apply_to_an_empty_postgres_database(migrated_database):
     }
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "c4d2e9a1b5f6"
+            "e7a1c3d5f908"
         )
         for table in ("app_settings", "conversations", "files", "messages", "sources"):
             assert connection.scalar(text(f"SELECT count(*) FROM {table}")) == 0
@@ -461,3 +461,101 @@ def test_injected_service_failures_reach_visible_http_responses(
             "sources": [],
             "retrieval": {"method": "hybrid", "outcome": "success"},
         }
+
+
+@pytest.mark.full_stack
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        pytest.param("disk", id="disk"),
+        pytest.param("postgres", id="postgres"),
+        pytest.param("qdrant", id="qdrant"),
+        pytest.param("partial", id="partial"),
+    ],
+)
+def test_deletion_failures_retain_retryable_state(full_stack_app, boundary):
+    """Disk, Postgres, Qdrant, and partial cleanup failures stay retryable."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    file_record = harness.repositories.files.get_file(filename)
+    assert file_record["deletion_state"] == "active"
+
+    if boundary == "disk":
+        harness.storage.fail("delete")
+    elif boundary == "postgres":
+        harness.repositories.conversations.fail("delete_conversation_tree")
+    elif boundary == "qdrant":
+        harness.vector_store.fail("delete")
+    elif boundary == "partial":
+        harness.storage.fail("delete")
+
+    response = harness.client.delete(f"/files/remove?path={filename}")
+
+    assert response.status_code == 500
+    assert response.json()["category"] == "document_delete_failed"
+    assert response.json()["deletion_state"] == "delete_failed"
+    assert response.json()["leftovers"]
+    retained = harness.repositories.files.get_file(filename)
+    assert retained["deletion_state"] == "delete_failed"
+    assert retained["deletion_error"]
+    assert retained["deletion_attempts"] >= 1
+    if boundary == "partial":
+        # Storage failed but the vector cleanup still ran: a partial
+        # failure makes progress where it can without claiming success.
+        assert harness.qdrant.count(
+            collection_name=harness.collection_name,
+            exact=True,
+        ).count == 0
+        assert harness.storage.list() != []
+
+    if boundary == "disk":
+        harness.storage.unfail("delete")
+    elif boundary == "postgres":
+        harness.repositories.conversations.unfail("delete_conversation_tree")
+    elif boundary == "qdrant":
+        harness.vector_store.unfail("delete")
+    elif boundary == "partial":
+        harness.storage.unfail("delete")
+
+    retry = harness.client.delete(f"/files/remove?path={filename}")
+    assert retry.status_code == 200
+    assert harness.repositories.files.get_file(filename) is None
+    assert harness.storage.list() == []
+    assert (
+        harness.qdrant.count(
+            collection_name=harness.collection_name,
+            exact=True,
+        ).count
+        == 0
+    )
+    with harness.session_factory() as session:
+        assert session.query(Conversation).count() == 0
+        assert session.query(Message).count() == 0
+        assert session.query(Source).count() == 0
+
+
+@pytest.mark.full_stack
+def test_chat_and_process_are_blocked_while_deletion_failed(full_stack_app):
+    """A failed deletion blocks new chat and ingestion until retried."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+
+    harness.vector_store.fail("delete")
+    assert harness.client.delete(f"/files/remove?path={filename}").status_code == 500
+    harness.vector_store.unfail("delete")
+
+    chat = harness.client.post(
+        "/response", json={"filename": filename, "query": "What changed?"}
+    )
+    assert chat.status_code == 409
+    assert chat.json()["category"] == "document_delete_failed"
+
+    process = harness.client.post("/process-file", json={"filename": filename})
+    assert process.status_code == 409
+    assert process.json()["category"] == "document_delete_failed"
+
+    assert harness.client.delete(f"/files/remove?path={filename}").status_code == 200

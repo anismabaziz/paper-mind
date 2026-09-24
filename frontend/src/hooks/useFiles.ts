@@ -9,6 +9,7 @@ import {
   getFileMeta,
   markFileOpened,
 } from "@/services/files";
+import type { IDeleteFile } from "@/services/files";
 import type { File as DbFile } from "@/types/db";
 
 // All per-document keys live under the "files" prefix so a single
@@ -83,12 +84,17 @@ export function useUploadFile(options?: MutationCallbacks<UploadResult, File>) {
   });
 }
 
-export function useDeleteFile() {
+export function useDeleteFile(options?: MutationCallbacks<IDeleteFile, DbFile>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteFile,
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
+      void options?.onSuccess?.(data, variables);
+    },
+    onError: (err, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      options?.onError?.(err, variables);
     },
   });
 }

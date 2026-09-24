@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState, useEffect, useMemo, useCallback } from "react";
+import { lazy, Suspense, useRef, useState, useEffect, useCallback } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -16,7 +16,7 @@ import usePdfStore from "@/store/pdf-state";
 import useMobileUi from "@/store/mobile-ui";
 import { useFileStatus, useFileMeta, useDeleteFile } from "@/hooks/useFiles";
 import { cn } from "@/lib/utils";
-import { isDetached, sharedView } from "@/lib/bytes";
+import { isDetached } from "@/lib/bytes";
 import { displayTitle } from "@/types/db";
 import {
   DropdownMenu,
@@ -104,7 +104,7 @@ function usePdfFileData(file: { url: string } | null) {
 }
 
 export function ReaderPane() {
-  const { file, citationTarget } = usePdfStore();
+  const { file, citationTarget, setFile } = usePdfStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const outlineStripRef = useRef<HTMLDivElement>(null);
@@ -120,11 +120,15 @@ export function ReaderPane() {
   const [pendingCitation, setPendingCitation] = useState<{ page: number; key: number } | null>(null);
   const { data: fileData, reload: reloadFileData } = usePdfFileData(file);
 
-  // Single shared buffer for the sheet and the thumbnail strip. The strip
-  // gets a view over the same ArrayBuffer (no .slice() copy) and the memo
-  // intentionally ignores the outline toggle so opening/closing the strip
-  // never reallocates tens of megabytes.
-  const thumbnailFileData = useMemo(() => (fileData ? { data: sharedView(fileData) } : null), [fileData]);
+  // Each pdf.js Document transfers its buffer to the worker, detaching it.
+  // State initializer runs on every mount, so the strip gets a fresh copy
+  // instead of reusing a buffer the sheet's worker already detached.
+  const [thumbnailFileData, setThumbnailFileData] = useState<{ data: Uint8Array } | null>(() =>
+    fileData ? { data: fileData.slice() } : null,
+  );
+  useEffect(() => {
+    setThumbnailFileData(fileData ? { data: fileData.slice() } : null);
+  }, [fileData]);
 
   // Reopening the strip remounts its Document. If the worker already
   // detached the shared buffer, refetch fresh bytes so thumbnails reload
@@ -139,7 +143,12 @@ export function ReaderPane() {
 
   const metaQuery = useFileMeta(file);
 
-  const deleteMutation = useDeleteFile();
+  const deleteMutation = useDeleteFile({
+    onSuccess: (_data, variables) => {
+      if (file?.id === variables.id) setFile(null);
+    },
+  });
+  const deleteError = deleteMutation.error instanceof Error ? deleteMutation.error.message : null;
 
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
   const outline = metaQuery.data?.outline ?? [];
@@ -288,6 +297,29 @@ export function ReaderPane() {
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
+      {deleteMutation.isError && file && (
+        <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
+          <p className="text-xs font-medium text-destructive">Delete failed — the document was kept.</p>
+          <p className="mt-0.5 text-[0.65rem] text-ink-soft">{deleteError ?? "Retry deletion."}</p>
+          <div className="mt-1.5 flex gap-2">
+            <button
+              type="button"
+              onClick={() => deleteMutation.mutate(file)}
+              disabled={deleteMutation.isPending}
+              className="border border-ink bg-ink px-2 py-1 font-mono text-[0.6rem] text-paper hover:bg-ink/90 disabled:opacity-40"
+            >
+              Retry delete
+            </button>
+            <button
+              type="button"
+              onClick={() => deleteMutation.reset()}
+              className="border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       {/* Toolbar */}
       <header className="flex h-14 items-center justify-between gap-2 sm:gap-4 border-b border-rule bg-background/80 px-3 sm:px-5 backdrop-blur">
         <div className="flex min-w-0 items-center gap-3">
@@ -304,7 +336,7 @@ export function ReaderPane() {
               {file ? displayTitle(file) : "Document Viewer"}
             </p>
             <p className="label-meta truncate">
-              {file ? `${file.metadata.content_type} · ${isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
+              {file ? `${file.metadata.content_type} · ${file.deletion_state === "deleting" ? "Deleting" : file.deletion_state === "delete_failed" ? "Delete failed" : isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
             </p>
           </div>
         </div>

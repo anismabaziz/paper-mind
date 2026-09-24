@@ -91,7 +91,13 @@ export function LibraryRail() {
     },
   });
 
-  const deleteMutation = useDeleteFile();
+  const deleteMutation = useDeleteFile({
+    onSuccess: (_data, variables) => {
+      if (selectedFile?.id === variables.id) setFile(null);
+    },
+  });
+  const deleteError = deleteMutation.error instanceof Error ? deleteMutation.error.message : null;
+  const deleteTarget = deleteMutation.variables as DbFile | undefined;
 
   const processMutation = useProcessFile({
     onError: (err) => alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`),
@@ -190,6 +196,36 @@ export function LibraryRail() {
           )}
         </div>
 
+        {deleteMutation.isError && (
+          <div role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2">
+            <p className="text-xs font-medium text-destructive">
+              Delete failed{deleteTarget ? ` for ${displayTitle(deleteTarget)}` : ""}
+            </p>
+            <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-soft">
+              {deleteError ?? "The document was kept so you can retry."}
+            </p>
+            <div className="mt-2 flex gap-2">
+              {deleteTarget && (
+                <button
+                  type="button"
+                  onClick={() => deleteMutation.mutate(deleteTarget)}
+                  disabled={deleteMutation.isPending}
+                  className="border border-ink bg-ink px-2 py-1 font-mono text-[0.6rem] text-paper hover:bg-ink/90 disabled:opacity-40"
+                >
+                  Retry delete
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => deleteMutation.reset()}
+                className="border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {filesQuery.isPending ? (
           <div className="space-y-2 px-1">
             {[...Array(3)].map((_, i) => (
@@ -229,15 +265,17 @@ export function LibraryRail() {
               const isRemoving = deleteMutation.isPending && (deleteMutation.variables as DbFile | undefined)?.id === item.id;
               const isRetrying = processMutation.isPending && (processMutation.variables as DbFile | undefined)?.name === item.name;
               const isProcessing = !item.is_processed;
+              const isDeleting = item.deletion_state === "deleting" || isRemoving;
+              const isDeleteFailed = item.deletion_state === "delete_failed";
 
               return (
                 <li key={item.id} className="min-w-0 max-w-full overflow-hidden">
                   <div
-                    className={cn(
-                      "group relative flex min-w-0 max-w-full items-center gap-0 overflow-hidden border-l-2 text-left transition-colors",
-                      active ? "border-marker bg-paper" : "border-transparent hover:border-rule hover:bg-paper/70",
-                      isRemoving && "opacity-50 pointer-events-none",
-                    )}
+                      className={cn(
+                        "group relative flex min-w-0 max-w-full items-center gap-0 overflow-hidden border-l-2 text-left transition-colors",
+                        active ? "border-marker bg-paper" : "border-transparent hover:border-rule hover:bg-paper/70",
+                        (isRemoving || isDeleting) && "opacity-50 pointer-events-none",
+                      )}
                   >
                     <button
                       type="button"
@@ -249,7 +287,14 @@ export function LibraryRail() {
                       <span className="flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden font-mono text-[0.58rem] text-ink-faint">
                         <span>0{index + 1}</span>
                         <span className="flex items-center gap-1.5">
-                          {isProcessing ? (
+                          {isDeleting ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Loader2 className="size-2.5 animate-spin" />
+                              Deleting
+                            </span>
+                          ) : isDeleteFailed ? (
+                            <span className="text-destructive">Delete failed</span>
+                          ) : isProcessing ? (
                             <span className="inline-flex items-center gap-1">
                               <Loader2 className="size-2.5 animate-spin" />
                               {isRetrying ? "Re-indexing" : "Indexing"}
@@ -264,12 +309,22 @@ export function LibraryRail() {
                       </span>
                       <span className="block min-w-0 max-w-full truncate overflow-hidden text-[0.65rem] text-ink-faint">
                         {item.metadata.content_type.split("/").pop()?.toUpperCase() ?? "PDF"} ·{" "}
-                        {isProcessing ? "Queued for indexing" : "Indexed"}
+                        {isDeleting ? "Deleting" : isDeleteFailed ? (item.deletion_error ?? "Delete failed — retry") : isProcessing ? "Queued for indexing" : "Indexed"}
                       </span>
                     </button>
 
                     <div className="pr-1">
-                      {isProcessing ? (
+                      {isDeleteFailed ? (
+                        <button
+                          type="button"
+                          onClick={() => deleteMutation.mutate(item)}
+                          disabled={deleteMutation.isPending}
+                          title={item.deletion_error ?? "Retry deletion"}
+                          className="mr-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
+                        >
+                          Retry
+                        </button>
+                      ) : isProcessing ? (
                         <button
                           type="button"
                           onClick={() => processMutation.mutate(item)}
@@ -278,7 +333,7 @@ export function LibraryRail() {
                         >
                           {isRetrying ? <Loader2 className="size-3 animate-spin" /> : "→"}
                         </button>
-                      ) : !isRemoving ? (
+                      ) : !isRemoving && !isDeleting ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button

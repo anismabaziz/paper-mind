@@ -9,6 +9,18 @@ from db import Conversation, Message, Source
 from repositories.base import BaseRepository
 
 
+def _delete_conversation_rows(session: Session, conversation_id: str) -> None:
+    """Delete one conversation's messages and their citation sources."""
+    message_ids = list(
+        session.scalars(
+            select(Message.id).where(Message.conversation_id == conversation_id)
+        ).all()
+    )
+    if message_ids:
+        session.execute(delete(Source).where(Source.message_id.in_(message_ids)))
+    session.execute(delete(Message).where(Message.conversation_id == conversation_id))
+
+
 class ConversationRepository(BaseRepository):
     """Read and update the conversation aggregate."""
 
@@ -88,11 +100,17 @@ class ConversationRepository(BaseRepository):
             ]
 
     def delete_messages(self, conversation_id: str) -> None:
-        """Delete every message in one conversation."""
+        """Delete every message and its citation sources in one conversation."""
         with self._session_factory() as session, session.begin():
-            session.execute(
-                delete(Message).where(Message.conversation_id == conversation_id)
-            )
+            _delete_conversation_rows(session, conversation_id)
+
+    def delete_conversation_tree(self, conversation_id: str) -> None:
+        """Delete a conversation with its messages and citation sources."""
+        with self._session_factory() as session, session.begin():
+            _delete_conversation_rows(session, conversation_id)
+            conversation = session.get(Conversation, conversation_id)
+            if conversation:
+                session.delete(conversation)
 
     @staticmethod
     def _sources_for(session: Session, message_id: str) -> list[Source]:

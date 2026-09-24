@@ -3,6 +3,7 @@
 import io
 import logging
 import os
+import threading
 import time
 import uuid
 from typing import TYPE_CHECKING
@@ -10,7 +11,9 @@ from typing import TYPE_CHECKING
 from flask import Flask, jsonify, request, send_from_directory
 
 from routes.common import (
+    deletion_blocked_response,
     file_url,
+    is_deleting_record,
     is_safe_filename,
     traversal_check,
     vector_store_error_response,
@@ -26,6 +29,24 @@ if TYPE_CHECKING:
     from composition import Services
 
 log = logging.getLogger(__name__)
+
+
+_document_locks: dict[str, threading.RLock] = {}
+_document_locks_guard = threading.RLock()
+
+
+def _document_lock(filename: str) -> threading.RLock:
+    """Return the per-document lock serializing process, chat, and deletion."""
+    with _document_locks_guard:
+        lock = _document_locks.get(filename)
+        if lock is None:
+            lock = threading.RLock()
+            _document_locks[filename] = lock
+        return lock
+
+
+_is_deleting = is_deleting_record
+_deletion_blocked_response = deletion_blocked_response
 
 
 def _timed_call(func, *args, **kwargs):
@@ -238,84 +259,108 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             if guard is not None:
                 return guard
 
-            wall_start = time.time()
-            if not storage.exists(filename):
-                return jsonify({"error": "Failed to fetch file"}), 400
-            file_content = storage.open(filename)
-            chunk_objects, parse_elapsed = _timed_call(
-                parser.get_chunk_objects, filename, file_content
-            )
-            degraded = any(chunk.page_no is None for chunk in chunk_objects)
-            if degraded:
-                log.warning(
-                    "/process-file degraded parse for %s: chunks carry null page numbers",
-                    filename,
+            with _document_lock(filename):
+                existing = files_repository.get_file(filename)
+                if existing is None:
+                    return jsonify({"error": "File not found"}), 404
+                if _is_deleting(existing):
+                    return _deletion_blocked_response(existing)
+
+                wall_start = time.time()
+                if not storage.exists(filename):
+                    return jsonify({"error": "Failed to fetch file"}), 400
+                # Re-check after the existence check: deletion marks the row
+                # first, so a concurrent delete is visible here.
+                fresh = files_repository.get_file(filename)
+                if fresh is not None and _is_deleting(fresh):
+                    return _deletion_blocked_response(fresh)
+                file_content = storage.open(filename)
+                chunk_objects, parse_elapsed = _timed_call(
+                    parser.get_chunk_objects, filename, file_content
                 )
-            if not chunk_objects:
-                return jsonify({"error": "No text extracted from document"}), 400
-            try:
-                vector_service.delete_by_filename(filename)
-            except Exception as exc:
-                log.warning(
-                    "/process-file vector cleanup warning for %s: %s", filename, exc
-                )
-            texts = [chunk.text for chunk in chunk_objects]
-            try:
-                embeddings, embed_elapsed = _timed_call(
-                    embedding_service.embed_texts, texts
-                )
-                _, upsert_elapsed = _timed_call(
-                    vector_service.upsert_chunks,
-                    embeddings,
-                    chunk_objects,
-                    filename,
-                )
-            except Exception:
+                degraded = any(chunk.page_no is None for chunk in chunk_objects)
+                if degraded:
+                    log.warning(
+                        "degraded parse for %s: chunks carry null page numbers",
+                        filename,
+                    )
+                if not chunk_objects:
+                    return jsonify({"error": "No text extracted from document"}), 400
+                # Final guard before touching the index: a delete that won the
+                # lock first leaves the row in deleting state.
+                guard_record = files_repository.get_file(filename)
+                if guard_record is not None and _is_deleting(guard_record):
+                    return _deletion_blocked_response(guard_record)
                 try:
                     vector_service.delete_by_filename(filename)
-                except Exception as cleanup_exc:
+                except Exception as exc:
                     log.warning(
-                        "/process-file compensation cleanup failed for %s: %s",
-                        filename,
-                        cleanup_exc,
+                        "/process-file vector cleanup warning for %s: %s", filename, exc
                     )
+                texts = [chunk.text for chunk in chunk_objects]
                 try:
-                    files_repository.set_processed(filename, False)
-                except Exception as state_exc:
-                    log.warning(
-                        "/process-file compensation state failed for %s: %s",
-                        filename,
-                        state_exc,
+                    embeddings, embed_elapsed = _timed_call(
+                        embedding_service.embed_texts, texts
                     )
-                raise
+                    _, upsert_elapsed = _timed_call(
+                        vector_service.upsert_chunks,
+                        embeddings,
+                        chunk_objects,
+                        filename,
+                    )
+                except Exception:
+                    try:
+                        vector_service.delete_by_filename(filename)
+                    except Exception as cleanup_exc:
+                        log.warning(
+                            "/process-file compensation cleanup failed for %s: %s",
+                            filename,
+                            cleanup_exc,
+                        )
+                    try:
+                        files_repository.set_processed(filename, False)
+                    except Exception as state_exc:
+                        log.warning(
+                            "/process-file compensation state failed for %s: %s",
+                            filename,
+                            state_exc,
+                        )
+                    raise
 
-            file_record = files_repository.get_file(filename)
-            if file_record and not conversations_repository.get_conversation_id(
-                file_record["id"]
-            ):
-                conversations_repository.create_conversation(file_record["id"])
-            files_repository.set_processed(filename, True)
+                file_record = files_repository.get_file(filename)
+                if file_record is not None and _is_deleting(file_record):
+                    try:
+                        vector_service.delete_by_filename(filename)
+                    except Exception:
+                        pass
+                    return _deletion_blocked_response(file_record)
+                if file_record and not conversations_repository.get_conversation_id(
+                    file_record["id"]
+                ):
+                    conversations_repository.create_conversation(file_record["id"])
+                files_repository.set_processed(filename, True)
 
-            log.info(
-                "/process-file %s: %s chunks | parse %.2fs embed %.2fs upsert %.2fs total %.2fs",
-                filename,
-                len(chunk_objects),
-                parse_elapsed,
-                embed_elapsed,
-                upsert_elapsed,
-                time.time() - wall_start,
-            )
-            if degraded:
-                return jsonify(
-                    {
-                        "message": "PDF processed",
-                        "warning": (
-                            "Page numbers could not be detected, so citation "
-                            "sources for this document show no page."
-                        ),
-                    }
-                ), 200
-            return jsonify({"message": "PDF processed"}), 200
+                log.info(
+                    "processed %s: %s chunks | parse %.2fs embed %.2fs "
+                    "upsert %.2fs total %.2fs",
+                    filename,
+                    len(chunk_objects),
+                    parse_elapsed,
+                    embed_elapsed,
+                    upsert_elapsed,
+                    time.time() - wall_start,
+                )
+                if degraded:
+                    return jsonify(
+                        {
+                            "message": "PDF processed",
+                            "warning": (
+                                "Page numbers could not be detected, so citation "
+                                "sources for this document show no page."
+                            ),
+                        }
+                    ), 200
+                return jsonify({"message": "PDF processed"}), 200
         except (
             VectorStoreUnavailableError,
             VectorStoreConfigurationError,
@@ -370,6 +415,9 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                         "url": file_url(storage, filename),
                         "is_processed": db_file["is_processed"],
                         "last_opened_at": db_file.get("last_opened_at"),
+                        "deletion_state": db_file.get("deletion_state", "active"),
+                        "deletion_error": db_file.get("deletion_error"),
+                        "deletion_attempts": db_file.get("deletion_attempts", 0),
                         "metadata": {
                             "size": storage_item["size"] if storage_item else 0,
                             "content_type": "application/pdf",
@@ -390,30 +438,130 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             guard = traversal_check(storage, filename)
             if guard is not None:
                 return guard
-            try:
-                vector_service.delete_by_filename(filename)
-            except Exception:
-                log.exception("vector delete failed for %r", filename)
-            try:
-                storage.delete(filename)
-            except ValueError:
-                log.warning("traversal delete blocked for %r", filename)
-                return jsonify({"error": "Invalid filename"}), 400
-            except Exception:
-                log.exception("storage delete failed for %r", filename)
+            with _document_lock(filename):
+                file_record = files_repository.get_file(filename)
+                if not file_record:
+                    # No metadata: still attempt index and file cleanup so a
+                    # retry after a partial failure cannot leave silent vectors.
+                    leftovers: list[str] = []
+                    try:
+                        vector_service.delete_by_filename(filename)
+                    except Exception:
+                        log.exception("vector delete failed for %r", filename)
+                        leftovers.append("vectors")
+                    try:
+                        storage.delete(filename)
+                    except Exception:
+                        log.exception("storage delete failed for %r", filename)
+                        leftovers.append("file")
+                    if leftovers:
+                        return jsonify(
+                            {
+                                "error": (
+                                    "Deletion incomplete: could not remove "
+                                    + ", ".join(leftovers)
+                                    + ". Retry deletion."
+                                ),
+                                "category": "document_delete_failed",
+                                "leftovers": leftovers,
+                            }
+                        ), 500
+                    return jsonify(
+                        {"message": "File and all its data deleted successfully"}
+                    ), 200
 
-            file_record = files_repository.get_file(filename)
-            if file_record:
-                conversation_id = conversations_repository.get_conversation_id(
-                    file_record["id"]
-                )
-                if conversation_id:
-                    conversations_repository.delete_messages(conversation_id)
-                    conversations_repository.delete_conversation(conversation_id)
-                files_repository.delete_file(file_record["id"])
-            return jsonify(
-                {"message": "File and all its data deleted successfully"}
-            ), 200
+                # Durable deleting state first: retries re-enter here and the
+                # UI can render deleting vs failed from the listing.
+                marked = files_repository.mark_deleting(filename)
+                if marked is None:
+                    return jsonify({"error": "File not found"}), 404
+                file_id = file_record["id"]
+                failures: list[str] = []
+
+                # Every point for this document lives under its pdf_name
+                # payload filter, covering active and any stale generations.
+                try:
+                    vector_service.delete_by_filename(filename)
+                except Exception:
+                    log.exception("vector delete failed for %r", filename)
+                    failures.append("vectors")
+                try:
+                    storage.delete(filename)
+                except ValueError:
+                    log.warning("traversal delete blocked for %r", filename)
+                    try:
+                        files_repository.mark_delete_failed(
+                            filename,
+                            "Could not remove file: invalid filename. Retry deletion.",
+                        )
+                    except Exception:
+                        log.exception(
+                            "delete-failed marking failed for %r", filename
+                        )
+                    return jsonify({"error": "Invalid filename"}), 400
+                except Exception:
+                    log.exception("storage delete failed for %r", filename)
+                    failures.append("file")
+
+                conversation_failed = False
+                try:
+                    conversation_id = conversations_repository.get_conversation_id(
+                        file_id
+                    )
+                    if conversation_id:
+                        conversations_repository.delete_conversation_tree(
+                            conversation_id
+                        )
+                except Exception:
+                    log.exception("conversation delete failed for %r", filename)
+                    failures.append("conversation")
+                    conversation_failed = True
+
+                metadata_failed = False
+                if not failures:
+                    try:
+                        files_repository.delete_file(file_id)
+                    except Exception:
+                        log.exception("metadata delete failed for %r", filename)
+                        failures.append("metadata")
+                        metadata_failed = True
+
+                if failures:
+                    detail = ", ".join(failures)
+                    # Keep the row so a retry has the file id, conversation
+                    # id, and filename needed to finish the cleanup.
+                    try:
+                        files_repository.mark_delete_failed(
+                            filename,
+                            f"Could not remove {detail}. Retry deletion.",
+                        )
+                    except Exception:
+                        log.exception(
+                            "delete-failed marking failed for %r", filename
+                        )
+                    # A metadata failure after external cleanup succeeded is
+                    # still not a success: the row remains for retry.
+                    if metadata_failed and not conversation_failed:
+                        log.error(
+                            "remove_file metadata failed for %r after external cleanup",
+                            filename,
+                        )
+                    return jsonify(
+                        {
+                            "error": (
+                                "Deletion incomplete: could not remove "
+                                f"{detail}. Retry deletion."
+                            ),
+                            "category": "document_delete_failed",
+                            "deletion_state": "delete_failed",
+                            "leftovers": failures,
+                        }
+                    ), 500
+                with _document_locks_guard:
+                    _document_locks.pop(filename, None)
+                return jsonify(
+                    {"message": "File and all its data deleted successfully"}
+                ), 200
         except Exception:
             log.exception("remove_file failed for %r", request.args.get("path"))
             return jsonify({"error": "Internal server error"}), 500
