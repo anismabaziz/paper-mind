@@ -80,9 +80,7 @@ def _extract_first_heading(pdf_bytes: bytes) -> str | None:
         return None
 
 
-def derive_title(
-    pdf_bytes_or_none: bytes | None, original_filename: str | None
-) -> str:
+def derive_title(pdf_bytes_or_none: bytes | None, original_filename: str | None) -> str:
     """Derive a human title from PDF bytes and the original filename."""
     pdf_bytes = _normalize_pdf_bytes(pdf_bytes_or_none)
 

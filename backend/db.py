@@ -114,9 +114,7 @@ class Source(Base):
 
 def _engine_kwargs(url: str):
     if url.startswith("sqlite"):
-        kwargs: dict[str, Any] = {
-            "connect_args": {"check_same_thread": False}
-        }
+        kwargs: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
         if ":memory:" in url:
             kwargs["poolclass"] = StaticPool
         return kwargs

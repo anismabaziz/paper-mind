@@ -177,12 +177,11 @@ def rrf_fusion(
 
     for lst in ranked_lists:
         for rank, doc in enumerate(lst, start=1):
-            meta = doc.get("metadata", {}) if isinstance(doc.get("metadata"), dict) else {}
+            meta = (
+                doc.get("metadata", {}) if isinstance(doc.get("metadata"), dict) else {}
+            )
             doc_id = (
-                doc.get("id")
-                or meta.get("content_hash")
-                or meta.get("content")
-                or ""
+                doc.get("id") or meta.get("content_hash") or meta.get("content") or ""
             )
             # Normalise id to string for map key
             doc_id = str(doc_id)

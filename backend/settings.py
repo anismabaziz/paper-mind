@@ -176,7 +176,9 @@ class FrontendSettings(BaseSettings):
 
     frontend_origin: str = Field(
         default="http://localhost:5173",
-        validation_alias=AliasChoices("FRONTEND_ORIGIN", "FRONTEND_URL", "CORS_ALLOWED_ORIGINS"),
+        validation_alias=AliasChoices(
+            "FRONTEND_ORIGIN", "FRONTEND_URL", "CORS_ALLOWED_ORIGINS"
+        ),
     )
 
 

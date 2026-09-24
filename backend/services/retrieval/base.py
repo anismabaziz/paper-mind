@@ -14,7 +14,12 @@ from abc import ABC, abstractmethod
 class VectorDimensionError(ValueError):
     """Typed error for embedding dimension mismatch — never auto-heals by wiping."""
 
-    def __init__(self, expected: int | None = None, got: int | None = None, message: str | None = None):
+    def __init__(
+        self,
+        expected: int | None = None,
+        got: int | None = None,
+        message: str | None = None,
+    ):
         """Initialize with expected/got sizes and a remediation hint."""
         if message is None:
             if expected is not None and got is not None:

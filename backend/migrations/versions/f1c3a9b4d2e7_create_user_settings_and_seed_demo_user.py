@@ -19,9 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 DEMO_USER_ID = "13db88b6ca6a499b8f1dbd3d504e1b83"
 DEMO_EMAIL = "demo@papermind.local"
-DEMO_PASSWORD_HASH = (
-    "$2b$12$XCQV9kxyNy.WmRGKqcaNsOcAErzCcotZcHvOT/JtTpPAJVhY3QU8."
-)
+DEMO_PASSWORD_HASH = "$2b$12$XCQV9kxyNy.WmRGKqcaNsOcAErzCcotZcHvOT/JtTpPAJVhY3QU8."
 
 
 def upgrade() -> None:

@@ -42,9 +42,7 @@ def app_secret(settings_obj, monkeypatch):
 @pytest.fixture
 def client(repositories, app_secret, settings_obj):
     """App composed over in-memory repositories with the default verifier."""
-    services = replace(
-        Services.from_settings(settings_obj), repositories=repositories
-    )
+    services = replace(Services.from_settings(settings_obj), repositories=repositories)
     application = create_app(settings_obj, services=services)
     with application.test_client() as client:
         yield client
@@ -155,7 +153,11 @@ def test_verify_reports_ok(repositories, app_secret, settings_obj):
     with application.test_client() as client:
         client.put(
             "/settings",
-            json={"provider": "google", "model": "gemini-2.0-flash", "api_key": "sk-live"},
+            json={
+                "provider": "google",
+                "model": "gemini-2.0-flash",
+                "api_key": "sk-live",
+            },
         )
         response = client.post("/settings/verify")
     assert response.status_code == 200
@@ -175,7 +177,11 @@ def test_verify_reports_failure(repositories, app_secret, settings_obj):
     with application.test_client() as client:
         client.put(
             "/settings",
-            json={"provider": "groq", "model": "llama-3.3-70b-versatile", "api_key": "bad"},
+            json={
+                "provider": "groq",
+                "model": "llama-3.3-70b-versatile",
+                "api_key": "bad",
+            },
         )
         response = client.post("/settings/verify")
     assert response.status_code == 200
@@ -203,7 +209,11 @@ def test_verify_error_never_contains_the_key(repositories, app_secret, settings_
     with application.test_client() as client:
         client.put(
             "/settings",
-            json={"provider": "groq", "model": "llama-3.3-70b-versatile", "api_key": secret},
+            json={
+                "provider": "groq",
+                "model": "llama-3.3-70b-versatile",
+                "api_key": secret,
+            },
         )
         body = client.post("/settings/verify").get_json()
     assert secret not in body["error"]
@@ -229,7 +239,9 @@ def _seed_legacy_row(repositories, secret):
     return plaintext
 
 
-def test_get_settings_old_row_returns_resave_400(repositories, app_secret, settings_obj):
+def test_get_settings_old_row_returns_resave_400(
+    repositories, app_secret, settings_obj
+):
     """GET /settings on an old row returns 400 with a re-save message."""
     application = make_app(repositories, settings_obj)
     plaintext = _seed_legacy_row(repositories, app_secret)
@@ -271,11 +283,19 @@ def test_put_is_idempotent_and_global(repositories, app_secret, settings_obj):
     with application.test_client() as client:
         client.put(
             "/settings",
-            json={"provider": "groq", "model": "openai/gpt-oss-120b", "api_key": "sk-first"},
+            json={
+                "provider": "groq",
+                "model": "openai/gpt-oss-120b",
+                "api_key": "sk-first",
+            },
         )
         client.put(
             "/settings",
-            json={"provider": "google", "model": "gemini-2.0-flash", "api_key": "sk-second"},
+            json={
+                "provider": "google",
+                "model": "gemini-2.0-flash",
+                "api_key": "sk-second",
+            },
         )
         body = client.get("/settings").get_json()
         assert body["provider"] == "google"

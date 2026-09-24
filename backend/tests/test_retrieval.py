@@ -76,7 +76,9 @@ class TestDocumentParser:
         """The ingestor's chunking matches a chunker built with the same values."""
         text = " ".join(f"word{i}" for i in range(3000))
 
-        ingestor = DocumentIngestor(use_docling="auto", chunk_size=512, chunk_overlap=50)
+        ingestor = DocumentIngestor(
+            use_docling="auto", chunk_size=512, chunk_overlap=50
+        )
 
         assert ingestor.split_text(text) == TokenChunker(512, 50).split_text(text)
 
@@ -244,9 +246,7 @@ class TestChunkMetadata:
             Chunk("world", page_no=7, chunk_index=1, content_hash="world-hash"),
         ]
 
-        vectors = build_vectors_from_chunks(
-            [[0.3, 0.4]], chunks, "paper.pdf", offset=1
-        )
+        vectors = build_vectors_from_chunks([[0.3, 0.4]], chunks, "paper.pdf", offset=1)
 
         assert len(vectors) == 1
         vector = vectors[0]

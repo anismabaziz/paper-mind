@@ -143,7 +143,9 @@ class TestRerankerGate:
         dup_service = make_service(
             dup_matches, make_reranker(enabled=True, model=DupModel())
         )
-        before = dup_service.query_vectors([0.1] * 8, "doc.pdf", query_text="q", rerank=False)
+        before = dup_service.query_vectors(
+            [0.1] * 8, "doc.pdf", query_text="q", rerank=False
+        )
         assert len(before) == 2  # deduped legacy still 2
         deduped = dup_service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=True

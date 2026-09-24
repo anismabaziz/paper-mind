@@ -88,9 +88,7 @@ def build_vectors_from_chunks(
             "content_hash": chunk.content_hash,
         }
         sparse = (
-            sparse_batch[j]
-            if j < len(sparse_batch)
-            else {"indices": [], "values": []}
+            sparse_batch[j] if j < len(sparse_batch) else {"indices": [], "values": []}
         )
         vectors.append(
             {
@@ -205,7 +203,9 @@ class VectorService:
             except TypeError as exc:
                 # Explicit warning instead of silent fallback – hybrid is
                 # degraded, helps surface mis-wired fakes in tests.
-                print(f"VectorService hybrid query degraded to dense (TypeError): {exc}")
+                print(
+                    f"VectorService hybrid query degraded to dense (TypeError): {exc}"
+                )
                 search_results = self._store.query(
                     vector=embedding,
                     top_k=top_k,

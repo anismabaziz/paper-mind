@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  push:
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 permissions:
   contents: read
@@ -32,9 +34,15 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # build runs `tsc -b` first, covering the type-check
+      - name: Test
+        run: npm test -- --run
+
+      # build runs `tsc -b` first, covering the type-check; it fails fast
+      # when VITE_API_URL is missing or not an http(s) URL (see vite.config.ts)
       - name: Type-check and build
         run: npm run build
+        env:
+          VITE_API_URL: http://127.0.0.1:3000
 
   backend:
     name: Backend (pytest)
@@ -55,5 +63,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Type-check
+        run: uv run mypy
+
       - name: Test
-        run: uv run pytest -v
+        run: uv run pytest -q

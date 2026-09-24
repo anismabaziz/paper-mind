@@ -114,9 +114,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
         uploaded_file = request.files["file"]
         raw_original = (uploaded_file.filename or "").strip()
         original_filename = raw_original or None
-        file_ext = (
-            os.path.splitext(raw_original)[1].lower() if raw_original else ""
-        )
+        file_ext = os.path.splitext(raw_original)[1].lower() if raw_original else ""
         if file_ext not in allowed_extensions:
             log.warning("upload rejected: invalid extension %r", file_ext)
             return jsonify({"error": "Only PDF files are allowed"}), 400

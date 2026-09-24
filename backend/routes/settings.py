@@ -89,9 +89,7 @@ def register_settings_routes(app: Flask, services: "Services") -> None:
             log.exception("encrypt_api_key failed")
             return jsonify({"error": "Internal server error"}), 500
         try:
-            app_settings_repository.upsert_app_settings(
-                provider, model, encrypted
-            )
+            app_settings_repository.upsert_app_settings(provider, model, encrypted)
         except Exception:
             log.exception("upsert_app_settings failed")
             return jsonify({"error": "Internal server error"}), 500
@@ -125,8 +123,6 @@ def register_settings_routes(app: Flask, services: "Services") -> None:
         )
         ok, error = api_key_verifier(credentials)
         if error:
-            error = (
-                scrub_api_key_from_text(error, api_key) or "Verification failed"
-            )
+            error = scrub_api_key_from_text(error, api_key) or "Verification failed"
             _clear_llm_caches()
         return jsonify({"ok": ok, "error": error}), 200

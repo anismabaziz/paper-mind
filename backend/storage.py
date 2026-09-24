@@ -77,4 +77,3 @@ def get_storage() -> LocalStorage:
             if _storage is None:
                 _storage = LocalStorage(get_settings().storage.storage_dir)
     return _storage
-

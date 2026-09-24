@@ -4,9 +4,8 @@ Docling layout-aware parser (opt-in).
 Keeps tables as Markdown tables and preserves two-column reading order without
 requiring a paid OCR API. Heavy deps (``docling`` + ``granite-docling-258M``
 ~1.1GB) are optional — install with ``pip install ".[docling]"`` or
-``uv sync --extra docling``. The model weights are cached via ``HF_HOME``
-(Docker volume ``hf_cache`` in compose.yaml) so the download only happens
-once.
+``uv sync --extra docling``. The model weights are cached locally via ``HF_HOME``
+(``~/.cache/huggingface``) so the download only happens once.
 
 The parser is reached through :func:`services.parsing.document_parser.resolve_parser`
 (same interface as :class:`services.parsing.pdf_service.PDFParser`) so swapping parsers
@@ -106,8 +105,8 @@ def _try_import_docling() -> None:
         raise ImportError(
             "Docling is not installed. Install the optional extra with "
             '`uv sync --extra docling` or `pip install ".[docling]"` '
-            "(pulls `docling` + `granite-docling-258M` ~1.1GB, cached to "
-            "HF_HOME / Docker volume `hf_cache`). "
+            "(pulls `docling` + `granite-docling-258M` ~1.1GB, cached locally via "
+            "HF_HOME / `~/.cache/huggingface`). "
             "Tests mock this parser so `uv run pytest` never downloads."
         )
 

@@ -41,6 +41,7 @@ class FakeVectorService:
 @pytest.fixture
 def fake_repositories():
     """Provide minimal aggregate repositories for open-endpoint checks."""
+
     class _Repo:
         def list_files(self):
             return []

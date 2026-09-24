@@ -526,9 +526,7 @@ def test_process_embed_failure_compensates_with_no_orphans(
     )
 
 
-def test_process_upsert_failure_compensates_with_no_orphans(
-    client, fake_vectors
-):
+def test_process_upsert_failure_compensates_with_no_orphans(client, fake_vectors):
     """An upsert failure removes this doc's vectors and leaves it not processed."""
     filename = upload(client).get_json()["file"]["name"]
 
@@ -549,9 +547,7 @@ def test_process_upsert_failure_compensates_with_no_orphans(
     )
 
 
-def test_process_retry_cleans_stale_vectors_before_rewrite(
-    client, fake_vectors
-):
+def test_process_retry_cleans_stale_vectors_before_rewrite(client, fake_vectors):
     """A retry after failure cleans stale vectors first, so it stays idempotent."""
     filename = upload(client).get_json()["file"]["name"]
 
@@ -582,9 +578,7 @@ def test_process_retry_cleans_stale_vectors_before_rewrite(
     )
 
 
-def test_chat_retrieval_failure_leaves_no_stranded_message(
-    client, fake_vectors
-):
+def test_chat_retrieval_failure_leaves_no_stranded_message(client, fake_vectors):
     """A retrieval failure persists no user message, so no stranded question."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
@@ -601,9 +595,7 @@ def test_chat_retrieval_failure_leaves_no_stranded_message(
     assert history == []
 
 
-def test_chat_embed_failure_leaves_no_stranded_message(
-    client, fake_embeddings
-):
+def test_chat_embed_failure_leaves_no_stranded_message(client, fake_embeddings):
     """An embed failure on the query path also leaves no stranded question."""
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
@@ -620,9 +612,7 @@ def test_chat_embed_failure_leaves_no_stranded_message(
     assert history == []
 
 
-def test_chat_query_too_long_rejected_before_embedding(
-    client, fake_embeddings
-):
+def test_chat_query_too_long_rejected_before_embedding(client, fake_embeddings):
     """An oversized query is a 400 and never reaches the embedding model."""
     from routes.chat import MAX_QUERY_CHARS
 

@@ -44,9 +44,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         query = data.get("query")
         filename = data.get("filename")
         if not query or not filename:
-            return jsonify(
-                {"error": "Query and Filename are required"}
-            ), 400
+            return jsonify({"error": "Query and Filename are required"}), 400
 
         guard = traversal_check(services.storage, filename)
         if guard is not None:
@@ -118,9 +116,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
             log.exception("/response retrieval failed for %s", filename)
             return jsonify({"error": "Internal server error"}), 500
         try:
-            conversations_repository.add_message(
-                conversation_id, "user", query
-            )
+            conversations_repository.add_message(conversation_id, "user", query)
         except Exception:
             log.exception("/response persist user message failed for %s", filename)
             return jsonify({"error": "Internal server error"}), 500
@@ -151,8 +147,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 return
 
             answer = (
-                "".join(fragments).strip()
-                or "I don't know based on the given context."
+                "".join(fragments).strip() or "I don't know based on the given context."
             )
             try:
                 conversations_repository.add_message(

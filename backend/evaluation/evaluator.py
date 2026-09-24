@@ -115,9 +115,7 @@ def index_document(
     raw = read_document(filename, docs_dir)
     chunks = _ingestor().get_chunk_objects(filename, raw)
     embeddings = embed_fn([chunk.text for chunk in chunks])
-    vectors = build_vectors_from_chunks(
-        embeddings, chunks, pdf_name or filename
-    )
+    vectors = build_vectors_from_chunks(embeddings, chunks, pdf_name or filename)
     index.upsert(vectors)
     return len(chunks)
 

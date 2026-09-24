@@ -18,7 +18,9 @@ from repositories import build_repositories
 from services.titles import derive_title, is_hex_like_title
 
 
-def _make_pdf_with_title(text: str | None = None, metadata_title: str | None = None) -> bytes:
+def _make_pdf_with_title(
+    text: str | None = None, metadata_title: str | None = None
+) -> bytes:
     import pymupdf
 
     doc = pymupdf.open()
@@ -60,7 +62,10 @@ class FakeStorage:
         self.blobs.pop(filename, None)
 
     def list(self):
-        return [{"name": name, "size": len(data)} for name, data in sorted(self.blobs.items())]
+        return [
+            {"name": name, "size": len(data)}
+            for name, data in sorted(self.blobs.items())
+        ]
 
     def url(self, filename):
         return f"/storage/{filename}"
@@ -120,7 +125,9 @@ def app_and_client(repositories, settings_obj):
 
 
 def test_derive_title_priority_metadata_over_filename():
-    pdf = _make_pdf_with_title(text="First Heading", metadata_title="  Metadata Title  ")
+    pdf = _make_pdf_with_title(
+        text="First Heading", metadata_title="  Metadata Title  "
+    )
     assert derive_title(pdf, "ignored.pdf") == "Metadata Title"
     assert derive_title(pdf, None) == "Metadata Title"
 
@@ -201,7 +208,9 @@ def test_lazy_backfill_null_title(app_and_client):
     assert entry["title"] == "Backfill Heading"
 
     with repositories.files._session_factory() as sess:
-        rec = sess.scalars(select(FileRecord).where(FileRecord.filename == hex_name)).first()
+        rec = sess.scalars(
+            select(FileRecord).where(FileRecord.filename == hex_name)
+        ).first()
         assert rec.title == "Backfill Heading"
 
 
@@ -220,7 +229,9 @@ def test_lazy_backfill_hex_like_title(app_and_client):
     assert entry["title"] == "Derived from Meta"
 
     with repositories.files._session_factory() as sess:
-        rec = sess.scalars(select(FileRecord).where(FileRecord.filename == hex_name)).first()
+        rec = sess.scalars(
+            select(FileRecord).where(FileRecord.filename == hex_name)
+        ).first()
         assert rec.title == "Derived from Meta"
 
 
@@ -258,7 +269,9 @@ def test_vectors_still_keyed_on_filename_not_title():
     app = create_app(settings_obj, services=svc)
     cl = app.test_client()
     data = {"file": (io.BytesIO(pdf), "titled.pdf")}
-    stored = cl.post("/upload", data=data, content_type="multipart/form-data").get_json()["file"]
+    stored = cl.post(
+        "/upload", data=data, content_type="multipart/form-data"
+    ).get_json()["file"]
     cl.post("/process-file", json={"filename": stored["name"]})
     assert vectors.last_filename == stored["name"]
     assert vectors.last_filename != stored["title"]
