@@ -51,8 +51,8 @@ Required env vars: `DATABASE_URL` (e.g. `postgresql+psycopg://papermind:papermin
 and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional: `APP_SECRET`
 — the Fernet root that encrypts the stored provider key. Set it in any
 persistent deployment; changing it invalidates previously stored keys. With no
-`APP_SECRET`, a per-process fallback is used and a warning is printed. After
-boot, open Settings in the app and paste your provider key — no login step.
+`APP_SECRET`, a warning is printed and stored keys cannot be encrypted or
+decrypted. After boot, open Settings in the app and paste your provider key — no login step.
 
 ## Configuring a chat provider
 
@@ -70,7 +70,7 @@ except the chat LLM, which is configured once in Settings:
 | Concern | Detail |
 |---|---|
 | Vector store | Qdrant on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`), collection `pdf-index` |
-| Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached to `hf_cache` volume — no API key |
+| Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached locally via `HF_HOME` (`~/.cache/huggingface`) — no API key |
 | Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
 | Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata |
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |

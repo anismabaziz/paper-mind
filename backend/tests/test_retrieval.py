@@ -10,6 +10,7 @@ in-memory data only.
 import pytest
 
 from services.parsing.document_parser import (
+    Chunk,
     DocumentIngestor,
     TokenChunker,
     UnknownDocumentFormat,
@@ -18,6 +19,7 @@ from services.parsing.document_parser import (
 from services.retrieval.vector_service import (
     MAX_RETRIEVED_SOURCES,
     VectorService,
+    build_vectors_from_chunks,
 )
 
 
@@ -74,7 +76,9 @@ class TestDocumentParser:
         """The ingestor's chunking matches a chunker built with the same values."""
         text = " ".join(f"word{i}" for i in range(3000))
 
-        ingestor = DocumentIngestor(use_docling="auto", chunk_size=512, chunk_overlap=50)
+        ingestor = DocumentIngestor(
+            use_docling="auto", chunk_size=512, chunk_overlap=50
+        )
 
         assert ingestor.split_text(text) == TokenChunker(512, 50).split_text(text)
 
@@ -234,6 +238,28 @@ class TestRetrievalShaping:
 
 class TestChunkMetadata:
     """TestChunkMetadata."""
+
+    def test_shared_builder_preserves_sparse_and_chunk_metadata(self):
+        """A batch offset does not change sparse text or source metadata."""
+        chunks = [
+            Chunk("hello", page_no=2, chunk_index=0, content_hash="hello-hash"),
+            Chunk("world", page_no=7, chunk_index=1, content_hash="world-hash"),
+        ]
+
+        vectors = build_vectors_from_chunks([[0.3, 0.4]], chunks, "paper.pdf", offset=1)
+
+        assert len(vectors) == 1
+        vector = vectors[0]
+        assert vector["id"]
+        assert vector["values"] == [0.3, 0.4]
+        assert vector["sparse_vector"] == {"indices": [23351], "values": [1.0]}
+        assert vector["metadata"] == {
+            "content": "world",
+            "pdf_name": "paper.pdf",
+            "chunk_index": 1,
+            "page_no": 7,
+            "content_hash": "world-hash",
+        }
 
     def test_upsert_includes_page_no_and_content_hash(self):
         """Do test upsert includes page no and content hash."""

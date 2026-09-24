@@ -5,10 +5,13 @@ Replaces the legacy multi-user auth tests. The app runs as a single-instance
 open-source workspace; no token is required and no /auth/* routes exist.
 """
 
-import pytest
 from dataclasses import replace
+from types import SimpleNamespace
 
-from app import Services, create_app
+import pytest
+
+from app import create_app
+from composition import Services
 
 
 class FakeStorage:
@@ -36,8 +39,9 @@ class FakeVectorService:
 
 
 @pytest.fixture
-def fake_repo():
-    """Provide a minimal fake repository for open-endpoint checks."""
+def fake_repositories():
+    """Provide minimal aggregate repositories for open-endpoint checks."""
+
     class _Repo:
         def list_files(self):
             return []
@@ -48,15 +52,20 @@ def fake_repo():
         def get_file(self, filename):
             return None
 
-    return _Repo()
+    repository = _Repo()
+    return SimpleNamespace(
+        files=repository,
+        app_settings=repository,
+        conversations=repository,
+    )
 
 
 @pytest.fixture
-def client(fake_repo, settings_obj):
+def client(fake_repositories, settings_obj):
     """Provide a test client wired to fakes."""
     services = replace(
         Services.from_settings(settings_obj),
-        repository=fake_repo,
+        repositories=fake_repositories,
         storage=FakeStorage(),
         vector_service=FakeVectorService(),
     )
@@ -90,13 +99,11 @@ def test_auth_routes_are_gone(client):
     assert client.post("/auth/login", json={}).status_code == 404
 
 
-def test_jwt_code_is_gone():
-    """JWT issuance/verification helpers no longer exist."""
-    import services.accounts.auth_service as auth
+def test_legacy_auth_module_is_removed():
+    """The retired authentication module is no longer importable."""
+    import importlib.util
 
-    assert not hasattr(auth, "issue_token")
-    assert not hasattr(auth, "verify_token")
-    assert not hasattr(auth, "require_auth")
+    assert importlib.util.find_spec("services.accounts.auth_service") is None
 
 
 def test_no_authorization_header_required_for_storage(client):

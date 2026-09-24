@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import {
   verifySettings,
 } from "@/services/settings";
 import { cn } from "@/lib/utils";
+import { useEscapeKey } from "@/hooks/useEscape";
 import useSettingsUi from "@/store/settings-ui";
 
 type Feedback = { kind: "success" | "error"; text: string } | null;
@@ -28,8 +29,21 @@ export default function SettingsDialog() {
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   const settings = settingsQuery.data;
+
+  // Move focus into the dialog on open, restore it on close.
+  useEffect(() => {
+    if (!isOpen) return;
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    return () => {
+      restoreFocusRef.current?.focus();
+    };
+  }, [isOpen]);
+  useEscapeKey(isOpen, close);
 
   useEffect(() => {
     if (settings) {
@@ -90,8 +104,14 @@ export default function SettingsDialog() {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md border border-rule bg-paper shadow-sheet p-6 relative">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+        className="w-full max-w-md border border-rule bg-paper shadow-sheet p-6 relative"
+      >
         <button
+          ref={closeRef}
           onClick={close}
           aria-label="Close settings"
           className="absolute right-4 top-4 text-ink-faint hover:text-ink cursor-pointer"
@@ -100,7 +120,7 @@ export default function SettingsDialog() {
         </button>
         <div className="flex items-center gap-2 mb-5">
           <Settings size={16} className="text-ink-soft" />
-          <h2 className="font-mono text-xs font-semibold uppercase tracking-widest text-ink">
+          <h2 id="settings-dialog-title" className="font-mono text-xs font-semibold uppercase tracking-widest text-ink">
             Settings
           </h2>
         </div>

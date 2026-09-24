@@ -9,12 +9,15 @@ Priority:
 """
 
 import io
+import logging
 import os
 import re
+from typing import Protocol
 
 MAX_TITLE_LEN = 200
 
 _HEX_TITLE_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+log = logging.getLogger(__name__)
 
 
 def is_hex_like_title(title: str | None) -> bool:
@@ -77,9 +80,7 @@ def _extract_first_heading(pdf_bytes: bytes) -> str | None:
         return None
 
 
-def derive_title(
-    pdf_bytes_or_none: bytes | None, original_filename: str | None
-) -> str:
+def derive_title(pdf_bytes_or_none: bytes | None, original_filename: str | None) -> str:
     """Derive a human title from PDF bytes and the original filename."""
     pdf_bytes = _normalize_pdf_bytes(pdf_bytes_or_none)
 
@@ -104,3 +105,52 @@ def derive_title(
             return heading
 
     return "Untitled"
+
+
+class TitleStorage(Protocol):
+    """Read persisted bytes for a stored document."""
+
+    def open(self, filename: str):
+        """Return the stored document bytes."""
+        ...
+
+
+class TitleRepository(Protocol):
+    """Persist a replacement title for a stored document."""
+
+    def set_file_title(self, filename: str, title: str) -> None:
+        """Replace the document title."""
+        ...
+
+
+def _needs_title_backfill(title: str | None) -> bool:
+    return title is None or is_hex_like_title(title)
+
+
+def backfill_title(
+    storage: TitleStorage,
+    repository: TitleRepository,
+    filename: str,
+    title: str | None,
+    original_filename: str | None,
+) -> str | None:
+    """Derive and persist a title for legacy stored document metadata."""
+    if not _needs_title_backfill(title):
+        return title
+    try:
+        raw = storage.open(filename)
+    except Exception as exc:
+        log.warning("backfill read failed for %s: %s", filename, exc)
+        return title
+    try:
+        derived = derive_title(raw, original_filename)
+    except Exception as exc:
+        log.warning("backfill derive failed for %s: %s", filename, exc)
+        return title
+    if derived and derived != title:
+        try:
+            repository.set_file_title(filename, derived)
+        except Exception as exc:
+            log.warning("backfill persist failed for %s: %s", filename, exc)
+        return derived
+    return title

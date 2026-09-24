@@ -5,6 +5,7 @@ The app only knows the interface below; swapping local disk for a bucket
 service means implementing the same five methods.
 """
 
+import threading
 from pathlib import Path
 
 from settings import get_settings
@@ -49,19 +50,30 @@ class LocalStorage:
 
     def _path(self, filename: str) -> Path:
         # Reject traversal: the name must resolve inside the storage root.
+        if not filename or filename.strip() == "":
+            raise ValueError(f"Invalid storage filename: {filename!r}")
+        root = self._root.resolve()
         path = (self._root / filename).resolve()
-        if path.parent != self._root.resolve():
+        # Must be inside root (not root itself and not outside)
+        try:
+            path.relative_to(root)
+        except ValueError:
+            raise ValueError(f"Invalid storage filename: {filename!r}") from None
+        # Disallow absolute or parent traversal that escapes even via symlink
+        if path == root:
             raise ValueError(f"Invalid storage filename: {filename!r}")
         return path
 
 
 _storage = None
+_storage_lock = threading.RLock()
 
 
 def get_storage() -> LocalStorage:
     """Build the process-wide store once, from Settings."""
     global _storage
     if _storage is None:
-        _storage = LocalStorage(get_settings().storage.storage_dir)
+        with _storage_lock:
+            if _storage is None:
+                _storage = LocalStorage(get_settings().storage.storage_dir)
     return _storage
-

@@ -23,18 +23,22 @@ APP_SETTINGS_ID = "app"
 def _seed_app_settings(bind) -> None:
     """Copy demo@papermind.local user_settings into app_settings if present."""
     try:
-        demo_row = bind.execute(
-            sa.text(
-                """
+        demo_row = (
+            bind.execute(
+                sa.text(
+                    """
                 SELECT us.provider, us.model, us.encrypted_api_key
                 FROM user_settings us
                 JOIN users u ON u.id = us.user_id
                 WHERE u.email = :email
                 LIMIT 1
                 """
-            ),
-            {"email": "demo@papermind.local"},
-        ).mappings().first()
+                ),
+                {"email": "demo@papermind.local"},
+            )
+            .mappings()
+            .first()
+        )
 
         if not demo_row:
             return

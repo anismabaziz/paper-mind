@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Clock3, Folder, Plus, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings } from "lucide-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getFiles, uploadFile, deleteFile, processFile } from "@/services/files";
+import { useQueryClient } from "@tanstack/react-query";
+import { processFile } from "@/services/files";
+import { useFiles, useUploadFile, useDeleteFile, useProcessFile } from "@/hooks/useFiles";
+import { formatFileSize } from "@/lib/format";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
+import useMobileUi from "@/store/mobile-ui";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -21,14 +24,8 @@ export function LibraryRail() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openSettings = useSettingsUi((s) => s.open);
-  const filesQuery = useQuery({
-    queryKey: ["files"],
-    queryFn: getFiles,
-    refetchInterval: (q) => {
-      const hasUnprocessed = q.state.data?.files.some((f) => !f.is_processed);
-      return hasUnprocessed ? 3000 : false;
-    },
-  });
+  const setLibraryOpen = useMobileUi((s) => s.setLibraryOpen);
+  const filesQuery = useFiles();
 
   const files = filesQuery.data?.files ?? [];
 
@@ -50,18 +47,16 @@ export function LibraryRail() {
     return files.filter((f) => displayTitle(f).toLowerCase().includes(v));
   }, [files, query]);
 
-  const uploadMutation = useMutation({
-    mutationFn: uploadFile,
+  const uploadMutation = useUploadFile({
     onSuccess: async (data) => {
-      queryClient.invalidateQueries({ queryKey: ["files"] });
       try {
         await processFile(data.file);
       } catch (err) {
         console.error("Indexing failed:", err);
         alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
+        // ["files"] prefix covers the per-document status/messages/meta keys.
         queryClient.invalidateQueries({ queryKey: ["files"] });
-        queryClient.invalidateQueries({ queryKey: [data.file.name, "is-processed"] });
       }
     },
     onError: (err) => {
@@ -69,14 +64,9 @@ export function LibraryRail() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteFile,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
-  });
+  const deleteMutation = useDeleteFile();
 
-  const processMutation = useMutation({
-    mutationFn: processFile,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["files"] }),
+  const processMutation = useProcessFile({
     onError: (err) => alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`),
   });
 
@@ -84,12 +74,6 @@ export function LibraryRail() {
     if (e.target.files?.[0]) uploadMutation.mutate(e.target.files[0]);
     if (e.target) e.target.value = "";
   }
-
-  const formatSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1048576) return (bytes / 1024).toFixed(0) + " KB";
-    return (bytes / 1048576).toFixed(1) + " MB";
-  };
 
   return (
     <aside className="flex w-64 max-w-full min-w-0 shrink-0 flex-col overflow-x-hidden border-r border-rule bg-sidebar">
@@ -202,7 +186,12 @@ export function LibraryRail() {
                   >
                     <button
                       type="button"
-                      onClick={() => !isProcessing && setFile(item)}
+                      onClick={() => {
+                        if (!isProcessing) {
+                          setFile(item);
+                          setLibraryOpen(false);
+                        }
+                      }}
                       className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isProcessing && "cursor-default")}
                     >
                       <span className="flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden font-mono text-[0.58rem] text-ink-faint">
@@ -214,7 +203,7 @@ export function LibraryRail() {
                               {isRetrying ? "Re-indexing" : "Indexing"}
                             </span>
                           ) : (
-                            <span>{formatSize(item.metadata.size)}</span>
+                            <span>{formatFileSize(item.metadata.size)}</span>
                           )}
                         </span>
                       </span>
@@ -274,23 +263,16 @@ export function LibraryRail() {
         )}
       </nav>
 
-      <footer className="border-t border-rule px-5 py-4">
-        <div className="flex items-center gap-3">
-          <span className="grid size-8 place-items-center rounded-full bg-canvas font-mono text-[0.6rem] font-bold">AT</span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium">Aris Thorne</p>
-            <p className="text-[0.62rem] text-ink-faint">Portfolio prototype</p>
-          </div>
-          <button
-            type="button"
-            onClick={openSettings}
-            aria-label="Open settings"
-            className="grid size-7 place-items-center border border-rule bg-paper text-ink-faint hover:border-ink hover:text-ink"
-            title="Settings"
-          >
-            <Settings className="size-3.5" />
-          </button>
-        </div>
+      <footer className="flex justify-end border-t border-rule px-5 py-3">
+        <button
+          type="button"
+          onClick={openSettings}
+          aria-label="Open settings"
+          className="grid size-7 place-items-center border border-rule bg-paper text-ink-faint hover:border-ink hover:text-ink"
+          title="Settings"
+        >
+          <Settings className="size-3.5" />
+        </button>
       </footer>
     </aside>
   );

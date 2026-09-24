@@ -11,7 +11,12 @@ from typing import Iterator
 from groq import Groq
 
 from services.llm.base import LLMProvider
-from services.prompts import SYSTEM_INSTRUCTION
+from services.prompts import SYSTEM_INSTRUCTION, build_user_prompt
+
+
+def clear_cache() -> None:
+    """Evict all cached Groq clients (called when keys rotate or tests reset)."""
+    _client.cache_clear()
 
 
 @lru_cache(maxsize=32)
@@ -38,7 +43,7 @@ class GroqProvider(LLMProvider):
                 },
                 {
                     "role": "user",
-                    "content": f"Context: {context}\n\nQuery: {query}",
+                    "content": build_user_prompt(context, query),
                 },
             ],
             model=self.model,
@@ -57,7 +62,7 @@ class GroqProvider(LLMProvider):
                 },
                 {
                     "role": "user",
-                    "content": f"Context: {context}\n\nQuery: {query}",
+                    "content": build_user_prompt(context, query),
                 },
             ],
             model=self.model,
@@ -70,9 +75,17 @@ class GroqProvider(LLMProvider):
                 yield delta
 
     def verify(self) -> None:
-        """Do verify."""
-        self._sdk_client().chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
+        """Verify the key with the same framing chat uses, under a timeout."""
+        client = self._sdk_client()
+
+        def _ping():
+            return client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_INSTRUCTION},
+                    {"role": "user", "content": build_user_prompt("", "ping")},
+                ],
+                max_tokens=1,
+            )
+
+        self._verify_with_timeout(_ping)

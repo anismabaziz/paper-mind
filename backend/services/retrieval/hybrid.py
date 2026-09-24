@@ -66,7 +66,7 @@ STOPWORDS = {
     "with",
 }
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_TOKEN_RE = re.compile(r"[a-z0-9%°]+")
 # Vocabulary size for hashing – large enough to keep collisions rare
 VOCAB_SIZE = 30_000
 
@@ -177,7 +177,12 @@ def rrf_fusion(
 
     for lst in ranked_lists:
         for rank, doc in enumerate(lst, start=1):
-            doc_id = doc.get("id") or doc.get("metadata", {}).get("content", "")[:64]
+            meta = (
+                doc.get("metadata", {}) if isinstance(doc.get("metadata"), dict) else {}
+            )
+            doc_id = (
+                doc.get("id") or meta.get("content_hash") or meta.get("content") or ""
+            )
             # Normalise id to string for map key
             doc_id = str(doc_id)
             inc = 1.0 / (k + rank)
