@@ -350,6 +350,17 @@ def test_process_embeds_and_marks_processed(client, app, fake_vectors, fake_embe
     )
 
 
+def test_chat_is_blocked_while_a_ready_document_is_reindexed(client, app):
+    """A reindex never exposes an old or partial generation to chat."""
+    filename = index_document(client, app)
+    assert client.post(f"/ingestion-jobs/{filename}/retry").status_code == 201
+
+    response = client.post("/response", json={"query": "what?", "filename": filename})
+
+    assert response.status_code == 409
+    assert response.get_json()["category"] == "document_indexing"
+
+
 def test_ask_streams_tokens_and_persists_sources(client, app, fake_vectors):
     """Do test ask streams tokens and persists sources."""
     filename = index_document(client, app)
@@ -547,7 +558,9 @@ def test_provider_failure_still_leaves_a_visible_reply(
     assert error_data["error"] in history[-1]["text"]
 
 
-def test_sources_panel_order_matches_llm_context_order(client, app, fake_vectors, fake_chat):
+def test_sources_panel_order_matches_llm_context_order(
+    client, app, fake_vectors, fake_chat
+):
     """Do test sources panel order matches llm context order."""
     filename = index_document(client, app)
 
@@ -632,9 +645,7 @@ def test_process_embed_failure_compensates_with_no_orphans(
     )
 
 
-def test_process_upsert_failure_compensates_with_no_orphans(
-    client, app, fake_vectors
-):
+def test_process_upsert_failure_compensates_with_no_orphans(client, app, fake_vectors):
     """An upsert failure removes this doc's vectors and leaves it not processed."""
     filename = upload(client).get_json()["file"]["name"]
 
@@ -973,11 +984,21 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     } <= tables
     assert {"users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "f2b4c6d8a013",
+        "a7b8c9d0e1f2",
     )
-    assert {"title", "original_filename", "is_processed", "last_opened_at"} <= {
-        row[1] for row in connection.execute("pragma table_info(files)")
-    }
+    assert {
+        "title",
+        "original_filename",
+        "is_processed",
+        "last_opened_at",
+        "index_generation",
+    } <= {row[1] for row in connection.execute("pragma table_info(files)")}
+    assert {
+        "cancel_requested_at",
+        "cancelled_at",
+        "limits_json",
+        "usage_json",
+    } <= {row[1] for row in connection.execute("pragma table_info(ingestion_jobs)")}
     assert {"deletion_state", "deletion_error", "deletion_attempts"} <= {
         row[1] for row in connection.execute("pragma table_info(files)")
     }

@@ -39,8 +39,12 @@ def upgrade() -> None:
         sa.Column("error_category", sa.String(64), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("worker_id", sa.String(64), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("heartbeat_at", sa.DateTime(timezone=True), nullable=True),

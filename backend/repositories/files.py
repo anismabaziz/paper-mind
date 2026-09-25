@@ -144,6 +144,7 @@ class FileRepository(BaseRepository):
             title=record.title,
             original_filename=record.original_filename,
             is_processed=record.is_processed,
+            index_generation=getattr(record, "index_generation", None),
             last_opened_at=opened.isoformat() if opened else None,
             deletion_state=getattr(record, "deletion_state", "active") or "active",
             deletion_error=getattr(record, "deletion_error", None),

@@ -1,15 +1,17 @@
 """Persistence for durable ingestion jobs."""
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
-from db import IngestionJob
+from db import FileRecord, IngestionJob
 from repositories.base import BaseRepository, to_record_dict
 
-ACTIVE_STATES = ("queued", "running")
+ACTIVE_STATES = ("queued", "running", "cancelling")
+CANCELLABLE_STATES = ("queued", "running")
 
 
 class JobConflictError(Exception):
@@ -30,8 +32,35 @@ def _age_s(timestamp: datetime | None) -> float | None:
     return (_utcnow() - timestamp).total_seconds()
 
 
+def _json_object(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _mark_cancel_requested(record: IngestionJob, now: datetime) -> None:
+    if record.state == "queued":
+        record.state = "cancelled"
+        record.stage = "cancelled"
+        record.cancel_requested_at = now
+        record.cancelled_at = now
+        record.finished_at = now
+        record.heartbeat_at = now
+        record.worker_id = None
+    elif record.state == "running":
+        record.state = "cancelling"
+        record.stage = "cancelling"
+        record.cancel_requested_at = now
+
+
 def ingestion_job_to_dict(record: IngestionJob) -> dict[str, Any]:
     """Convert a persisted job to a plain dictionary."""
+    limits = _json_object(record.limits_json)
+    usage = _json_object(record.usage_json)
     return to_record_dict(
         record,
         file_id=record.file_id,
@@ -47,9 +76,14 @@ def ingestion_job_to_dict(record: IngestionJob) -> dict[str, Any]:
         updated_at=record.updated_at.isoformat() if record.updated_at else None,
         started_at=record.started_at.isoformat() if record.started_at else None,
         finished_at=record.finished_at.isoformat() if record.finished_at else None,
-        heartbeat_at=record.heartbeat_at.isoformat()
-        if record.heartbeat_at
+        heartbeat_at=record.heartbeat_at.isoformat() if record.heartbeat_at else None,
+        cancel_requested_at=record.cancel_requested_at.isoformat()
+        if record.cancel_requested_at
         else None,
+        cancelled_at=record.cancelled_at.isoformat() if record.cancelled_at else None,
+        cancellation_requested=record.cancel_requested_at is not None,
+        limits=limits,
+        usage=usage,
     )
 
 
@@ -80,6 +114,11 @@ class IngestionJobRepository(BaseRepository):
                     record.state = "stale"
                     record.stage = "stale"
                     record.finished_at = _utcnow()
+            cancelling = [record for record in active if record.state == "cancelling"]
+            if cancelling:
+                raise JobConflictError(
+                    "One active ingestion job already processes this document."
+                )
             running = [record for record in active if record.state == "running"]
             if running:
                 raise JobConflictError(
@@ -111,7 +150,9 @@ class IngestionJobRepository(BaseRepository):
             record = session.scalars(
                 select(IngestionJob)
                 .where(IngestionJob.filename == filename)
-                .order_by(IngestionJob.created_at.desc(), IngestionJob.generation.desc())
+                .order_by(
+                    IngestionJob.created_at.desc(), IngestionJob.generation.desc()
+                )
             ).first()
             return ingestion_job_to_dict(record) if record else None
 
@@ -125,27 +166,119 @@ class IngestionJobRepository(BaseRepository):
             ).first()
             return ingestion_job_to_dict(record) if record else None
 
+    def get(self, job_id: str) -> dict[str, Any] | None:
+        """Return one job by its durable identifier."""
+        with self._session_factory() as session:
+            record = session.get(IngestionJob, job_id)
+            return ingestion_job_to_dict(record) if record else None
+
+    def request_cancel(self, file_id: str) -> dict[str, Any] | None:
+        """Request cancellation without reactivating a terminal job."""
+        with self._session_factory() as session, session.begin():
+            record = session.scalars(
+                select(IngestionJob)
+                .where(IngestionJob.file_id == file_id)
+                .where(IngestionJob.state.in_(CANCELLABLE_STATES + ("cancelling",)))
+                .order_by(
+                    IngestionJob.created_at.desc(), IngestionJob.generation.desc()
+                )
+                .with_for_update()
+            ).first()
+            if record is None:
+                record = session.scalars(
+                    select(IngestionJob)
+                    .where(IngestionJob.file_id == file_id)
+                    .order_by(
+                        IngestionJob.created_at.desc(), IngestionJob.generation.desc()
+                    )
+                ).first()
+            if record is None:
+                return None
+            _mark_cancel_requested(record, _utcnow())
+            session.flush()
+            return ingestion_job_to_dict(record)
+
+    def mark_cancelled(
+        self,
+        job_id: str,
+        worker_id: str,
+        usage: dict[str, int | float] | None = None,
+    ) -> dict[str, Any] | None:
+        """Finish a cancellation requested while a worker owned the job."""
+        with self._session_factory() as session, session.begin():
+            record = session.get(IngestionJob, job_id, with_for_update=True)
+            if (
+                record is None
+                or record.worker_id != worker_id
+                or record.state not in ("running", "cancelling")
+            ):
+                return None
+            now = _utcnow()
+            record.state = "cancelled"
+            record.stage = "cancelled"
+            record.cancelled_at = now
+            record.finished_at = now
+            record.heartbeat_at = now
+            record.worker_id = None
+            if usage is not None:
+                current_usage = _json_object(record.usage_json)
+                current_usage.update(usage)
+                record.usage_json = json.dumps(current_usage, sort_keys=True)
+            session.flush()
+            return ingestion_job_to_dict(record)
+
+    def release_cancellation(
+        self, job_id: str, worker_id: str
+    ) -> dict[str, Any] | None:
+        """Release a worker claim when cancellation cleanup needs a retry."""
+        with self._session_factory() as session, session.begin():
+            record = session.get(IngestionJob, job_id, with_for_update=True)
+            if (
+                record is None
+                or record.state != "cancelling"
+                or record.worker_id != worker_id
+            ):
+                return None
+            record.worker_id = None
+            record.heartbeat_at = None
+            session.flush()
+            return ingestion_job_to_dict(record)
+
     def claim_next(
-        self, worker_id: str, stale_timeout_s: int = 120
+        self,
+        worker_id: str,
+        stale_timeout_s: int = 120,
+        limits: dict[str, int | float] | None = None,
     ) -> dict[str, Any] | None:
         """Claim the oldest queued job so one worker owns it."""
         self.recover_stale(stale_timeout_s)
         with self._session_factory() as session, session.begin():
             candidate = session.scalars(
                 select(IngestionJob)
-                .where(IngestionJob.state == "queued")
+                .where(
+                    or_(
+                        IngestionJob.state == "queued",
+                        and_(
+                            IngestionJob.state == "cancelling",
+                            IngestionJob.worker_id.is_(None),
+                        ),
+                    )
+                )
                 .order_by(IngestionJob.created_at.asc())
                 .with_for_update(skip_locked=True)
             ).first()
             if candidate is None:
                 return None
             now = _utcnow()
-            candidate.state = "running"
-            candidate.stage = "parsing"
-            candidate.progress = 5
+            was_cancelling = candidate.state == "cancelling"
+            candidate.state = "cancelling" if was_cancelling else "running"
+            candidate.stage = "cancelling" if was_cancelling else "parsing"
+            candidate.progress = 0 if was_cancelling else 5
             candidate.worker_id = worker_id
             candidate.started_at = now
             candidate.heartbeat_at = now
+            if limits is not None:
+                candidate.limits_json = json.dumps(limits, sort_keys=True)
             session.flush()
             return ingestion_job_to_dict(candidate)
 
@@ -155,10 +288,11 @@ class IngestionJobRepository(BaseRepository):
         worker_id: str,
         stage: str | None = None,
         progress: int | None = None,
+        usage: dict[str, int | float] | None = None,
     ) -> dict[str, Any] | None:
         """Refresh a running job owned by one worker."""
         with self._session_factory() as session, session.begin():
-            record = session.get(IngestionJob, job_id)
+            record = session.get(IngestionJob, job_id, with_for_update=True)
             if (
                 record is None
                 or record.state != "running"
@@ -170,17 +304,31 @@ class IngestionJobRepository(BaseRepository):
                 record.stage = stage
             if progress is not None:
                 record.progress = progress
+            if usage is not None:
+                current_usage = _json_object(record.usage_json)
+                current_usage.update(usage)
+                record.usage_json = json.dumps(current_usage, sort_keys=True)
             session.flush()
             return ingestion_job_to_dict(record)
 
-    def mark_ready(self, job_id: str, worker_id: str) -> dict[str, Any] | None:
+    def mark_ready(
+        self,
+        job_id: str,
+        worker_id: str,
+        index_generation: int | None = None,
+    ) -> dict[str, Any] | None:
         """Finish a job only while its worker still owns the claim."""
         with self._session_factory() as session, session.begin():
-            record = session.get(IngestionJob, job_id)
+            record = session.get(IngestionJob, job_id, with_for_update=True)
             if not self._owned(record, worker_id):
                 return None
             assert record is not None
             now = _utcnow()
+            if index_generation is not None:
+                file_record = session.get(FileRecord, record.file_id)
+                if file_record is not None:
+                    file_record.index_generation = index_generation
+                    file_record.is_processed = True
             record.state = "ready"
             record.stage = "ready"
             record.progress = 100
@@ -192,11 +340,16 @@ class IngestionJobRepository(BaseRepository):
             return ingestion_job_to_dict(record)
 
     def mark_failed(
-        self, job_id: str, worker_id: str, category: str, message: str
+        self,
+        job_id: str,
+        worker_id: str,
+        category: str,
+        message: str,
+        usage: dict[str, int | float] | None = None,
     ) -> dict[str, Any] | None:
         """Fail a job only while its worker still owns the claim."""
         with self._session_factory() as session, session.begin():
-            record = session.get(IngestionJob, job_id)
+            record = session.get(IngestionJob, job_id, with_for_update=True)
             if not self._owned(record, worker_id):
                 return None
             assert record is not None
@@ -205,8 +358,13 @@ class IngestionJobRepository(BaseRepository):
             record.stage = "failed"
             record.error_category = category[:64]
             record.error_message = message[:2000]
+            record.worker_id = None
             record.finished_at = now
             record.heartbeat_at = now
+            if usage is not None:
+                current_usage = _json_object(record.usage_json)
+                current_usage.update(usage)
+                record.usage_json = json.dumps(current_usage, sort_keys=True)
             session.flush()
             return ingestion_job_to_dict(record)
 
@@ -215,7 +373,7 @@ class IngestionJobRepository(BaseRepository):
     ) -> dict[str, Any] | None:
         """Stop a running job whose document entered the deleting state."""
         with self._session_factory() as session, session.begin():
-            record = session.get(IngestionJob, job_id)
+            record = session.get(IngestionJob, job_id, with_for_update=True)
             if not self._owned(record, worker_id):
                 return None
             assert record is not None
@@ -240,20 +398,34 @@ class IngestionJobRepository(BaseRepository):
         )
 
     def recover_stale(self, stale_timeout_s: int = 120) -> list[str]:
-        """Requeue running jobs whose worker stopped heartbeating."""
+        """Recover running or cancelling jobs whose worker stopped heartbeating."""
         recovered: list[str] = []
         with self._session_factory() as session, session.begin():
-            running = session.scalars(
-                select(IngestionJob).where(IngestionJob.state == "running")
+            active = session.scalars(
+                select(IngestionJob).where(
+                    IngestionJob.state.in_(("running", "cancelling"))
+                )
             ).all()
-            for record in running:
+            for record in active:
                 age = _age_s(record.heartbeat_at or record.started_at)
                 if age is not None and age >= stale_timeout_s:
-                    record.state = "queued"
-                    record.stage = "queued"
-                    record.progress = 0
+                    elapsed = _age_s(record.started_at)
+                    if elapsed is not None:
+                        usage = _json_object(record.usage_json)
+                        usage["elapsed_seconds"] = max(
+                            float(usage.get("elapsed_seconds", 0.0)), elapsed
+                        )
+                        record.usage_json = json.dumps(usage, sort_keys=True)
+                    if record.state == "cancelling":
+                        record.stage = "cancelling"
+                        record.progress = 0
+                    else:
+                        record.state = "queued"
+                        record.stage = "queued"
+                        record.progress = 0
+                        record.started_at = None
                     record.worker_id = None
-                    record.started_at = None
+                    record.finished_at = None
                     record.heartbeat_at = None
                     recovered.append(record.id)
             session.flush()
@@ -270,7 +442,7 @@ class IngestionJobRepository(BaseRepository):
             return int(count or 0)
 
     def cancel_active(self, file_id: str) -> int:
-        """Supersede active jobs so deletion is not followed by late indexing."""
+        """Request cancellation before deletion and preserve worker ownership."""
         with self._session_factory() as session, session.begin():
             active = session.scalars(
                 select(IngestionJob)
@@ -279,10 +451,7 @@ class IngestionJobRepository(BaseRepository):
             ).all()
             now = _utcnow()
             for record in active:
-                record.state = "stale"
-                record.stage = "stale"
-                record.worker_id = None
-                record.finished_at = now
+                _mark_cancel_requested(record, now)
             return len(active)
 
     def delete_for_file(self, file_id: str) -> None:
