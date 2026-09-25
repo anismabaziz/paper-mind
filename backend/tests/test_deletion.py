@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from app import create_app
 from composition import Services
-from db import Base, Message, Source
+from db import Base, Source, Turn
 from repositories import build_repositories
 from tests.ingestion_helpers import build_test_worker
 from services.accounts.secrets_service import encrypt_api_key
@@ -329,21 +329,18 @@ def test_conversation_failure_retains_history_for_retry(
 
 
 def test_deletion_removes_citation_sources_without_orphans(client, repositories, app):
-    """Conversation cleanup removes messages and their citation sources."""
-    from db import Source as SourceModel
-
+    """Conversation cleanup removes turns and their citation sources."""
     filename = upload_process_chat(client, app)
     file_record = repositories.files.get_file(filename)
     conversation_id = repositories.conversations.get_conversation_id(file_record["id"])
     with repositories.conversations._session_factory() as session:
-        assert session.query(Message).count() == 2
+        assert session.query(Turn).count() == 1
         assert session.query(Source).count() >= 1
-        assert session.query(SourceModel).count() >= 1
 
     assert client.delete(f"/files/remove?path={filename}").status_code == 200
 
     with repositories.conversations._session_factory() as session:
-        assert session.query(Message).count() == 0
+        assert session.query(Turn).count() == 0
         assert session.query(Source).count() == 0
 
 
