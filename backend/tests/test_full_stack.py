@@ -1,10 +1,14 @@
 """Full-stack tests over HTTP with real infrastructure and deterministic models."""
 
+import json
 import os
 import pathlib
+import socket
+import struct
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 
@@ -14,9 +18,10 @@ from qdrant_client.models import FieldCondition, Filter as QdrantFilter, MatchVa
 from psycopg import sql
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from db import Conversation, FileRecord, IngestionJob, Message, Source
+from db import Conversation, FileRecord, IngestionJob, Source, Turn
 from services.embeddings.local_embeddings import EmbeddingService
 from services.llm.base import LLMProvider
 from services.retrieval.base import VectorStore, VectorStoreConfigurationError
@@ -48,6 +53,8 @@ ADMIN_DATABASE_URL = os.getenv(
     "postgresql+psycopg://papermind:papermind@127.0.0.1:55432/papermind",
 )
 QDRANT_URL = os.getenv("FULL_STACK_QDRANT_URL", "http://127.0.0.1:56333")
+PRE_TURN_REVISION = "c3d7e1f4a9b2"
+CURRENT_REVISION = "d4f1a8b3c6e2"
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,39 @@ class MigratedDatabase:
 
     url: str
     engine: object
+
+
+def _create_database(target_revision: str):
+    """Create an empty database, migrate it to a revision, and yield its details."""
+    database_name = f"papermind_test_{uuid.uuid4().hex}"
+    database_url = (
+        make_url(ADMIN_DATABASE_URL)
+        .set(database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    with psycopg.connect(
+        _psycopg_url(ADMIN_DATABASE_URL), autocommit=True
+    ) as connection:
+        connection.execute(
+            sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name))
+        )
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", target_revision],
+            cwd=BACKEND_DIR,
+            env={**os.environ, "DATABASE_URL": database_url},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        engine = create_engine(database_url, pool_pre_ping=True)
+        try:
+            yield MigratedDatabase(database_url, engine)
+        finally:
+            engine.dispose()
+    finally:
+        _drop_database(database_name)
 
 
 def _psycopg_url(database_url: str) -> str:
@@ -86,36 +126,15 @@ def migrated_database():
     """Create, migrate, and remove one isolated Postgres database."""
     if os.getenv("RUN_FULL_STACK_TESTS") != "1":
         pytest.skip("set RUN_FULL_STACK_TESTS=1 to run full-stack tests")
+    yield from _create_database("head")
 
-    database_name = f"papermind_test_{uuid.uuid4().hex}"
-    database_url = (
-        make_url(ADMIN_DATABASE_URL)
-        .set(database=database_name)
-        .render_as_string(hide_password=False)
-    )
-    with psycopg.connect(
-        _psycopg_url(ADMIN_DATABASE_URL), autocommit=True
-    ) as connection:
-        connection.execute(
-            sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name))
-        )
 
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            cwd=BACKEND_DIR,
-            env={**os.environ, "DATABASE_URL": database_url},
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, result.stderr
-        engine = create_engine(database_url, pool_pre_ping=True)
-        try:
-            yield MigratedDatabase(database_url, engine)
-        finally:
-            engine.dispose()
-    finally:
-        _drop_database(database_name)
+@pytest.fixture
+def legacy_database():
+    """Create a database migrated to the last revision before ordered turns."""
+    if os.getenv("RUN_FULL_STACK_TESTS") != "1":
+        pytest.skip("set RUN_FULL_STACK_TESTS=1 to run full-stack tests")
+    yield from _create_database(PRE_TURN_REVISION)
 
 
 @pytest.fixture
@@ -255,20 +274,21 @@ def test_migrations_apply_to_an_empty_postgres_database(migrated_database):
         "files",
         "index_generation_cleanups",
         "ingestion_jobs",
-        "messages",
         "sources",
+        "turns",
     }
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "c3d7e1f4a9b2"
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == CURRENT_REVISION
         )
         for table in (
             "app_settings",
             "conversations",
             "files",
             "ingestion_jobs",
-            "messages",
             "sources",
+            "turns",
         ):
             assert connection.scalar(text(f"SELECT count(*) FROM {table}")) == 0
 
@@ -397,6 +417,8 @@ def test_pdf_flow_persists_across_http_postgres_qdrant_and_storage(
     messages = history.json()["messages"]
     assert [message["sender"] for message in messages] == ["user", "bot"]
     assert messages[1]["text"] == "The answer is grounded in the retrieved PDF text."
+    assert [message["turn_sequence"] for message in messages] == [1, 1]
+    assert [message["turn_status"] for message in messages] == ["answered", "answered"]
     source_fields = ("content", "document", "chunk_index", "score", "page")
     assert [
         {field: source[field] for field in source_fields}
@@ -407,7 +429,7 @@ def test_pdf_flow_persists_across_http_postgres_qdrant_and_storage(
     ]
 
     with harness.session_factory() as session:
-        assert session.query(Message).count() == 2
+        assert session.query(Turn).count() == 1
         assert session.query(Source).count() == len(terminal[1]["sources"])
 
     assert isinstance(harness.storage, LocalStorage)
@@ -429,7 +451,7 @@ def test_pdf_flow_persists_across_http_postgres_qdrant_and_storage(
     )
     with harness.session_factory() as session:
         assert session.query(Conversation).count() == 0
-        assert session.query(Message).count() == 0
+        assert session.query(Turn).count() == 0
         assert session.query(Source).count() == 0
 
 
@@ -573,7 +595,7 @@ def test_deletion_failures_retain_retryable_state(full_stack_app, boundary):
     )
     with harness.session_factory() as session:
         assert session.query(Conversation).count() == 0
-        assert session.query(Message).count() == 0
+        assert session.query(Turn).count() == 0
         assert session.query(Source).count() == 0
 
 
@@ -1080,3 +1102,440 @@ def test_validation_rejects_a_generation_with_missing_vectors(full_stack_app):
     with pytest.raises(VectorStoreConfigurationError) as raised:
         service.validate_generation(filename, 1, stored)
     assert "failed validation" in str(raised.value)
+
+
+def _turns(harness: ApplicationHarness, filename: str) -> list[dict]:
+    """Read one document's stored turns in sequence order."""
+    file_id = harness.repositories.files.get_file(filename)["id"]
+    conversation_id = harness.repositories.conversations.get_conversation_id(file_id)
+    return harness.repositories.conversations.get_turns(conversation_id)
+
+
+def _turn_status(harness: ApplicationHarness, filename: str) -> list[str]:
+    """Read one document's stored turn outcomes."""
+    return [turn["status"] for turn in _turns(harness, filename)]
+
+
+@pytest.mark.full_stack
+def test_postgres_allows_one_conversation_per_document(full_stack_app):
+    """Racing indexing keeps one conversation, and a second insert is refused."""
+    harness = full_stack_app
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    file_id = harness.repositories.files.get_file(filename)["id"]
+    repository = harness.repositories.conversations
+
+    assert repository.ensure_conversation(file_id) == repository.get_conversation_id(
+        file_id
+    )
+    with harness.session_factory() as session:
+        assert session.query(Conversation).filter_by(file_id=file_id).count() == 1
+
+    with pytest.raises(IntegrityError):
+        with harness.session_factory() as session, session.begin():
+            session.add(Conversation(file_id=file_id, id="f" * 32))
+
+    # A reindex re-runs the same conversation creation without splitting it.
+    assert harness.client.post(f"/files/{filename}/reindex").status_code == 201
+    assert harness.drain() == 1
+    with harness.session_factory() as session:
+        assert session.query(Conversation).filter_by(file_id=file_id).count() == 1
+
+
+@pytest.mark.full_stack
+def test_concurrent_questions_become_distinct_ordered_turns(full_stack_app):
+    """Four parallel questions get four sequences, not a tangled history."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+
+    barrier = threading.Barrier(4)
+    answers: list[str] = []
+    lock = threading.Lock()
+
+    def ask(index: int) -> None:
+        barrier.wait()
+        response = harness.client.post(
+            "/response",
+            json={"filename": filename, "query": f"What is stage {index}?"},
+        )
+        assert response.status_code == 200, response.text
+        with lock:
+            answers.append(
+                "".join(
+                    payload["text"]
+                    for name, payload in parse_sse(response.text)
+                    if name == "token"
+                )
+            )
+
+    threads = [threading.Thread(target=ask, args=(index,)) for index in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert answers == ["The answer is grounded in the retrieved PDF text."] * 4
+    turns = _turns(harness, filename)
+    assert [turn["sequence"] for turn in turns] == [1, 2, 3, 4]
+    assert {turn["status"] for turn in turns} == {"answered"}
+    assert sorted(turn["question"] for turn in turns) == [
+        f"What is stage {index}?" for index in range(4)
+    ]
+
+    history = harness.client.get(f"/messages?filename={filename}").json()["messages"]
+    assert [message["text"] for message in history] == [
+        value for turn in turns for value in (turn["question"], turn["answer"])
+    ]
+
+
+@pytest.mark.full_stack
+def test_a_provider_failure_stores_a_failed_turn(full_stack_app):
+    """A dead provider leaves a recorded failure, not a stranded question."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    harness.chat.fail("stream")
+
+    response = harness.client.post(
+        "/response", json={"filename": filename, "query": "What is a RAG pipeline?"}
+    )
+
+    assert [name for name, _ in parse_sse(response.text)] == ["error", "done"]
+    turn = _turns(harness, filename)[0]
+    assert turn["status"] == "failed"
+    assert turn["question"] == "What is a RAG pipeline?"
+    assert turn["answer"]
+    assert turn["failure_reason"] == "provider failure"
+    assert turn["completed_at"]
+    history = harness.client.get(f"/messages?filename={filename}").json()["messages"]
+    assert [message["turn_status"] for message in history] == ["failed", "failed"]
+
+
+@pytest.mark.full_stack
+def test_an_answer_that_postgres_cannot_save_closes_the_turn_as_failed(full_stack_app):
+    """A database that refuses the answer still ends the turn as a failure."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    harness.repositories.conversations.fail("complete_turn")
+
+    response = harness.client.post(
+        "/response", json={"filename": filename, "query": "What is a RAG pipeline?"}
+    )
+
+    assert [name for name, _ in parse_sse(response.text)][-2:] == ["error", "done"]
+    harness.repositories.conversations.unfail("complete_turn")
+    turn = _turns(harness, filename)[0]
+    assert turn["status"] == "failed"
+    assert turn["question"] == "What is a RAG pipeline?"
+    assert turn["failure_reason"] == "answer could not be saved"
+    assert turn["completed_at"]
+    history = harness.client.get(f"/messages?filename={filename}").json()["messages"]
+    assert [message["turn_status"] for message in history] == ["failed", "failed"]
+
+
+@pytest.mark.full_stack
+def test_a_client_that_disconnects_mid_answer_cancels_its_turn(full_stack_app):
+    """A closed stream ends the turn as cancelled instead of leaving it open."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    holding = harness.chat.hold_after_first_token()
+
+    _reset_connection_after_first_token(
+        harness.server.server_port,
+        {"filename": filename, "query": "What is RAG?"},
+    )
+    harness.chat.release()
+
+    assert holding.wait(timeout=30)
+    assert _wait_for_turn_status(harness, filename, "cancelled")
+    turn = _turns(harness, filename)[0]
+    assert turn["question"] == "What is RAG?"
+    assert turn["answer"] is None
+    assert turn["failure_reason"] == "client disconnected"
+    history = harness.client.get(f"/messages?filename={filename}").json()["messages"]
+    assert [message["text"] for message in history] == ["What is RAG?"]
+
+
+def _reset_connection_after_first_token(port: int, payload: dict) -> None:
+    """Ask a question, read one token, then abort the connection."""
+    # Closing a socket normally leaves the server free to finish writing into a
+    # buffer nobody reads, so the reset is what the server actually notices.
+    body = json.dumps(payload).encode()
+    request = (
+        "POST /response HTTP/1.1\r\n"
+        f"Host: 127.0.0.1:{port}\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode() + body
+    with socket.create_connection(("127.0.0.1", port), timeout=30) as connection:
+        connection.sendall(request)
+        received = b""
+        while b"event: token" not in received:
+            chunk = connection.recv(4096)
+            if not chunk:
+                raise AssertionError("the stream ended before the first token")
+            received += chunk
+        connection.setsockopt(
+            socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+        )
+
+
+def _wait_for_turn_status(
+    harness: ApplicationHarness, filename: str, status: str, timeout: float = 15.0
+) -> bool:
+    """Wait until one document's first turn reaches the expected outcome."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _turn_status(harness, filename) == [status]:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.mark.full_stack
+def test_an_unanswerable_history_state_reloads_as_it_was_accepted(full_stack_app):
+    """A stored answer replays unchanged after the app is rebuilt."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    response = harness.client.post(
+        "/response", json={"filename": filename, "query": "What is a RAG pipeline?"}
+    )
+    terminal = parse_sse(response.text)[-1][1]
+
+    reloaded = harness.client.get(f"/messages?filename={filename}").json()["messages"]
+
+    assert [message["sender"] for message in reloaded] == ["user", "bot"]
+    assert reloaded[1]["text"] == "The answer is grounded in the retrieved PDF text."
+    assert reloaded[1]["turn_status"] == "answered"
+    assert reloaded[1]["turn_id"] == reloaded[0]["turn_id"]
+    source_fields = ("content", "document", "chunk_index", "score", "page")
+    assert [
+        {field: source[field] for field in source_fields}
+        for source in reloaded[1]["sources"]
+    ] == [
+        {field: source[field] for field in source_fields}
+        for source in terminal["sources"]
+    ]
+
+
+@pytest.mark.full_stack
+def test_the_turn_migration_keeps_every_legacy_exchange(legacy_database):
+    """Legacy messages become ordered turns without losing a question or a source."""
+    engine = legacy_database.engine
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO files (id, filename, title, is_processed) "
+                "VALUES (:id, :filename, :title, true)"
+            ),
+            [
+                {"id": "1" * 32, "filename": "one.pdf", "title": "One"},
+                {"id": "2" * 32, "filename": "two.pdf", "title": "Two"},
+                {"id": "3" * 32, "filename": "three.pdf", "title": "Three"},
+            ],
+        )
+        # One document ended up with two conversations, each with one exchange.
+        connection.execute(
+            text(
+                "INSERT INTO conversations (id, file_id, created_at) VALUES "
+                "('a' || :one, :file, '2026-01-01'), "
+                "('b' || :two, :file, '2026-01-02')"
+            ),
+            {"one": "1" * 31, "two": "2" * 31, "file": "1" * 32},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO conversations (id, file_id) VALUES "
+                "('c' || :one, :two), ('d' || :one, :three)"
+            ),
+            {"one": "3" * 31, "two": "2" * 32, "three": "3" * 32},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO messages (id, conversation_id, sender, text, created_at) "
+                "VALUES (:id, :conversation, :sender, :text, :created_at)"
+            ),
+            [
+                {
+                    "id": "m" + "1" * 31,
+                    "conversation": "a" + "1" * 31,
+                    "sender": "user",
+                    "text": "What is a RAG pipeline?",
+                    "created_at": "2026-01-01 10:00:00",
+                },
+                {
+                    "id": "m" + "2" * 31,
+                    "conversation": "a" + "1" * 31,
+                    "sender": "bot",
+                    "text": "It retrieves evidence for a generator.",
+                    "created_at": "2026-01-01 10:00:05",
+                },
+                {
+                    "id": "m" + "3" * 31,
+                    "conversation": "b" + "2" * 31,
+                    "sender": "user",
+                    "text": "What does reranking do?",
+                    "created_at": "2026-01-02 10:00:00",
+                },
+                {
+                    "id": "m" + "4" * 31,
+                    "conversation": "b" + "2" * 31,
+                    "sender": "bot",
+                    "text": "It reorders the candidates.",
+                    "created_at": "2026-01-02 10:00:05",
+                },
+                {
+                    "id": "m" + "5" * 31,
+                    "conversation": "c" + "3" * 31,
+                    "sender": "user",
+                    "text": "Answered question",
+                    "created_at": "2026-01-01 09:00:00",
+                },
+                {
+                    "id": "m" + "6" * 31,
+                    "conversation": "c" + "3" * 31,
+                    "sender": "bot",
+                    "text": "Answered reply",
+                    "created_at": "2026-01-01 09:00:01",
+                },
+                {
+                    "id": "m" + "7" * 31,
+                    "conversation": "c" + "3" * 31,
+                    "sender": "user",
+                    "text": "Never answered",
+                    "created_at": "2026-01-01 09:01:00",
+                },
+                {
+                    "id": "m" + "8" * 31,
+                    "conversation": "d" + "3" * 31,
+                    "sender": "bot",
+                    "text": "A reply no question asked for",
+                    "created_at": "2026-01-01 08:00:00",
+                },
+            ],
+        )
+        connection.execute(
+            text(
+                "INSERT INTO sources "
+                "(id, message_id, content, document, chunk_index, score) "
+                "VALUES (:id, :message, 'Chunk', 'one.pdf', 0, 0.9)"
+            ),
+            [
+                {"id": "s" + "1" * 31, "message": "m" + "2" * 31},
+                {"id": "s" + "2" * 31, "message": "m" + "4" * 31},
+            ],
+        )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_DIR,
+        env={**os.environ, "DATABASE_URL": legacy_database.url},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+            CURRENT_REVISION
+        )
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM conversations WHERE file_id = :file"),
+                {"file": "1" * 32},
+            )
+            == 1
+        )
+        rows = (
+            connection.execute(
+                text(
+                    "SELECT t.sequence, t.question, t.answer, t.status, t.failure_reason, "
+                    "f.filename, (SELECT count(*) FROM sources s "
+                    "WHERE s.turn_id = t.id) AS source_count "
+                    "FROM turns t "
+                    "JOIN conversations c ON c.id = t.conversation_id "
+                    "JOIN files f ON f.id = c.file_id "
+                    "WHERE c.file_id = '11111111111111111111111111111111' "
+                    "ORDER BY t.sequence"
+                )
+            )
+            .mappings()
+            .all()
+        )
+        assert [dict(row) for row in rows] == [
+            {
+                "sequence": 1,
+                "question": "What is a RAG pipeline?",
+                "answer": "It retrieves evidence for a generator.",
+                "status": "answered",
+                "failure_reason": None,
+                "filename": "one.pdf",
+                "source_count": 1,
+            },
+            {
+                "sequence": 2,
+                "question": "What does reranking do?",
+                "answer": "It reorders the candidates.",
+                "status": "answered",
+                "failure_reason": None,
+                "filename": "one.pdf",
+                "source_count": 1,
+            },
+        ]
+        stranded = (
+            connection.execute(
+                text(
+                    "SELECT t.sequence, t.question, t.answer, t.status, t.failure_reason "
+                    "FROM turns t JOIN conversations c ON c.id = t.conversation_id "
+                    "WHERE c.file_id = '22222222222222222222222222222222' "
+                    "ORDER BY t.sequence"
+                )
+            )
+            .mappings()
+            .all()
+        )
+        assert [dict(row) for row in stranded] == [
+            {
+                "sequence": 1,
+                "question": "Answered question",
+                "answer": "Answered reply",
+                "status": "answered",
+                "failure_reason": None,
+            },
+            {
+                "sequence": 2,
+                "question": "Never answered",
+                "answer": None,
+                "status": "unanswered",
+                "failure_reason": "no answer was recorded",
+            },
+        ]
+        orphan = (
+            connection.execute(
+                text(
+                    "SELECT t.question, t.answer, t.status, t.failure_reason "
+                    "FROM turns t JOIN conversations c ON c.id = t.conversation_id "
+                    "WHERE c.file_id = '33333333333333333333333333333333'"
+                )
+            )
+            .mappings()
+            .all()
+        )
+        assert [dict(row) for row in orphan] == [
+            {
+                "question": None,
+                "answer": "A reply no question asked for",
+                "status": "answered",
+                "failure_reason": "no question was recorded",
+            }
+        ]

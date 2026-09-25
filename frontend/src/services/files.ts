@@ -170,6 +170,9 @@ export interface IMessage {
   sender: 'user' | 'bot';
   sources: ISource[];
   created_at: string;
+  turn_id: string;
+  turn_sequence: number;
+  turn_status: 'pending' | 'answered' | 'failed' | 'cancelled' | 'unanswered';
 }
 
 interface IGetMessages {

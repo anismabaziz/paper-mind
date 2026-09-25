@@ -279,13 +279,35 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 files_repository.get_file(filename) or {"deletion_state": "deleting"}
             )
         try:
-            conversations_repository.add_message(conversation_id, "user", query)
+            turn_id = conversations_repository.start_turn(conversation_id, query)
         except Exception:
-            log.exception("/response persist user message failed for %s", filename)
+            log.exception("/response could not commit the question for %s", filename)
             return jsonify({"error": "Internal server error"}), 500
 
         def event(name, payload):
             return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
+
+        def done(answer_sources):
+            """Return the terminal event for a stream that stopped early."""
+            return event(
+                "done",
+                {"done": True, "sources": answer_sources, "retrieval": retrieval},
+            )
+
+        def record_outcome(record, *args):
+            """Apply one terminal turn outcome unless the document is gone."""
+            try:
+                if not _still_present():
+                    log.warning(
+                        "/response skipping turn outcome after concurrent delete for %s",
+                        filename,
+                    )
+                    return
+                record(*args)
+            except Exception:
+                log.exception(
+                    "/response could not record turn outcome for %s", filename
+                )
 
         def generate():
             fragments = []
@@ -293,6 +315,15 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 for token in chat_provider.stream_response(query, context):
                     fragments.append(token)
                     yield event("token", {"text": token})
+            except GeneratorExit:
+                # The client left mid-answer. The question stays on record as
+                # cancelled rather than pending, so it is never stranded.
+                record_outcome(
+                    conversations_repository.cancel_turn,
+                    turn_id,
+                    "client disconnected",
+                )
+                raise
             except Exception as exc:
                 log.error(
                     "/response generation failed for %s: %s",
@@ -303,38 +334,47 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                     "Sorry. The language model is unavailable right now. "
                     "Please try again."
                 )
-                try:
-                    if _still_present():
-                        conversations_repository.add_message(
-                            conversation_id, "bot", failure
-                        )
-                except Exception:
-                    log.exception("failed to persist error reply for %s", filename)
-                yield event("error", {"error": failure})
-                yield event(
-                    "done", {"done": True, "sources": [], "retrieval": retrieval}
+                record_outcome(
+                    conversations_repository.fail_turn,
+                    turn_id,
+                    failure,
+                    "provider failure",
                 )
+                yield event("error", {"error": failure})
+                yield done([])
                 return
 
             answer = (
                 "".join(fragments).strip() or "I don't know based on the given context."
             )
+            if not _still_present():
+                log.warning(
+                    "/response skipping persist after concurrent delete for %s",
+                    filename,
+                )
+                yield done(sources)
+                return
             try:
-                if _still_present():
-                    conversations_repository.add_message(
-                        conversation_id, "bot", answer, sources
-                    )
-                else:
-                    log.warning(
-                        "/response skipping persist after concurrent delete for %s",
-                        filename,
-                    )
+                completed = conversations_repository.complete_turn(
+                    turn_id, answer, sources
+                )
             except Exception:
                 log.exception("failed to persist answer for %s", filename)
-            yield event(
-                "done",
-                {"done": True, "sources": sources, "retrieval": retrieval},
-            )
+                unsaved = (
+                    "The answer could not be saved. Please ask the question again."
+                )
+                record_outcome(
+                    conversations_repository.fail_turn,
+                    turn_id,
+                    unsaved,
+                    "answer could not be saved",
+                )
+                yield event("error", {"error": unsaved})
+                yield done([])
+                return
+            if not completed:
+                log.warning("/response turn %s already ended for %s", turn_id, filename)
+            yield done(sources)
 
         return Response(
             stream_with_context(generate()),
