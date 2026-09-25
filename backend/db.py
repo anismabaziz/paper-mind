@@ -185,6 +185,7 @@ class Conversation(Base):
     """Conversation tied to one stored document."""
 
     __tablename__ = "conversations"
+    __table_args__ = (Index("uq_conversations_file_id", "file_id", unique=True),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"))
@@ -193,31 +194,60 @@ class Conversation(Base):
     )
 
 
-class Message(Base):
-    """Message in a document conversation."""
+# A question is committed as a pending turn before the provider is called, so
+# an interrupted request can never leave it unanswered. Every other state is
+# terminal, including the states the migration writes for history the old
+# message log recorded imperfectly.
+TURN_PENDING = "pending"
+TURN_ANSWERED = "answered"
+TURN_FAILED = "failed"
+TURN_CANCELLED = "cancelled"
+TURN_UNANSWERED = "unanswered"
+TERMINAL_TURN_STATES = frozenset(
+    {TURN_ANSWERED, TURN_FAILED, TURN_CANCELLED, TURN_UNANSWERED}
+)
 
-    __tablename__ = "messages"
+
+class Turn(Base):
+    """One ordered exchange in a conversation."""
+
+    __tablename__ = "turns"
+    __table_args__ = (
+        Index(
+            "uq_turns_conversation_sequence", "conversation_id", "sequence", unique=True
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     conversation_id: Mapped[str] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE")
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
     )
-    sender: Mapped[str] = mapped_column(String(16))
-    text: Mapped[str] = mapped_column(String(8192))
+    sequence: Mapped[int] = mapped_column(Integer)
+    question: Mapped[str | None] = mapped_column(
+        String(8192), nullable=True, default=None
+    )
+    answer: Mapped[str | None] = mapped_column(
+        String(8192), nullable=True, default=None
+    )
+    status: Mapped[str] = mapped_column(String(16), default=TURN_PENDING)
+    failure_reason: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
 
 
 class Source(Base):
-    """Citation source attached to a message."""
+    """Citation source attached to an answered turn."""
 
     __tablename__ = "sources"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
-    message_id: Mapped[str] = mapped_column(
-        ForeignKey("messages.id", ondelete="CASCADE")
-    )
+    turn_id: Mapped[str] = mapped_column(ForeignKey("turns.id", ondelete="CASCADE"))
     content: Mapped[str] = mapped_column(String(8192))
     document: Mapped[str] = mapped_column(String(255))
     chunk_index: Mapped[int] = mapped_column()

@@ -33,6 +33,7 @@ from settings import Settings
 from storage import LocalStorage
 
 _EMBEDDING_SIZE = 1024
+_HOLD_TIMEOUT_SECONDS = 15
 
 
 class InjectedFailure(RuntimeError):
@@ -284,6 +285,9 @@ class DeterministicChatProvider(LLMProvider):
         _maybe_fail(self._factory.failures, "stream")
         self._factory.streamed.append((query, context))
         yield "The answer is "
+        if self._factory.holding is not None:
+            self._factory.holding.set()
+            self._factory.released.wait(timeout=_HOLD_TIMEOUT_SECONDS)
         yield "grounded in the retrieved PDF text."
 
     def verify(self) -> None:
@@ -302,10 +306,22 @@ class DeterministicChatFactory:
     streamed: list[tuple[str, str]] = field(default_factory=list)
     verified: list[tuple[str, str]] = field(default_factory=list)
     failures: set[str] = field(default_factory=set)
+    holding: threading.Event | None = None
+    released: threading.Event = field(default_factory=threading.Event)
 
     def fail(self, operation: str) -> None:
         """Fail the named provider operation on its next call."""
         self.failures.add(operation)
+
+    def hold_after_first_token(self) -> threading.Event:
+        """Stop the next stream after its first token until the test releases it."""
+        self.released = threading.Event()
+        self.holding = threading.Event()
+        return self.holding
+
+    def release(self) -> None:
+        """Let a held stream finish producing tokens."""
+        self.released.set()
 
     def __call__(self, credentials: ChatCredentials) -> LLMProvider:
         """Build the deterministic provider for stored credentials."""

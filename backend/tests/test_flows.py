@@ -844,7 +844,7 @@ def test_chat_query_too_long_rejected_before_embedding(client, app, fake_embeddi
 
 
 def test_conversation_repository_round_trip():
-    """Conversation, message, and source records survive their aggregate interface."""
+    """Turn, status, and source records survive their aggregate interface."""
     from repositories import ConversationRepository, FileRepository
 
     engine = create_engine(
@@ -857,10 +857,10 @@ def test_conversation_repository_round_trip():
     file_record = FileRepository(session_factory).create_file("doc.pdf", title="Doc")
     repository = ConversationRepository(session_factory)
 
-    conversation_id = repository.create_conversation(file_record["id"])
-    repository.add_message(
-        conversation_id,
-        "assistant",
+    conversation_id = repository.ensure_conversation(file_record["id"])
+    turn_id = repository.start_turn(conversation_id, "Question")
+    repository.complete_turn(
+        turn_id,
         "Answer",
         [
             {
@@ -873,9 +873,10 @@ def test_conversation_repository_round_trip():
         ],
     )
 
-    messages = repository.get_messages(conversation_id)
-    assert [message["text"] for message in messages] == ["Answer"]
-    assert messages[0]["sources"] == [
+    turns = repository.get_turns(conversation_id)
+    assert [turn["status"] for turn in turns] == ["answered"]
+    assert [turn["answer"] for turn in turns] == ["Answer"]
+    assert turns[0]["sources"] == [
         {
             "content": "Source",
             "document": "doc.pdf",
@@ -883,6 +884,12 @@ def test_conversation_repository_round_trip():
             "score": 0.9,
             "page": 3,
         }
+    ]
+    assert [
+        message["text"] for message in repository.get_messages(conversation_id)
+    ] == [
+        "Question",
+        "Answer",
     ]
 
 
@@ -980,12 +987,12 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
         "files",
         "index_generation_cleanups",
         "ingestion_jobs",
-        "messages",
         "sources",
+        "turns",
     } <= tables
-    assert {"users", "user_settings"}.isdisjoint(tables)
+    assert {"messages", "users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "c3d7e1f4a9b2",
+        "d4f1a8b3c6e2",
     )
     assert {
         "title",
@@ -1006,7 +1013,16 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     assert {"deletion_state", "deletion_error", "deletion_attempts"} <= {
         row[1] for row in connection.execute("pragma table_info(files)")
     }
-    assert "page" in {
+    assert {"page", "turn_id"} <= {
         row[1] for row in connection.execute("pragma table_info(sources)")
     }
+    assert {
+        "sequence",
+        "question",
+        "answer",
+        "status",
+        "failure_reason",
+        "created_at",
+        "completed_at",
+    } <= {row[1] for row in connection.execute("pragma table_info(turns)")}
     connection.close()

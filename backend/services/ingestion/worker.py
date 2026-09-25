@@ -500,10 +500,8 @@ class IngestionWorker:
                 ):
                     self._supersede(job)
                     return
-                if not fresh.get("is_processed") and not (
-                    self._conversations.get_conversation_id(fresh["id"])
-                ):
-                    self._conversations.create_conversation(fresh["id"])
+                if not fresh.get("is_processed"):
+                    self._conversations.ensure_conversation(fresh["id"])
                 # The removal of the generation this one replaces is written
                 # down before activation, so a restart between the two still
                 # retires the superseded vectors.
