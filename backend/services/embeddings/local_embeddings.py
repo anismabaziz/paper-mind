@@ -20,6 +20,7 @@ generated.
 
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from services.concurrency import map_batches_concurrently
 
@@ -79,7 +80,7 @@ class LocalEmbeddingService(EmbeddingService):
             )
             return self._model
 
-    def embed_texts(self, texts):
+    def embed_texts(self, texts, check: Callable[[], None] | None = None):
         """
         Embed any number of texts, batched and run concurrently.
 
@@ -100,6 +101,7 @@ class LocalEmbeddingService(EmbeddingService):
             batches,
             self._embed_batch,
             label=f"embed_texts: {len(texts)} texts",
+            before_batch=check,
         )
         all_values: list = []
         for result in results:

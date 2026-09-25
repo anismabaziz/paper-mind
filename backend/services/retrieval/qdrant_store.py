@@ -11,7 +11,9 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    IsEmptyCondition,
     MatchValue,
+    PayloadField,
     Modifier,
     PointStruct,
     Prefetch,
@@ -170,7 +172,11 @@ class QdrantIndexAdapter(VectorStore):
             return None
         return Filter(
             must=[
-                FieldCondition(key=key, match=MatchValue(value=value))
+                (
+                    IsEmptyCondition(is_empty=PayloadField(key=key))
+                    if value is None
+                    else FieldCondition(key=key, match=MatchValue(value=value))
+                )
                 for key, value in filter_dict.items()
             ]
         )
@@ -369,6 +375,19 @@ class QdrantIndexAdapter(VectorStore):
             "method": method,
             "outcome": "success" if matches else "empty",
         }
+
+    def count(self, filter=None) -> int:
+        """Count points matching one payload filter."""
+        self._ensure_collection(create=False)
+        try:
+            result = self._client.count(
+                collection_name=self._collection,
+                count_filter=self._to_filter(filter),
+                exact=True,
+            )
+        except Exception as exc:
+            self._raise_operation_error(exc, operation="count")
+        return int(getattr(result, "count", result))
 
     def delete(self, filter=None, delete_all=False) -> dict:
         """Delete all points or the points matching one payload filter."""

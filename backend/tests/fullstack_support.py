@@ -229,6 +229,15 @@ class ControlledVectorStore(VectorStore):
             **kwargs,
         )
 
+    def delete_unversioned(self, filename) -> dict:
+        """Delete legacy points for one document."""
+        return self.delete(filter={"pdf_name": filename, "index_generation": None})
+
+    def count(self, filter=None) -> int:
+        """Count vectors unless the count failure is active."""
+        _maybe_fail(self.failures, "count")
+        return self._delegate.count(filter=filter)
+
     def delete(self, filter=None, delete_all=False) -> dict:
         """Delete vectors unless the delete failure is active."""
         _maybe_fail(self.failures, "delete")
@@ -385,6 +394,7 @@ def build_application(
             embedding_service=embeddings,
             vector_service=VectorService(vector_store, reranker),
             worker_id=worker_id,
+            limits=app_settings.ingestion,
         )
 
     server = make_server("127.0.0.1", 0, application, threaded=True)

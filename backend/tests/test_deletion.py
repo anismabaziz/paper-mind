@@ -259,8 +259,8 @@ def upload_process_chat(client, app):
 
 
 def test_vector_failure_keeps_retryable_delete_failed_state(
-    client, fake_storage, fake_vectors, repositories
-, app):
+    client, fake_storage, fake_vectors, repositories, app
+):
     """A vector failure never reports success and retains state for retry."""
     filename = upload_process_chat(client, app)
     fake_vectors.fail_delete = True
@@ -289,8 +289,8 @@ def test_vector_failure_keeps_retryable_delete_failed_state(
 
 
 def test_storage_failure_keeps_bytes_and_metadata_for_retry(
-    client, fake_storage, fake_vectors, repositories
-, app):
+    client, fake_storage, fake_vectors, repositories, app
+):
     """A disk failure during cleanup is a 500 with the document retained."""
     filename = upload_process_chat(client, app)
     fake_storage.fail_delete = True
@@ -310,17 +310,15 @@ def test_storage_failure_keeps_bytes_and_metadata_for_retry(
 
 
 def test_conversation_failure_retains_history_for_retry(
-    client, fake_vectors, repositories, monkeypatch
-, app):
+    client, fake_vectors, repositories, monkeypatch, app
+):
     """A Postgres failure deleting history blocks metadata finalization."""
     filename = upload_process_chat(client, app)
 
     def _boom(conversation_id):
         raise RuntimeError("postgres down")
 
-    monkeypatch.setattr(
-        repositories.conversations, "delete_conversation_tree", _boom
-    )
+    monkeypatch.setattr(repositories.conversations, "delete_conversation_tree", _boom)
 
     response = client.delete(f"/files/remove?path={filename}")
 
@@ -330,17 +328,13 @@ def test_conversation_failure_retains_history_for_retry(
     assert client.get(f"/messages?filename={filename}").get_json()["messages"] != []
 
 
-def test_deletion_removes_citation_sources_without_orphans(
-    client, repositories
-, app):
+def test_deletion_removes_citation_sources_without_orphans(client, repositories, app):
     """Conversation cleanup removes messages and their citation sources."""
     from db import Source as SourceModel
 
     filename = upload_process_chat(client, app)
     file_record = repositories.files.get_file(filename)
-    conversation_id = repositories.conversations.get_conversation_id(
-        file_record["id"]
-    )
+    conversation_id = repositories.conversations.get_conversation_id(file_record["id"])
     with repositories.conversations._session_factory() as session:
         assert session.query(Message).count() == 2
         assert session.query(Source).count() >= 1

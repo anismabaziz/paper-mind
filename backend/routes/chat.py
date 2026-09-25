@@ -49,6 +49,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
     app_settings_repository = services.repositories.app_settings
     files_repository = services.repositories.files
     conversations_repository = services.repositories.conversations
+    ingestion_jobs = services.repositories.ingestion_jobs
     embedding_service = services.embedding_service
     vector_service = services.vector_service
     chat_provider_factory = services.chat_provider_factory
@@ -178,6 +179,19 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
             return jsonify({"error": "File not found"}), 404
         if is_deleting_record(file_record):
             return deletion_blocked_response(file_record)
+        ingestion_job = ingestion_jobs.get_latest(filename)
+        if (
+            file_record.get("is_processed")
+            and ingestion_job
+            and ingestion_job["state"] in ("queued", "running", "cancelling")
+        ):
+            return jsonify(
+                {
+                    "error": "This document is being reindexed. Try again when indexing finishes.",
+                    "category": "document_indexing",
+                    "job": ingestion_job,
+                }
+            ), 409
         conversation_id = conversations_repository.get_conversation_id(
             file_record["id"]
         )
@@ -191,7 +205,11 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         try:
             query_embedding = embedding_service.embed_texts(query)[0]
             retrieval_result = vector_service.query_vectors(
-                query_embedding, filename, query_text=query
+                query_embedding,
+                filename,
+                query_text=query,
+                generation=file_record.get("index_generation"),
+                include_legacy=file_record.get("index_generation") is None,
             )
             retrieval = {
                 "method": retrieval_result.method,
@@ -226,9 +244,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
             return not is_deleting_record(current)
 
         if not _still_present():
-            log.warning(
-                "/response refusing chat for deleting document %s", filename
-            )
+            log.warning("/response refusing chat for deleting document %s", filename)
             return deletion_blocked_response(
                 files_repository.get_file(filename) or {"deletion_state": "deleting"}
             )

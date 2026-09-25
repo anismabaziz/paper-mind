@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings, AlertTriangle, RotateCw } from "lucide-react";
+import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings, AlertTriangle, RotateCw, Square } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useFiles, useUploadFile, useDeleteFile, useRetryIngestion, useTouchFileOpened } from "@/hooks/useFiles";
+import { useFiles, useUploadFile, useDeleteFile, useRetryIngestion, useCancelIngestion, useTouchFileOpened } from "@/hooks/useFiles";
 import { formatFileSize } from "@/lib/format";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
@@ -14,7 +14,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import type { File as DbFile, IngestionJob } from "@/types/db";
-import { displayTitle, ingestionStageLabel, isIngestionActive } from "@/types/db";
+import { displayTitle, ingestionStageLabel, isIngestionActive, isIngestionCancellable, isIngestionRetryable } from "@/types/db";
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -27,6 +27,8 @@ function jobStatusLine(job: IngestionJob | null | undefined): string {
   if (job.state === "failed") {
     return job.error_message ?? "Indexing failed \u2014 retry";
   }
+  if (job.state === "cancelled") return "Cancelled \u00b7 retry available";
+  if (job.state === "cancelling") return "Cancelling";
   if (job.state === "stale") return "Superseded by a newer attempt";
   if (job.state === "ready") return "Indexed";
   return `${ingestionStageLabel(job.stage)} \u00b7 ${job.progress}%`;
@@ -106,6 +108,9 @@ export function LibraryRail() {
   const retryMutation = useRetryIngestion();
   const retryTarget = retryMutation.variables as string | undefined;
   const retryError = retryMutation.error instanceof Error ? retryMutation.error.message : null;
+  const cancelMutation = useCancelIngestion();
+  const cancelTarget = cancelMutation.variables as string | undefined;
+  const cancelError = cancelMutation.error instanceof Error ? cancelMutation.error.message : null;
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files?.[0]) uploadMutation.mutate(e.target.files[0]);
@@ -200,19 +205,20 @@ export function LibraryRail() {
           )}
         </div>
 
-        {(uploadError || retryError) && (
+        {(uploadError || retryError || cancelError) && (
           <div role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2">
             <p className="text-xs font-medium text-destructive">
-              {retryError ? "Retry failed" : "Upload failed"}
+              {cancelError ? "Cancellation failed" : retryError ? "Retry failed" : "Upload failed"}
             </p>
             <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-soft">
-              {retryError ?? uploadError}
+              {cancelError ?? retryError ?? uploadError}
             </p>
             <button
               type="button"
               onClick={() => {
                 setUploadError(null);
                 retryMutation.reset();
+                cancelMutation.reset();
               }}
               className="mt-2 border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
             >
@@ -290,8 +296,11 @@ export function LibraryRail() {
               const isRemoving = deleteMutation.isPending && (deleteMutation.variables as DbFile | undefined)?.id === item.id;
               const job = item.ingestion;
               const isRetrying = retryMutation.isPending && retryTarget === item.name;
-              const isJobActive = isIngestionActive(job?.state) || isRetrying;
+              const isCancelling = cancelMutation.isPending && cancelTarget === item.name;
+              const isJobActive = isIngestionActive(job?.state) || isRetrying || isCancelling;
+              const isJobRetryable = isIngestionRetryable(job?.state) && !isRetrying;
               const isJobFailed = job?.state === "failed" && !isRetrying;
+
               const isDeleting = item.deletion_state === "deleting" || isRemoving;
               const isDeleteFailed = item.deletion_state === "delete_failed";
 
@@ -331,13 +340,23 @@ export function LibraryRail() {
                           ) : isJobActive ? (
                             <span className="inline-flex items-center gap-1">
                               <Loader2 className="size-2.5 animate-spin" />
-                              {isRetrying ? "Retrying" : ingestionStageLabel(job?.stage ?? "queued")}
+                              {isCancelling
+                                ? "Cancelling"
+                                : isRetrying
+                                  ? "Retrying"
+                                  : ingestionStageLabel(job?.stage ?? "queued")}
+                            </span>
+                          ) : isJobRetryable ? (
+                            <span className="inline-flex items-center gap-1 text-destructive">
+                              <AlertTriangle className="size-2.5" />
+                              Retry
                             </span>
                           ) : (
                             <span>{formatFileSize(item.metadata.size)}</span>
-                          )}
-                        </span>
-                      </span>
+                           )}
+                         </span>
+                       </span>
+
                       <span className={cn("block min-w-0 max-w-full overflow-hidden text-[0.78rem] leading-snug break-words line-clamp-2", active ? "font-medium text-ink" : "text-ink-soft group-hover:text-ink")}>
                         {displayTitle(item)}
                       </span>
@@ -362,7 +381,7 @@ export function LibraryRail() {
                         >
                           Retry
                         </button>
-                      ) : isJobFailed ? (
+                      ) : isJobRetryable ? (
                         <button
                           type="button"
                           onClick={() => retryMutation.mutate(item.name)}
@@ -375,17 +394,32 @@ export function LibraryRail() {
                           Retry
                         </button>
                       ) : isJobActive ? (
-                        <span
-                          className="mr-1 grid size-7 place-items-center"
-                          role="status"
-                          aria-label={`${ingestionStageLabel(job?.stage ?? "queued")} ${job?.progress ?? 0}%`}
-                        >
-                          <Loader2 className="size-3 animate-spin" />
-                        </span>
-                      ) : !isRemoving && !isDeleting ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
+                        <>
+                          <span
+                            className="mr-1 grid size-7 place-items-center"
+                            role="status"
+                            aria-label={`${ingestionStageLabel(job?.stage ?? "queued")} ${job?.progress ?? 0}%`}
+                          >
+                            <Loader2 className="size-3 animate-spin" />
+                          </span>
+                          {isIngestionCancellable(job?.state) && (
                             <button
+                              type="button"
+                              onClick={() => cancelMutation.mutate(item.name)}
+                              disabled={isCancelling}
+                              title="Cancel indexing"
+                              aria-label={`Cancel indexing ${displayTitle(item)}`}
+                              className="mr-1 grid size-7 place-items-center border border-rule bg-paper text-ink-soft hover:border-destructive hover:text-destructive disabled:opacity-40"
+                            >
+                              {isCancelling ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+                            </button>
+                          )}
+                        </>
+                       ) : !isRemoving && !isDeleting ? (
+                         <DropdownMenu>
+                           <DropdownMenuTrigger asChild>
+                             <button
+
                               type="button"
                               onClick={(e) => e.stopPropagation()}
                               className={cn(

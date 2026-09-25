@@ -6,6 +6,7 @@ import { MarkdownRenderer } from "./MarkdownRenderer";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
 import { cn } from "@/lib/utils";
+import { isIngestionActive } from "@/types/db";
 
 type ChatMessage = {
   id: string;
@@ -109,7 +110,12 @@ export function ChatPane() {
   const fileIdRef = useRef<string | null>(null);
 
   const checkProcessedQuery = useFileStatus(file);
-  const messagesQuery = useFileMessages(file, checkProcessedQuery.data?.is_processed === true);
+  const ingestionJob = checkProcessedQuery.data?.ingestion;
+  const isIndexing = isIngestionActive(ingestionJob?.state);
+  const messagesQuery = useFileMessages(
+    file,
+    checkProcessedQuery.data?.is_processed === true && !isIndexing
+  );
   const watchedFileId = file?.id ?? null;
 
   useEffect(() => {
@@ -150,7 +156,7 @@ export function ChatPane() {
 
   async function send(text: string) {
     const body = text.trim();
-    if (!body || !file || thinking) return;
+    if (!body || !file || thinking || isIndexing) return;
     setValue("");
     setThinking(true);
     const botId = crypto.randomUUID();
@@ -218,7 +224,7 @@ export function ChatPane() {
   }
 
   const isProcessed = checkProcessedQuery.data?.is_processed;
-  const inputDisabled = !file || !isProcessed;
+  const inputDisabled = !file || !isProcessed || isIndexing;
 
   return (
     <section className="flex w-[26rem] shrink-0 flex-col border-l border-rule bg-background">
@@ -250,15 +256,17 @@ export function ChatPane() {
           </div>
         )}
 
-        {file && !isProcessed && (
+        {file && (!isProcessed || isIndexing) && (
           <div className="flex flex-col items-center py-16 text-center">
             <Loader2 className="size-6 animate-spin text-ink-faint" />
-            <h4 className="mt-4 font-serif text-sm font-medium">Indexing Document…</h4>
+            <h4 className="mt-4 font-serif text-sm font-medium">
+              {isIndexing ? "Reindexing Document…" : "Indexing Document…"}
+            </h4>
             <p className="mt-1 max-w-[26ch] text-xs leading-relaxed text-ink-faint">Generating semantic vector representations for retrieval-augmented analysis.</p>
           </div>
         )}
 
-        {file && isProcessed && messages.length === 0 && !thinking && (
+        {file && isProcessed && !isIndexing && messages.length === 0 && !thinking && (
           <div className="rounded-sm border border-rule bg-paper p-5 text-center shadow-sm">
             <h4 className="font-mono text-[0.68rem] font-semibold uppercase tracking-widest">Session Initialized</h4>
             <p className="mx-auto mt-2 max-w-[30ch] font-serif text-xs leading-relaxed text-ink-faint">

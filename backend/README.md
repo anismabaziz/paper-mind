@@ -89,10 +89,14 @@ uv run python worker.py     # claims and processes ingestion jobs
 Upload stores the PDF and creates one queued ingestion job in the same
 transaction, then returns immediately. The worker claims queued jobs, moves
 them through parsing, embedding, indexing, and validation while refreshing a
-heartbeat, and records stage, progress, attempt count, and a safe error
-category. A worker that stops leaves a running job that the next worker
-requeues once the heartbeat goes stale, so interrupted work is recoverable.
-`uv run python worker.py --once` drains the current queue and exits.
+heartbeat, and records stage, progress, attempt count, resource usage, and a
+safe error category. A worker that stops leaves a recoverable job. Users can
+cancel queued or running work through the ingestion-job API; a cancelled or
+limited job remains retryable. The worker checks these bounds before and after
+each ingestion stage. Configure `MAX_INGESTION_PAGES`,
+`MAX_INGESTION_TEXT_BYTES`, `MAX_INGESTION_OUTPUT_BYTES`,
+`MAX_INGESTION_SECONDS`, and `MAX_INGESTION_MEMORY_BYTES` to bound work per
+job. `uv run python worker.py --once` drains the current queue and exits.
 
 ## Tests
 

@@ -267,6 +267,31 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             log.exception("get_ingestion_job failed for %r", filename)
             return jsonify({"error": "Internal server error"}), 500
 
+    @app.route("/ingestion-jobs/<path:filename>/cancel", methods=["POST"])
+    def cancel_ingestion_job(filename):
+        try:
+            guard = traversal_check(storage, filename)
+            if guard is not None:
+                return guard
+            file_record = files_repository.get_file(filename)
+            if not file_record:
+                return jsonify({"error": "File not found"}), 404
+            if _is_deleting(file_record):
+                return _deletion_blocked_response(file_record)
+            with _document_lock(filename):
+                job = ingestion_jobs.request_cancel(file_record["id"])
+            if job is None:
+                return jsonify({"error": "No ingestion job for this document"}), 404
+            return jsonify(
+                {
+                    "job": job,
+                    "cancelled": job["state"] in ("cancelling", "cancelled"),
+                }
+            ), 200
+        except Exception:
+            log.exception("cancel_ingestion_job failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
+
     @app.route("/ingestion-jobs/<path:filename>/retry", methods=["POST"])
     def retry_ingestion_job(filename):
         """Queue a new attempt for a document that is not already active."""
@@ -286,8 +311,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                 return jsonify(
                     {
                         "error": (
-                            "An ingestion job is already active for this "
-                            "document."
+                            "An ingestion job is already active for this document."
                         ),
                         "category": "ingestion_job_active",
                         "job": active,
@@ -465,9 +489,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                             "Could not remove file: invalid filename. Retry deletion.",
                         )
                     except Exception:
-                        log.exception(
-                            "delete-failed marking failed for %r", filename
-                        )
+                        log.exception("delete-failed marking failed for %r", filename)
                     return jsonify({"error": "Invalid filename"}), 400
                 except Exception:
                     log.exception("storage delete failed for %r", filename)
@@ -507,9 +529,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                             f"Could not remove {detail}. Retry deletion.",
                         )
                     except Exception:
-                        log.exception(
-                            "delete-failed marking failed for %r", filename
-                        )
+                        log.exception("delete-failed marking failed for %r", filename)
                     # A metadata failure after external cleanup succeeded is
                     # still not a success: the row remains for retry.
                     if metadata_failed and not conversation_failed:

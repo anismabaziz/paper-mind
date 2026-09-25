@@ -49,6 +49,9 @@ class FileRecord(Base):
         String(255), nullable=True, default=None
     )
     is_processed: Mapped[bool] = mapped_column(default=False)
+    index_generation: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
     last_opened_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
@@ -71,8 +74,8 @@ class IngestionJob(Base):
             "uq_ingestion_jobs_one_active",
             "file_id",
             unique=True,
-            sqlite_where=text("state IN ('queued', 'running')"),
-            postgresql_where=text("state IN ('queued', 'running')"),
+            sqlite_where=text("state IN ('queued', 'running', 'cancelling')"),
+            postgresql_where=text("state IN ('queued', 'running', 'cancelling')"),
         ),
     )
 
@@ -89,9 +92,7 @@ class IngestionJob(Base):
     error_category: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
     )
-    error_message: Mapped[str | None] = mapped_column(
-        Text, nullable=True, default=None
-    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     worker_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, default=None
     )
@@ -110,6 +111,14 @@ class IngestionJob(Base):
     heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    limits_json: Mapped[str] = mapped_column(Text, default="{}")
+    usage_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
 class AppSettings(Base):

@@ -1,6 +1,13 @@
 export type DeletionState = "active" | "deleting" | "delete_failed";
 
-export type IngestionState = "queued" | "running" | "failed" | "stale" | "ready";
+export type IngestionState =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "cancelled"
+  | "failed"
+  | "stale"
+  | "ready";
 
 export type IngestionStage =
   | "queued"
@@ -8,6 +15,8 @@ export type IngestionStage =
   | "embedding"
   | "indexing"
   | "validating"
+  | "cancelling"
+  | "cancelled"
   | "ready"
   | "failed"
   | "stale";
@@ -29,11 +38,17 @@ export interface IngestionJob {
   started_at: string | null;
   finished_at: string | null;
   heartbeat_at: string | null;
+  cancel_requested_at?: string | null;
+  cancelled_at?: string | null;
+  cancellation_requested?: boolean;
+  limits?: Record<string, number>;
+  usage?: Record<string, number>;
 }
 
 export interface File {
   id: string;
   is_processed: boolean;
+  index_generation?: number | null;
   last_opened_at: string | null;
   deletion_state: DeletionState;
   deletion_error: string | null;
@@ -59,6 +74,8 @@ const STAGE_LABELS: Record<IngestionStage, string> = {
   embedding: "Embedding",
   indexing: "Indexing",
   validating: "Validating",
+  cancelling: "Cancelling",
+  cancelled: "Cancelled",
   ready: "Ready",
   failed: "Failed",
   stale: "Superseded",
@@ -69,5 +86,13 @@ export function ingestionStageLabel(stage: IngestionStage): string {
 }
 
 export function isIngestionActive(state: IngestionState | undefined): boolean {
+  return state === "queued" || state === "running" || state === "cancelling";
+}
+
+export function isIngestionCancellable(state: IngestionState | undefined): boolean {
   return state === "queued" || state === "running";
+}
+
+export function isIngestionRetryable(state: IngestionState | undefined): boolean {
+  return state === "failed" || state === "cancelled";
 }

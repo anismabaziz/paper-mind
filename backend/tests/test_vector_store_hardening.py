@@ -108,6 +108,28 @@ def test_hybrid_query_uses_named_vectors_rrf_60_and_candidate_depth():
     assert call["limit"] == 50
 
 
+def test_legacy_generation_filter_matches_unversioned_points():
+    """Legacy documents query only points without a generation payload."""
+    mock_client = MagicMock()
+    mock_client.collection_exists.return_value = True
+    mock_client.get_collection.return_value = _valid_collection()
+    mock_client.query_points.return_value.points = []
+    adapter = QdrantIndexAdapter(mock_client, "pdf-index")
+
+    adapter.query(
+        [0.1] * 1024,
+        50,
+        filter={"pdf_name": "doc.pdf", "index_generation": None},
+        method="dense",
+    )
+
+    query_filter = mock_client.query_points.call_args.kwargs["query_filter"]
+    assert any(
+        getattr(getattr(condition, "is_empty", None), "key", None) == "index_generation"
+        for condition in query_filter.must
+    )
+
+
 def test_sparse_query_selects_named_sparse_vector():
     """Sparse-only retrieval selects the stored sparse representation."""
     mock_client = MagicMock()

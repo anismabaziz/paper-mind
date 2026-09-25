@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Loader2,
   RotateCw,
+  Square,
 } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
@@ -21,10 +22,11 @@ import {
   useFileMeta,
   useDeleteFile,
   useRetryIngestion,
+  useCancelIngestion,
 } from "@/hooks/useFiles";
 import { cn } from "@/lib/utils";
 import { isDetached } from "@/lib/bytes";
-import { displayTitle, ingestionStageLabel, isIngestionActive } from "@/types/db";
+import { displayTitle, ingestionStageLabel, isIngestionActive, isIngestionCancellable, isIngestionRetryable } from "@/types/db";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -159,11 +161,14 @@ export function ReaderPane() {
 
   const retryIngestion = useRetryIngestion();
   const retryError = retryIngestion.error instanceof Error ? retryIngestion.error.message : null;
+  const cancelIngestion = useCancelIngestion();
+  const cancelError = cancelIngestion.error instanceof Error ? cancelIngestion.error.message : null;
 
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
   const ingestionJob = checkProcessedQuery.data?.ingestion ?? null;
   const isJobActive = isIngestionActive(ingestionJob?.state);
   const isJobFailed = ingestionJob?.state === "failed";
+  const isJobRetryable = isIngestionRetryable(ingestionJob?.state);
   const outline = metaQuery.data?.outline ?? [];
   const metaPageCount = metaQuery.data?.pageCount ?? null;
   const { setLibraryOpen, setChatOpen } = useMobileUi();
@@ -318,6 +323,14 @@ export function ReaderPane() {
           </p>
         </div>
       )}
+      {cancelIngestion.isError && file && (
+        <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
+          <p className="text-xs font-medium text-destructive">Cancellation failed</p>
+          <p className="mt-0.5 text-[0.65rem] text-ink-soft">
+            {cancelError ?? "The indexing job could not be cancelled."}
+          </p>
+        </div>
+      )}
       {deleteMutation.isError && file && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
           <p className="text-xs font-medium text-destructive">Delete failed — the document was kept.</p>
@@ -357,7 +370,7 @@ export function ReaderPane() {
               {file ? displayTitle(file) : "Document Viewer"}
             </p>
             <p className="label-meta truncate">
-              {file ? `${file.metadata.content_type} · ${file.deletion_state === "deleting" ? "Deleting" : file.deletion_state === "delete_failed" ? "Delete failed" : isProcessed ? "Indexed" : isJobActive ? `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} ${ingestionJob?.progress ?? 0}%` : isJobFailed ? "Indexing failed" : "Indexing"}` : "No document selected"}
+              {file ? `${file.metadata.content_type} · ${file.deletion_state === "deleting" ? "Deleting" : file.deletion_state === "delete_failed" ? "Delete failed" : isJobActive ? `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} ${ingestionJob?.progress ?? 0}%` : isJobRetryable ? (isJobFailed ? "Indexing failed" : "Indexing cancelled") : isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
             </p>
           </div>
         </div>
@@ -582,10 +595,29 @@ export function ReaderPane() {
                       isProcessed ? "border-marker bg-marker-soft text-marker" : "border-rule bg-canvas text-ink-faint",
                     )}
                   >
-                    {isProcessed ? "Ready for questions" : isJobFailed ? "Indexing failed" : `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} · ${ingestionJob?.progress ?? 0}%`}
+                    {isJobActive
+                      ? `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} · ${ingestionJob?.progress ?? 0}%`
+                      : isJobRetryable
+                        ? isJobFailed
+                          ? "Indexing failed"
+                          : "Indexing cancelled"
+                        : isProcessed
+                          ? "Ready for questions"
+                          : "Indexing"}
                   </span>
-                  <span className="font-mono text-[0.62rem] text-ink-faint">Page {String(page).padStart(2, "0")}</span>
-                </div>
+                  {isJobRetryable && isProcessed && !isJobActive && file && (
+                    <button
+                      type="button"
+                      onClick={() => retryIngestion.mutate(file.name)}
+                      disabled={retryIngestion.isPending}
+                      className="ml-2 border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] text-ink-soft hover:border-ink hover:text-ink disabled:opacity-40"
+                    >
+                      Retry
+                    </button>
+                  )}
+                   <span className="font-mono text-[0.62rem] text-ink-faint">Page {String(page).padStart(2, "0")}</span>
+                 </div>
+
                 <p className="mt-4 font-serif text-[0.95rem] leading-[1.7] text-ink-soft italic">
                   <span className="mr-2 font-mono text-[0.62rem] tracking-[0.14em] text-marker not-italic uppercase">Abstract</span>
                   This workspace keeps every answer tied to the passage it came from. Ask a question in the companion and the document stays open beside it — no context lost.
@@ -619,23 +651,27 @@ export function ReaderPane() {
                       />
                     </Suspense>
                   </div>
-                  {!isProcessed && (
+                  {(!isProcessed || isJobActive) && (
                     <div className="absolute inset-3 grid place-items-center bg-paper/70 backdrop-blur-[1px]">
                       <div className="rounded-sm border border-rule bg-paper px-4 py-3 text-center shadow-sheet">
                         <p className="font-mono text-xs font-medium" role="status">
                           {isJobFailed
                             ? "Indexing failed"
-                            : `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} · ${
-                                ingestionJob?.progress ?? 0
-                              }%`}
+                            : isJobRetryable
+                              ? "Indexing cancelled"
+                              : `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} · ${
+                                  ingestionJob?.progress ?? 0
+                                }%`}
                         </p>
                         <p className="mt-1 text-xs text-ink-soft">
                           {isJobFailed
                             ? (ingestionJob?.error_message ??
                               "Indexing failed before this document was ready.")
-                            : "Semantic vectors are being generated — chat will unlock when this pass finishes."}
+                            : isJobRetryable
+                              ? "The indexing job was cancelled. You can retry it when ready."
+                              : "Semantic vectors are being generated — chat will unlock when this pass finishes."}
                         </p>
-                        {isJobFailed && file && (
+                        {isJobRetryable && file && (
                           <button
                             type="button"
                             onClick={() => retryIngestion.mutate(file.name)}
@@ -650,10 +686,26 @@ export function ReaderPane() {
                             Retry indexing
                           </button>
                         )}
+                        {isJobActive && isIngestionCancellable(ingestionJob?.state) && file && (
+                          <button
+                            type="button"
+                            onClick={() => cancelIngestion.mutate(file.name)}
+                            disabled={cancelIngestion.isPending}
+                            className="mt-3 ml-2 inline-flex items-center gap-1.5 border border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] text-ink-soft hover:border-destructive hover:text-destructive disabled:opacity-40"
+                          >
+                            {cancelIngestion.isPending ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Square className="size-3" />
+                            )}
+                            Cancel indexing
+                          </button>
+                        )}
                       </div>
                     </div>
-                  )}
-                </div>
+                   )}
+                 </div>
+
                 <div className="flex items-center justify-between border-t border-rule px-10 py-4">
                   <span className="label-meta">p. {String(page).padStart(2, "0")}</span>
                   <span className="label-meta">{String(page).padStart(2, "0")}</span>

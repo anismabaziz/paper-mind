@@ -30,7 +30,7 @@ vi.mock("./client", () => ({
   apiBaseUrl: "http://127.0.0.1:3000",
 }));
 
-import { retryIngestionJob, uploadFile } from "./files";
+import { cancelIngestionJob, retryIngestionJob, uploadFile } from "./files";
 
 describe("ingestion job routes", () => {
   beforeEach(() => {
@@ -47,6 +47,17 @@ describe("ingestion job routes", () => {
 
     await expect(retryIngestionJob("doc.pdf")).resolves.toEqual(retried);
     expect(request).toHaveBeenCalledWith("post", "/ingestion-jobs/doc.pdf/retry");
+  });
+
+  it("requests cancellation through the document cancel route", async () => {
+    const cancelled = { ...queuedJob, state: "cancelling" as const };
+    request.mockResolvedValue({ data: { job: cancelled, cancelled: true } });
+
+    await expect(cancelIngestionJob("a b/c.pdf")).resolves.toEqual(cancelled);
+    expect(request).toHaveBeenCalledWith(
+      "post",
+      "/ingestion-jobs/a%20b%2Fc.pdf/cancel"
+    );
   });
 
   it("escapes the document name in the retry route", async () => {

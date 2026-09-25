@@ -51,6 +51,13 @@ export async function retryIngestionJob(name: string) {
   return response.data.job;
 }
 
+export async function cancelIngestionJob(name: string) {
+  const response = await client.post<{ job: IngestionJob; cancelled: boolean }>(
+    `/ingestion-jobs/${encodeURIComponent(name)}/cancel`
+  );
+  return response.data.job;
+}
+
 interface IMarkOpened {
   last_opened_at: string | null;
 }

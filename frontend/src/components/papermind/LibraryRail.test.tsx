@@ -3,13 +3,18 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryRail } from "./LibraryRail";
-import { getFiles, retryIngestionJob } from "@/services/files";
+import { cancelIngestionJob, getFiles, retryIngestionJob } from "@/services/files";
 import usePdfStore from "@/store/pdf-state";
 import type { File, IngestionJob } from "@/types/db";
 
 vi.mock("@/services/files", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/services/files")>();
-  return { ...original, getFiles: vi.fn(), retryIngestionJob: vi.fn() };
+  return {
+    ...original,
+    getFiles: vi.fn(),
+    retryIngestionJob: vi.fn(),
+    cancelIngestionJob: vi.fn(),
+  };
 });
 
 vi.mock("react-pdf", () => ({
@@ -69,6 +74,9 @@ function renderRail() {
 }
 
 beforeEach(() => {
+  vi.mocked(cancelIngestionJob).mockResolvedValue(
+    makeJob({ state: "cancelling", stage: "cancelling" })
+  );
   vi.mocked(retryIngestionJob).mockResolvedValue(
     makeJob({ state: "queued", stage: "queued", progress: 0, attempt: 2 })
   );
@@ -86,6 +94,20 @@ describe("LibraryRail ingestion state", () => {
 
     expect(await screen.findByText(/Embedding · 45%/)).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Embedding 45%" })).toBeInTheDocument();
+  });
+
+  it("offers cancellation while a job is active", async () => {
+    vi.mocked(getFiles).mockResolvedValue({ files: [makeFile(makeJob())] });
+    renderRail();
+
+    const cancel = await screen.findByRole("button", {
+      name: /Cancel indexing Attention Is All You Need/,
+    });
+    fireEvent.click(cancel);
+
+    await waitFor(() => {
+      expect(cancelIngestionJob).toHaveBeenCalledWith("doc.pdf");
+    });
   });
 
   it("shows the failure message and a retry action", async () => {
@@ -116,6 +138,30 @@ describe("LibraryRail ingestion state", () => {
     await waitFor(() => {
       expect(retryIngestionJob).toHaveBeenCalledWith("doc.pdf");
     });
+  });
+
+  it("keeps retry available after cancellation", async () => {
+    vi.mocked(getFiles).mockResolvedValue({
+      files: [
+        makeFile(
+          makeJob({
+            state: "cancelled",
+            stage: "cancelled",
+            progress: 45,
+            error_category: "cancelled",
+            error_message: "The indexing job was cancelled.",
+          })
+        ),
+      ],
+    });
+    renderRail();
+
+    expect(await screen.findByText(/Cancelled/)).toBeInTheDocument();
+    const retry = screen.getByRole("button", {
+      name: /Retry indexing Attention Is All You Need/,
+    });
+    fireEvent.click(retry);
+    await waitFor(() => expect(retryIngestionJob).toHaveBeenCalledWith("doc.pdf"));
   });
 
   it("marks a ready job as indexed", async () => {

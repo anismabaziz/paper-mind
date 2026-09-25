@@ -24,6 +24,7 @@ def map_batches_concurrently(
     *,
     label: str,
     max_workers: int = 4,
+    before_batch: Callable[[], None] | None = None,
 ) -> list[R]:
     """
     Run ``func`` over ``batches`` concurrently, preserving input order.
@@ -41,9 +42,19 @@ def map_batches_concurrently(
         return []
 
     if len(batches) == 1:
+        if before_batch is not None:
+            before_batch()
         return [func(batches[0])]
 
     start = time.time()
+
+    def checked(batch: T) -> R:
+        if before_batch is not None:
+            before_batch()
+        return func(batch)
+
+    def run_sequentially() -> list[R]:
+        return [checked(batch) for batch in batches]
 
     # Infrastructure phase: pool creation and submission. Any failure here
     # is a thread-pool problem and warrants a sequential fallback. Business
@@ -57,22 +68,22 @@ def map_batches_concurrently(
             f"{label}: concurrent batching failed after {elapsed:.2f}s "
             f"({exc}), falling back to sequential"
         )
-        return [func(batch) for batch in batches]
+        return run_sequentially()
 
     with executor:
-        try:
-            futures = {
-                executor.submit(func, batch): idx for idx, batch in enumerate(batches)
-            }
-        except Exception as exc:
-            elapsed = time.time() - start
-            print(
-                f"{label}: concurrent batching failed after {elapsed:.2f}s "
-                f"({exc}), falling back to sequential"
-            )
-            # Shut down without waiting so a stuck submit does not hang boot.
-            executor.shutdown(wait=False, cancel_futures=True)
-            return [func(batch) for batch in batches]
+        futures = {}
+        for idx, batch in enumerate(batches):
+            try:
+                future = executor.submit(checked, batch)
+            except Exception as exc:
+                elapsed = time.time() - start
+                print(
+                    f"{label}: concurrent batching failed after {elapsed:.2f}s "
+                    f"({exc}), falling back to sequential"
+                )
+                executor.shutdown(wait=False, cancel_futures=True)
+                return run_sequentially()
+            futures[future] = idx
 
         # Business phase: collection. Let func errors propagate so a
         # retry-exhausted embedding or an upsert rejection is not hidden.

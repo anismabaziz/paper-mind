@@ -169,6 +169,45 @@ class UploadSettings(BaseSettings):
     allowed_mime_types: set[str] = {"application/pdf"}
 
 
+DEFAULT_MAX_INGESTION_PAGES = 1000
+DEFAULT_MAX_INGESTION_TEXT_BYTES = 100 * 1024 * 1024
+DEFAULT_MAX_INGESTION_OUTPUT_BYTES = 512 * 1024 * 1024
+DEFAULT_MAX_INGESTION_SECONDS = 1800.0
+DEFAULT_MAX_INGESTION_MEMORY_BYTES = 4 * 1024 * 1024 * 1024
+
+
+class IngestionSettings(BaseSettings):
+    """Resource limits applied to each durable ingestion job."""
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    max_pages: int = Field(
+        default=DEFAULT_MAX_INGESTION_PAGES,
+        ge=0,
+        validation_alias="MAX_INGESTION_PAGES",
+    )
+    max_extracted_text_bytes: int = Field(
+        default=DEFAULT_MAX_INGESTION_TEXT_BYTES,
+        ge=0,
+        validation_alias="MAX_INGESTION_TEXT_BYTES",
+    )
+    max_output_bytes: int = Field(
+        default=DEFAULT_MAX_INGESTION_OUTPUT_BYTES,
+        ge=0,
+        validation_alias="MAX_INGESTION_OUTPUT_BYTES",
+    )
+    max_elapsed_seconds: float = Field(
+        default=DEFAULT_MAX_INGESTION_SECONDS,
+        ge=0,
+        validation_alias="MAX_INGESTION_SECONDS",
+    )
+    max_memory_bytes: int = Field(
+        default=DEFAULT_MAX_INGESTION_MEMORY_BYTES,
+        ge=0,
+        validation_alias="MAX_INGESTION_MEMORY_BYTES",
+    )
+
+
 class FrontendSettings(BaseSettings):
     """Frontend origin for CORS allowlist."""
 
@@ -200,6 +239,7 @@ class Settings(BaseSettings):
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     upload: UploadSettings = Field(default_factory=UploadSettings)
+    ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
     frontend: FrontendSettings = Field(default_factory=FrontendSettings)
 
 

@@ -5,6 +5,7 @@ import {
   deleteFile,
   checkIsProcessed,
   retryIngestionJob,
+  cancelIngestionJob,
   getMessages,
   getFileMeta,
   markFileOpened,
@@ -48,11 +49,9 @@ export function useFileStatus(file: Pick<DbFile, "name"> | null | undefined) {
     queryFn: () => checkIsProcessed(file as DbFile),
     enabled: !!file,
     refetchInterval: (q) => {
+      if (isIngestionActive(q.state.data?.ingestion?.state)) return ACTIVE_POLL_MS;
       if (q.state.data?.is_processed) return false;
-      return isIngestionActive(q.state.data?.ingestion?.state) ||
-        q.state.error
-        ? ACTIVE_POLL_MS
-        : false;
+      return q.state.error ? ACTIVE_POLL_MS : false;
     },
   });
 }
@@ -115,6 +114,22 @@ export function useRetryIngestion(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: retryIngestionJob,
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: fileKeys.status(name) });
+    },
+    onError: (err, name) => {
+      options?.onError?.(err, name);
+    },
+  });
+}
+
+export function useCancelIngestion(
+  options?: MutationCallbacks<Awaited<ReturnType<typeof cancelIngestionJob>>, string>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: cancelIngestionJob,
     onSuccess: (_data, name) => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
       queryClient.invalidateQueries({ queryKey: fileKeys.status(name) });
