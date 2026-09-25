@@ -80,3 +80,12 @@ class VectorStore(ABC):
     @abstractmethod
     def delete(self, filter=None, delete_all=False) -> dict:
         """Delete by filter (or everything when ``delete_all`` is set)."""
+
+    def generation_report(self, filter=None, limit=1000, value_keys=()):
+        """
+        Describe what one index generation stores, or ``None`` when unsupported.
+
+        A store that cannot inventory its points returns ``None``, which limits
+        activation to a point-count check.
+        """
+        return None

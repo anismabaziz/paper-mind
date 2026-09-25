@@ -53,6 +53,8 @@ files = [
     "evaluation/evaluator.py",
     "repositories",
     "routes",
+    "services/indexing",
+    "services/ingestion",
     "services/retrieval",
     "services/titles.py",
 ]

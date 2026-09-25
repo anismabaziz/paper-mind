@@ -9,6 +9,7 @@ from db import get_session_factory
 from repositories.app_settings import AppSettingsRepository
 from repositories.conversations import ConversationRepository
 from repositories.files import FileRepository
+from repositories.index_cleanups import IndexCleanupRepository
 from repositories.ingestion_jobs import IngestionJobRepository
 
 
@@ -20,6 +21,7 @@ class Repositories:
     app_settings: AppSettingsRepository
     conversations: ConversationRepository
     ingestion_jobs: IngestionJobRepository
+    index_cleanups: IndexCleanupRepository
 
 
 def build_repositories(
@@ -32,6 +34,7 @@ def build_repositories(
         app_settings=AppSettingsRepository(factory),
         conversations=ConversationRepository(factory),
         ingestion_jobs=IngestionJobRepository(factory),
+        index_cleanups=IndexCleanupRepository(factory),
     )
 
 
@@ -40,6 +43,7 @@ __all__ = [
     "ConversationRepository",
     "FileRepository",
     "IngestionJobRepository",
+    "IndexCleanupRepository",
     "Repositories",
     "build_repositories",
 ]

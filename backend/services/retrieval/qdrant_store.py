@@ -39,6 +39,29 @@ DENSE_SIZE = 1024
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
 
+# Payload fields a stored Passage must carry for retrieval and citations.
+_REPORTED_PAYLOAD_KEYS = (
+    "content",
+    "pdf_name",
+    "chunk_index",
+    "content_hash",
+    "page_no",
+    "sparse_method",
+    "sparse_tokenizer_version",
+    "index_generation",
+)
+
+
+def _is_empty_value(value: Any) -> bool:
+    """Return whether a payload value carries no usable information."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, dict, set)):
+        return not value
+    return False
+
 
 class QdrantIndexAdapter(VectorStore):
     """Store and retrieve named dense and sparse vectors in Qdrant."""
@@ -374,6 +397,99 @@ class QdrantIndexAdapter(VectorStore):
             "matches": matches,
             "method": method,
             "outcome": "success" if matches else "empty",
+        }
+
+    @staticmethod
+    def _report_point(point: Any, value_keys: tuple[str, ...]) -> dict[str, Any]:
+        """Describe one stored point for a generation report."""
+        if isinstance(point, dict):
+            payload = point.get("payload") or {}
+            vectors = point.get("vector", point.get("vectors"))
+        else:
+            payload = getattr(point, "payload", None) or {}
+            vectors = getattr(point, "vector", None)
+            if vectors is None:
+                vectors = getattr(point, "vectors", None)
+        dense = vectors.get(DENSE_VECTOR_NAME) if isinstance(vectors, dict) else None
+        sparse = vectors.get(SPARSE_VECTOR_NAME) if isinstance(vectors, dict) else None
+        sparse_indices = getattr(sparse, "indices", None)
+        if sparse_indices is None and isinstance(sparse, dict):
+            sparse_indices = sparse.get("indices")
+        pages: set[int] = set()
+        page_no = payload.get("page_no")
+        if isinstance(page_no, int) and not isinstance(page_no, bool):
+            pages.add(page_no)
+        return {
+            "has_dense": bool(dense),
+            "has_sparse": bool(sparse_indices),
+            "payload": payload,
+            "pages": pages,
+            "value_keys": {
+                key: payload.get(key) for key in value_keys if key in payload
+            },
+        }
+
+    def generation_report(
+        self,
+        filter: dict | None = None,
+        limit: int = 1000,
+        value_keys: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        """
+        Describe what one index generation actually stores.
+
+        The report is an inventory, not a verdict: counting, vector presence,
+        payload completeness, and Page provenance are aggregated here, while
+        the policy that decides whether the generation may be activated lives
+        in :class:`services.retrieval.vector_service.VectorService`.
+        """
+        self._ensure_collection(create=False)
+        total = self.count(filter=filter)
+        try:
+            scrolled = self._client.scroll(
+                collection_name=self._collection,
+                scroll_filter=self._to_filter(filter),
+                limit=limit,
+                with_payload=True,
+                with_vectors=True,
+            )
+        except Exception as exc:
+            self._raise_operation_error(exc, operation="scroll")
+        points = scrolled[0] if isinstance(scrolled, tuple) else scrolled
+        points = list(points or [])
+        without_dense = 0
+        without_sparse = 0
+        missing_payload: dict[str, int] = {}
+        empty_payload: dict[str, int] = {}
+        pages: set[int] = set()
+        distinct_values: dict[str, set[Any]] = {key: set() for key in value_keys}
+        for point in points:
+            described = self._report_point(point, value_keys)
+            if not described["has_dense"]:
+                without_dense += 1
+            if not described["has_sparse"]:
+                without_sparse += 1
+            pages |= described["pages"]
+            for key, value in described["value_keys"].items():
+                distinct_values[key].add(value)
+            payload = described["payload"]
+            for key in _REPORTED_PAYLOAD_KEYS:
+                if key not in payload:
+                    missing_payload[key] = missing_payload.get(key, 0) + 1
+                elif _is_empty_value(payload[key]):
+                    empty_payload[key] = empty_payload.get(key, 0) + 1
+        return {
+            "total": total,
+            "inspected": len(points),
+            "truncated": len(points) < total,
+            "without_dense": without_dense,
+            "without_sparse": without_sparse,
+            "missing_payload": missing_payload,
+            "empty_payload": empty_payload,
+            "pages": sorted(pages),
+            "distinct_values": {
+                key: sorted(value, key=str) for key, value in distinct_values.items()
+            },
         }
 
     def count(self, filter=None) -> int:

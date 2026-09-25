@@ -60,6 +60,11 @@ class FileRecord(Base):
     index_stale_reason: Mapped[str | None] = mapped_column(
         Text, nullable=True, default=None
     )
+    # When this Document's active Index Generation was activated, recorded
+    # with the manifest that generation was built against.
+    index_activated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     last_opened_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
@@ -127,6 +132,37 @@ class IngestionJob(Base):
     )
     limits_json: Mapped[str] = mapped_column(Text, default="{}")
     usage_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class IndexGenerationCleanup(Base):
+    """Durable work to remove a Document's superseded Index Generations."""
+
+    __tablename__ = "index_generation_cleanups"
+    __table_args__ = (
+        Index(
+            "uq_index_generation_cleanups_target",
+            "file_id",
+            "generation",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), index=True)
+    # Zero stands for vectors stored before generations were recorded.
+    generation: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    attempts: Mapped[int] = mapped_column(default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
 
 class AppSettings(Base):

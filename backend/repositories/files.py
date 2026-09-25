@@ -152,6 +152,7 @@ class FileRepository(BaseRepository):
     @staticmethod
     def _to_dict(record: FileRecord) -> dict[str, Any]:
         opened = record.last_opened_at
+        activated = getattr(record, "index_activated_at", None)
         return to_record_dict(
             record,
             filename=record.filename,
@@ -161,6 +162,7 @@ class FileRepository(BaseRepository):
             index_generation=getattr(record, "index_generation", None),
             index_manifest=getattr(record, "index_manifest", None),
             index_stale_reason=getattr(record, "index_stale_reason", None),
+            index_activated_at=activated.isoformat() if activated else None,
             last_opened_at=opened.isoformat() if opened else None,
             deletion_state=getattr(record, "deletion_state", "active") or "active",
             deletion_error=getattr(record, "deletion_error", None),

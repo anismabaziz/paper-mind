@@ -61,6 +61,7 @@ def fake_repositories():
         app_settings=repository,
         conversations=repository,
         ingestion_jobs=repository,
+        index_cleanups=repository,
     )
 
 

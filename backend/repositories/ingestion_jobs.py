@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from db import FileRecord, IngestionJob
 from repositories.base import BaseRepository, to_record_dict
+from repositories.index_cleanups import generation_key
 
 ACTIVE_STATES = ("queued", "running", "cancelling")
 CANCELLABLE_STATES = ("queued", "running")
@@ -318,7 +319,14 @@ class IngestionJobRepository(BaseRepository):
         index_generation: int | None = None,
         index_manifest: str | None = None,
     ) -> dict[str, Any] | None:
-        """Finish a job only while its worker still owns the claim."""
+        """
+        Activate a generation and finish the job in one transaction.
+
+        The Document row is the single place the active generation lives, so
+        the switch and the manifest that describes the new index commit
+        together. A Document that has started deleting is never activated:
+        there would be nothing left to read the generation from.
+        """
         with self._session_factory() as session, session.begin():
             record = session.get(IngestionJob, job_id, with_for_update=True)
             if not self._owned(record, worker_id):
@@ -326,15 +334,29 @@ class IngestionJobRepository(BaseRepository):
             assert record is not None
             now = _utcnow()
             if index_generation is not None:
-                file_record = session.get(FileRecord, record.file_id)
-                if file_record is not None:
-                    file_record.index_generation = index_generation
-                    file_record.is_processed = True
-                    if index_manifest is not None:
-                        file_record.index_manifest = index_manifest
-                    # The new generation matches the running configuration,
-                    # so whatever made the previous one stale no longer holds.
-                    file_record.index_stale_reason = None
+                file_record = session.get(
+                    FileRecord, record.file_id, with_for_update=True
+                )
+                if file_record is None or file_record.deletion_state != "active":
+                    record.state = "stale"
+                    record.stage = "stale"
+                    record.error_category = "document_deleting"
+                    record.error_message = (
+                        "The document is being deleted, so indexing was stopped."
+                    )
+                    record.worker_id = None
+                    record.finished_at = now
+                    record.heartbeat_at = now
+                    session.flush()
+                    return None
+                file_record.index_generation = index_generation
+                file_record.is_processed = True
+                file_record.index_activated_at = now
+                if index_manifest is not None:
+                    file_record.index_manifest = index_manifest
+                # The new generation matches the running configuration,
+                # so whatever made the previous one stale no longer holds.
+                file_record.index_stale_reason = None
             record.state = "ready"
             record.stage = "ready"
             record.progress = 100
@@ -344,6 +366,18 @@ class IngestionJobRepository(BaseRepository):
             record.heartbeat_at = now
             session.flush()
             return ingestion_job_to_dict(record)
+
+    def holds_generation(self, file_id: str, generation: int | None) -> bool:
+        """Return whether an active job still owns one generation."""
+        target = generation_key(generation)
+        with self._session_factory() as session:
+            record = session.scalars(
+                select(IngestionJob)
+                .where(IngestionJob.file_id == file_id)
+                .where(IngestionJob.generation == target)
+                .where(IngestionJob.state.in_(ACTIVE_STATES))
+            ).first()
+            return record is not None
 
     def mark_failed(
         self,

@@ -10,15 +10,16 @@ from dataclasses import dataclass
 
 import psycopg
 import pytest
+from qdrant_client.models import FieldCondition, Filter as QdrantFilter, MatchValue
 from psycopg import sql
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
-from db import Conversation, IngestionJob, Message, Source
+from db import Conversation, FileRecord, IngestionJob, Message, Source
 from services.embeddings.local_embeddings import EmbeddingService
 from services.llm.base import LLMProvider
-from services.retrieval.base import VectorStore
+from services.retrieval.base import VectorStore, VectorStoreConfigurationError
 from services.retrieval.hybrid import SPARSE_METHOD, TOKENIZER_VERSION
 from services.retrieval.qdrant_store import QdrantIndexAdapter
 from services.retrieval.reranker import Reranker
@@ -252,13 +253,14 @@ def test_migrations_apply_to_an_empty_postgres_database(migrated_database):
         "app_settings",
         "conversations",
         "files",
+        "index_generation_cleanups",
         "ingestion_jobs",
         "messages",
         "sources",
     }
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "b8e4c1a97d30"
+            "c3d7e1f4a9b2"
         )
         for table in (
             "app_settings",
@@ -858,3 +860,223 @@ def test_real_document_goes_stale_and_reindexes_into_a_new_generation(
     )
     assert answered.status_code == 200, answered.text
     assert parse_sse(answered.text)[-1][1]["done"] is True
+
+
+def _generation_points(harness: ApplicationHarness, filename: str, generation) -> int:
+    """Count the Qdrant points of one generation for one document."""
+    return harness.qdrant.count(
+        collection_name=harness.collection_name,
+        count_filter={
+            "must": [
+                {"key": "pdf_name", "match": {"value": filename}},
+                {"key": "index_generation", "match": {"value": generation}},
+            ]
+        },
+        exact=True,
+    ).count
+
+
+def _file_record(harness: ApplicationHarness, filename: str) -> dict:
+    """Read the stored document record the activation transaction writes."""
+    with harness.session_factory() as session:
+        record = session.scalars(
+            select(FileRecord).where(FileRecord.filename == filename)
+        ).first()
+        return {
+            "index_generation": record.index_generation,
+            "index_activated_at": record.index_activated_at,
+            "index_manifest": record.index_manifest,
+            "is_processed": record.is_processed,
+        }
+
+
+@pytest.mark.full_stack
+def test_reindex_activates_a_validated_generation_and_records_the_transition(
+    full_stack_app,
+):
+    """The replacement is validated, activated, and dated in one commit."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    first = _file_record(harness, filename)
+    assert first["index_generation"] == 1
+    assert first["index_activated_at"] is not None
+
+    assert harness.client.post(f"/files/{filename}/reindex").status_code == 201
+    assert _generation_points(harness, filename, 1) > 0
+    assert harness.drain() == 1
+
+    second = _file_record(harness, filename)
+    assert second["index_generation"] == 2
+    assert second["index_activated_at"] >= first["index_activated_at"]
+    assert second["index_manifest"] != first["index_manifest"]
+    assert _generation_points(harness, filename, 1) == 0
+    assert _generation_points(harness, filename, 2) > 0
+    assert harness.repositories.index_cleanups.list_pending() == []
+
+
+@pytest.mark.full_stack
+@pytest.mark.parametrize(
+    "stage",
+    ["open", "embed", "upsert", "count"],
+    ids=["parsing", "embedding", "indexing", "validation"],
+)
+def test_a_reindex_failing_at_any_stage_keeps_the_previous_generation(
+    full_stack_app, stage
+):
+    """A replacement that never completes leaves the readable index alone."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    before = _generation_points(harness, filename, 1)
+    assert before > 0
+
+    failures = {
+        "open": harness.storage,
+        "embed": harness.embeddings,
+        "upsert": harness.vector_store,
+        "count": harness.vector_store,
+    }
+    failures[stage].fail(stage)
+    assert harness.client.post(f"/files/{filename}/reindex").status_code == 201
+    assert harness.drain() == 1
+    failures[stage].unfail(stage)
+
+    job = harness.client.get(f"/ingestion-jobs/{filename}").json()["job"]
+    assert job["state"] == "failed", stage
+    record = _file_record(harness, filename)
+    assert record["index_generation"] == 1, stage
+    assert record["is_processed"] is True, stage
+    assert _generation_points(harness, filename, 1) == before, stage
+    answered = harness.client.post(
+        "/response", json={"query": "What is a RAG pipeline?", "filename": filename}
+    )
+    assert answered.status_code == 200, answered.text
+
+
+@pytest.mark.full_stack
+def test_a_restarted_worker_finishes_the_recorded_generation_cleanup(full_stack_app):
+    """A cleanup that failed once is retried from its durable record."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+
+    harness.vector_store.fail("delete")
+    assert harness.client.post(f"/files/{filename}/reindex").status_code == 201
+    assert harness.drain() == 1
+
+    assert _generation_points(harness, filename, 1) > 0
+    assert _generation_points(harness, filename, 2) > 0
+    pending = harness.repositories.index_cleanups.list_pending()
+    assert [(task["filename"], task["generation"]) for task in pending] == [
+        (filename, 1)
+    ]
+    # The replacement is already active, so chat never waits for the cleanup.
+    assert _file_record(harness, filename)["index_generation"] == 2
+    assert (
+        harness.client.post(
+            "/response", json={"query": "What is a RAG pipeline?", "filename": filename}
+        ).status_code
+        == 200
+    )
+
+    harness.vector_store.unfail("delete")
+    assert harness.build_worker("worker-after-restart").run_pending_cleanups() == 1
+
+    assert _generation_points(harness, filename, 1) == 0
+    assert harness.repositories.index_cleanups.list_pending() == []
+
+
+@pytest.mark.full_stack
+def test_concurrent_reindex_requests_produce_one_activation(full_stack_app):
+    """Racing reindex requests queue one generation, not two."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    responses: list = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(3)
+
+    def request_reindex() -> None:
+        barrier.wait()
+        response = harness.client.post(f"/files/{filename}/reindex")
+        with lock:
+            responses.append(response)
+
+    threads = [threading.Thread(target=request_reindex) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(response.status_code for response in responses) == [201, 202]
+    assert harness.drain() == 1
+    assert _file_record(harness, filename)["index_generation"] == 2
+    assert _generation_points(harness, filename, 1) == 0
+    assert _generation_points(harness, filename, 2) > 0
+    assert harness.repositories.index_cleanups.list_pending() == []
+
+
+@pytest.mark.full_stack
+def test_deleting_a_document_removes_every_generation_from_qdrant(full_stack_app):
+    """Deletion leaves no points behind, whichever generation was active."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    assert harness.client.post(f"/files/{filename}/reindex").status_code == 201
+    assert harness.drain() == 1
+    assert _generation_points(harness, filename, 2) > 0
+
+    assert harness.client.delete(f"/files/remove?path={filename}").status_code == 200
+
+    assert (
+        harness.qdrant.count(
+            collection_name=harness.collection_name,
+            count_filter={"must": [{"key": "pdf_name", "match": {"value": filename}}]},
+            exact=True,
+        ).count
+        == 0
+    )
+    with harness.session_factory() as session:
+        assert (
+            session.scalars(
+                select(FileRecord).where(FileRecord.filename == filename)
+            ).first()
+            is None
+        )
+    assert harness.repositories.index_cleanups.list_pending() == []
+
+
+@pytest.mark.full_stack
+def test_validation_rejects_a_generation_with_missing_vectors(full_stack_app):
+    """Validation reads the stored points, not the counters of a write."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    service = VectorService(harness.vector_store)
+    stored = _generation_points(harness, filename, 1)
+    assert stored > 1
+
+    assert service.validate_generation(filename, 1, stored)["total"] == stored
+
+    harness.qdrant.delete(
+        collection_name=harness.collection_name,
+        points_selector=QdrantFilter(
+            must=[
+                FieldCondition(key="pdf_name", match=MatchValue(value=filename)),
+                FieldCondition(key="index_generation", match=MatchValue(value=1)),
+            ]
+        ),
+        wait=True,
+    )
+
+    with pytest.raises(VectorStoreConfigurationError) as raised:
+        service.validate_generation(filename, 1, stored)
+    assert "failed validation" in str(raised.value)

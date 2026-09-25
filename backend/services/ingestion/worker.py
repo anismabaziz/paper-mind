@@ -9,6 +9,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from repositories.index_cleanups import (
+    UNVERSIONED_GENERATION,
+    IndexCleanupRepository,
+    generation_key,
+)
 from repositories.ingestion_jobs import IngestionJobRepository
 from services.embeddings.local_embeddings import EmbeddingService
 from services.indexing.manifest import manifest_builder as manifest_builder_for
@@ -34,6 +39,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_STALE_TIMEOUT_S = 300
 HEARTBEAT_INTERVAL_S = 15.0
+CLEANUP_BATCH = 50
 
 
 def _page_count(parser: DocumentIngestor, filename: str, file_content: bytes) -> int:
@@ -184,6 +190,7 @@ class IngestionWorker:
         self._jobs = repositories.ingestion_jobs
         self._files = repositories.files
         self._conversations = repositories.conversations
+        self._cleanups: IndexCleanupRepository = repositories.index_cleanups
         self._storage = storage
         self._parser = parser
         self._embeddings = embedding_service
@@ -206,6 +213,7 @@ class IngestionWorker:
 
     def drain(self, limit: int | None = None) -> int:
         """Process queued jobs until the queue is empty or the limit is hit."""
+        self.run_pending_cleanups()
         processed = 0
         while limit is None or processed < limit:
             job = self._jobs.claim_next(
@@ -220,6 +228,79 @@ class IngestionWorker:
             if (self._jobs.get(job["id"]) or {}).get("state") == "cancelling":
                 break
         return processed
+
+    def run_pending_cleanups(self, limit: int = CLEANUP_BATCH) -> int:
+        """Remove superseded generations left behind by earlier activations."""
+        completed = 0
+        for task in self._cleanups.list_pending(limit=limit):
+            if self._run_cleanup(task):
+                completed += 1
+        return completed
+
+    def _run_cleanup(self, task: dict[str, Any]) -> bool:
+        """
+        Remove one superseded generation and retire the recorded work.
+
+        A generation is only removed once a newer one is active: the document
+        must still exist, must not be deleting, must not still list the target
+        as active, and no queued or running job may own it. A target that is
+        still active means the activation that recorded this removal never
+        happened, so the work stays pending for the next one. A removal that
+        fails also stays pending, which is what makes it durable.
+        """
+        cleanups = self._cleanups
+        filename = task["filename"]
+        target = task["generation"]
+        try:
+            record = self._files.get_file(filename)
+            if record is None or record.get("deletion_state") in (
+                "deleting",
+                "delete_failed",
+            ):
+                self._delete_whole_document(filename)
+            elif target == generation_key(record.get("index_generation")):
+                return False
+            elif self._jobs.holds_generation(record["id"], target):
+                return False
+            else:
+                self._delete_generation(filename, target)
+        except Exception as cleanup_error:
+            log.warning(
+                "generation cleanup failed for %s generation %s: %s",
+                filename,
+                target,
+                cleanup_error,
+            )
+            cleanups.record_failure(task["id"], str(cleanup_error))
+            return False
+        cleanups.mark_done(task["id"])
+        return True
+
+    def _delete_generation(self, filename: str, generation: int) -> None:
+        """
+        Delete one generation, or the unversioned vectors before numbering.
+
+        A vector service that cannot delete a generation fails the removal
+        rather than reporting it done, so the work is retried.
+        """
+        if generation == UNVERSIONED_GENERATION:
+            delete = getattr(self._vectors, "delete_unversioned", None)
+            if not callable(delete):
+                raise VectorStoreConfigurationError(
+                    "The vector service cannot remove unversioned vectors"
+                )
+            delete(filename)
+            return
+        delete_generation = getattr(self._vectors, "delete_by_generation", None)
+        if not callable(delete_generation):
+            raise VectorStoreConfigurationError(
+                "The vector service cannot remove an index generation"
+            )
+        delete_generation(filename, generation)
+
+    def _delete_whole_document(self, filename: str) -> None:
+        """Delete every generation of a document that is going away."""
+        self._vectors.delete_by_filename(filename)
 
     def _stage(
         self,
@@ -295,6 +376,9 @@ class IngestionWorker:
                 self._vectors.delete_by_filename(job["filename"])
             return True
         except Exception as cleanup_error:
+            # The removal is owed, so it is recorded and retried later rather
+            # than lost with the worker.
+            self._schedule_cleanup(job["filename"], generation, cleanup_error)
             log.warning(
                 "partial ingestion cleanup failed for %s: %s",
                 job["filename"],
@@ -302,29 +386,16 @@ class IngestionWorker:
             )
             return False
 
-    def _delete_previous_generation(
-        self, filename: str, generation: int | None
-    ) -> bool:
-        """Remove an older generation after the replacement is active."""
-        if generation is None:
-            delete_legacy = getattr(self._vectors, "delete_unversioned", None)
-        else:
-            delete_legacy = getattr(self._vectors, "delete_by_generation", None)
-        if not callable(delete_legacy):
-            return False
-        try:
-            if generation is None:
-                delete_legacy(filename)
-            else:
-                delete_legacy(filename, generation)
-            return True
-        except Exception as cleanup_error:
-            log.warning(
-                "previous generation cleanup failed for %s: %s",
-                filename,
-                cleanup_error,
-            )
-            return False
+    def _schedule_cleanup(
+        self, filename: str, generation: int | None, reason: Exception | None = None
+    ) -> None:
+        """Record a generation removal the worker still owes."""
+        record = self._files.get_file(filename)
+        if record is None:
+            return
+        self._cleanups.schedule(record["id"], filename, generation)
+        if reason is not None:
+            log.warning("cleanup recorded for %s: %s", filename, reason)
 
     def _process(self, job: dict[str, Any]) -> None:
         """Run one claimed job through the ingestion stages."""
@@ -417,6 +488,7 @@ class IngestionWorker:
                         filename,
                         job["generation"],
                         len(embeddings),
+                        page_count=page_count or None,
                     )
                 guard.observe()
                 if self._cancel_if_requested(job, guard, cleanup=True):
@@ -432,6 +504,10 @@ class IngestionWorker:
                     self._conversations.get_conversation_id(fresh["id"])
                 ):
                     self._conversations.create_conversation(fresh["id"])
+                # The removal of the generation this one replaces is written
+                # down before activation, so a restart between the two still
+                # retires the superseded vectors.
+                self._schedule_cleanup(filename, previous_generation)
                 if (
                     self._jobs.mark_ready(
                         job["id"],
@@ -443,13 +519,9 @@ class IngestionWorker:
                     )
                     is None
                 ):
-                    self._cancel_if_requested(job, guard, cleanup=True)
-                    log.warning(
-                        "ingestion job %s lost its claim before ready",
-                        job["id"],
-                    )
+                    self._handle_refused_activation(job, guard)
                     return
-                self._delete_previous_generation(filename, previous_generation)
+                self.run_pending_cleanups()
                 log.info("ingestion job %s ready for %s", job["id"], filename)
             except IngestionCancelled:
                 self._cancel_if_requested(job, guard, cleanup=partial_vectors)
@@ -462,6 +534,30 @@ class IngestionWorker:
             except Exception as exc:  # noqa: BLE001 - persisted as a safe category
                 log.exception("ingestion job %s failed for %s", job["id"], filename)
                 self._fail(job, _classify(exc), guard)
+
+    def _handle_refused_activation(
+        self, job: dict[str, Any], guard: ResourceGuard
+    ) -> None:
+        """
+        Wind up a job whose activation was refused.
+
+        Refusal is either a cancellation, a claim another worker took, or a
+        Document that started deleting. Only the vectors this job wrote are
+        removed, and the reason is logged rather than guessed.
+        """
+        if self._cancel_if_requested(job, guard, cleanup=True):
+            return
+        current = self._jobs.get(job["id"])
+        if current is None or current.get("state") == "stale":
+            self._cleanup_partial(job)
+            log.info(
+                "ingestion job %s was superseded before activation: %s",
+                job["id"],
+                (current or {}).get("error_category"),
+            )
+            return
+        self._cleanup_partial(job)
+        log.warning("ingestion job %s lost its claim before ready", job["id"])
 
     def _supersede(self, job: dict[str, Any]) -> None:
         """Stop a job whose document is being deleted."""
