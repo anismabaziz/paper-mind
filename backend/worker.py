@@ -26,6 +26,7 @@ def build_worker() -> IngestionWorker:
         parser=services.parser,
         embedding_service=services.embedding_service,
         vector_service=services.vector_service,
+        limits=services.settings.ingestion,
     )
 
 

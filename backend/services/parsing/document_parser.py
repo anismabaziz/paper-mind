@@ -16,11 +16,13 @@ import io
 import logging
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from services.ingestion.limits import IngestionCancelled, IngestionLimitExceeded
 from services.parsing.pdf_heuristics import should_use_docling
 
 log = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ def _token_len(text: str) -> int:
 
 
 def _pdf_page_count(file_bytes: bytes) -> int:
-    """Count PDF pages; 0 when uncountable, which callers treat as unverified."""
+    """Count PDF pages, returning -1 when the count cannot be trusted."""
     try:
         import pymupdf
 
@@ -44,7 +46,7 @@ def _pdf_page_count(file_bytes: bytes) -> int:
         log.warning(
             "page count unavailable, treating provenance as unverified: %s", exc
         )
-        return 0
+        return -1
 
 
 @dataclass(frozen=True)
@@ -96,8 +98,10 @@ class TokenChunker:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-    def split_text(self, text) -> list[str]:
+    def split_text(self, text, check: Callable[[], None] | None = None) -> list[str]:
         """Split one text into token-bounded, overlapping chunks."""
+        if check is not None:
+            check()
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
@@ -105,9 +109,15 @@ class TokenChunker:
             is_separator_regex=False,
         )
         texts = text_splitter.create_documents([text])
+        if check is not None:
+            check()
         return [doc.page_content for doc in texts]
 
-    def split_pages(self, page_texts: list[str]) -> list[tuple[str, int]]:
+    def split_pages(
+        self,
+        page_texts: list[str],
+        check: Callable[[], None] | None = None,
+    ) -> list[tuple[str, int]]:
         """
         Split per-page texts while preserving page numbers.
 
@@ -117,9 +127,11 @@ class TokenChunker:
         """
         chunks_with_page: list[tuple[str, int]] = []
         for page_no, page_text in enumerate(page_texts, start=1):
+            if check is not None:
+                check()
             if not page_text or not page_text.strip():
                 continue
-            page_chunks = self.split_text(page_text)
+            page_chunks = self.split_text(page_text, check=check)
             for chunk in page_chunks:
                 chunks_with_page.append((chunk, page_no))
         return chunks_with_page
@@ -175,7 +187,10 @@ class DocumentIngestor:
         return resolve_parser(filename, file_bytes, self._use_docling)
 
     def get_chunks(
-        self, filename: str, file_bytes: bytes
+        self,
+        filename: str,
+        file_bytes: bytes,
+        check: Callable[[], None] | None = None,
     ) -> tuple[list[str], list[int | None]]:
         """
         Parse and chunk a file, returning (chunks, page_numbers).
@@ -189,25 +204,45 @@ class DocumentIngestor:
         breaks. Prefer :meth:`get_chunk_objects` for new code — the parallel
         lists are a data clump.
         """
-        result = self.get_chunks_with_status(filename, file_bytes)
+        result = self.get_chunks_with_status(filename, file_bytes, check=check)
         return result.chunks, result.page_numbers
 
-    def get_chunks_with_status(self, filename: str, file_bytes: bytes) -> ParseResult:
+    def get_page_count(self, filename: str, file_bytes: bytes) -> int:
+        """Return a safe page-count preflight for a stored document."""
+        return _pdf_page_count(file_bytes)
+
+    def get_chunks_with_status(
+        self,
+        filename: str,
+        file_bytes: bytes,
+        check: Callable[[], None] | None = None,
+    ) -> ParseResult:
         """
         Parse and chunk, reporting whether page provenance was degraded.
 
         ``degraded`` is True when page numbers fell back to null so callers
         can surface a warning; ``reason`` names the failed branch.
         """
+        if check is not None:
+            check()
         # Try heuristic Docling branch first when warranted, before the plain
         # extension lookup. This keeps two-column / table PDFs correct without
         # paying Docling cost for single-column born-digital PDFs.
-        if should_use_docling(filename, file_bytes, self._use_docling):
+        if check is not None:
+            check()
+        should_use_docling_result = should_use_docling(
+            filename, file_bytes, self._use_docling
+        )
+        if check is not None:
+            check()
+        if should_use_docling_result:
             try:
                 from services.parsing.docling_parser import DoclingParser
 
                 page_texts = DoclingParser().extract_pages(file_bytes)
-                chunks_with_page = self._chunker.split_pages(page_texts)
+                if check is not None:
+                    check()
+                chunks_with_page = self._chunker.split_pages(page_texts, check=check)
                 chunks = [c for c, _ in chunks_with_page]
                 page_numbers = [p for _, p in chunks_with_page]
                 if chunks:
@@ -229,21 +264,31 @@ class DocumentIngestor:
                     return ParseResult(
                         chunks=chunks, page_numbers=page_numbers, degraded=False
                     )
+            except (IngestionCancelled, IngestionLimitExceeded):
+                raise
             except Exception as exc:
                 log.warning(
                     "docling branch failed for %r, trying fast path: %s", filename, exc
                 )
 
+        if check is not None:
+            check()
         parser = self.resolve(filename, file_bytes)
+        if check is not None:
+            check()
         try:
             page_texts = parser.extract_pages(file_bytes)
-            chunks_with_page = self._chunker.split_pages(page_texts)
+            if check is not None:
+                check()
+            chunks_with_page = self._chunker.split_pages(page_texts, check=check)
             chunks = [c for c, _ in chunks_with_page]
             page_numbers = [p for _, p in chunks_with_page]
             if chunks:
                 return ParseResult(
                     chunks=chunks, page_numbers=page_numbers, degraded=False
                 )
+        except (IngestionCancelled, IngestionLimitExceeded):
+            raise
         except Exception as exc:
             log.warning(
                 "page-aware parse failed for %r, falling back to flat text "
@@ -251,8 +296,12 @@ class DocumentIngestor:
                 filename,
                 exc,
             )
+        if check is not None:
+            check()
         text = parser.extract_text(file_bytes)
-        chunks = self._chunker.split_text(text)
+        if check is not None:
+            check()
+        chunks = self._chunker.split_text(text, check=check)
         if chunks:
             log.warning(
                 "degraded parse for %r: %d chunks carry null page numbers",
@@ -266,9 +315,14 @@ class DocumentIngestor:
             reason="page-extract-failed",
         )
 
-    def get_chunk_objects(self, filename: str, file_bytes: bytes) -> list[Chunk]:
+    def get_chunk_objects(
+        self,
+        filename: str,
+        file_bytes: bytes,
+        check: Callable[[], None] | None = None,
+    ) -> list[Chunk]:
         """Parse and chunk, returning bundled :class:`Chunk` objects."""
-        chunks, page_numbers = self.get_chunks(filename, file_bytes)
+        chunks, page_numbers = self.get_chunks(filename, file_bytes, check=check)
         return [
             Chunk(
                 text=chunk,
@@ -279,10 +333,14 @@ class DocumentIngestor:
             for i, chunk in enumerate(chunks)
         ]
 
-    def split_text(self, text) -> list[str]:
+    def split_text(self, text, check: Callable[[], None] | None = None) -> list[str]:
         """Split one text with the configured chunk size and overlap."""
-        return self._chunker.split_text(text)
+        return self._chunker.split_text(text, check=check)
 
-    def split_pages(self, page_texts: list[str]) -> list[tuple[str, int]]:
+    def split_pages(
+        self,
+        page_texts: list[str],
+        check: Callable[[], None] | None = None,
+    ) -> list[tuple[str, int]]:
         """Split per-page texts, preserving page numbers."""
-        return self._chunker.split_pages(page_texts)
+        return self._chunker.split_pages(page_texts, check=check)

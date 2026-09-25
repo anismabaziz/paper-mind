@@ -318,6 +318,33 @@ class TestChunkMetadata:
             "sparse_tokenizer_version": TOKENIZER_VERSION,
         }
 
+    def test_generation_point_ids_are_deterministic_and_isolated(self):
+        """The same generation reuses point IDs while a new generation does not."""
+        chunks = [Chunk("hello", page_no=1, chunk_index=0, content_hash="hash")]
+
+        first = build_vectors_from_chunks([[0.3]], chunks, "paper.pdf", generation=1)
+        repeated = build_vectors_from_chunks([[0.3]], chunks, "paper.pdf", generation=1)
+        replacement = build_vectors_from_chunks(
+            [[0.3]], chunks, "paper.pdf", generation=2
+        )
+
+        assert first[0]["id"] == repeated[0]["id"]
+        assert first[0]["id"] != replacement[0]["id"]
+        assert first[0]["metadata"]["index_generation"] == 1
+
+    def test_generation_validation_rejects_an_incomplete_index(self):
+        """A generation with the wrong point count cannot become ready."""
+        from services.retrieval.base import VectorStoreConfigurationError
+
+        class CountingStore:
+            """Store double that reports an incomplete generation."""
+
+            def count(self, filter=None):
+                return 1
+
+        with pytest.raises(VectorStoreConfigurationError):
+            VectorService(CountingStore()).validate_generation("doc.pdf", 2, 2)
+
     def test_upsert_includes_page_no_and_content_hash(self):
         """Do test upsert includes page no and content hash."""
         import hashlib

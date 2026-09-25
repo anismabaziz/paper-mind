@@ -258,7 +258,7 @@ def test_migrations_apply_to_an_empty_postgres_database(migrated_database):
     }
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "f2b4c6d8a013"
+            "a7b8c9d0e1f2"
         )
         for table in (
             "app_settings",
@@ -540,10 +540,13 @@ def test_deletion_failures_retain_retryable_state(full_stack_app, boundary):
     if boundary == "partial":
         # Storage failed but the vector cleanup still ran: a partial
         # failure makes progress where it can without claiming success.
-        assert harness.qdrant.count(
-            collection_name=harness.collection_name,
-            exact=True,
-        ).count == 0
+        assert (
+            harness.qdrant.count(
+                collection_name=harness.collection_name,
+                exact=True,
+            ).count
+            == 0
+        )
         assert harness.storage.list() != []
 
     if boundary == "disk":
@@ -598,6 +601,72 @@ def test_chat_and_process_are_blocked_while_deletion_failed(full_stack_app):
 
 
 @pytest.mark.full_stack
+def test_http_cancellation_covers_queued_and_interrupted_running_jobs(full_stack_app):
+    """Cancellation is durable across the HTTP, Postgres, and worker restart path."""
+    harness = full_stack_app
+    filename = _upload_sample(harness)
+
+    queued_cancel = harness.client.post(f"/ingestion-jobs/{filename}/cancel")
+    assert queued_cancel.status_code == 200
+    assert queued_cancel.json()["job"]["state"] == "cancelled"
+
+    retry = harness.client.post(f"/ingestion-jobs/{filename}/retry")
+    assert retry.status_code == 201
+    claimed = harness.repositories.ingestion_jobs.claim_next("worker-cancelled")
+    assert claimed is not None
+    running_cancel = harness.client.post(f"/ingestion-jobs/{filename}/cancel")
+    assert running_cancel.status_code == 200
+    assert running_cancel.json()["job"]["state"] == "cancelling"
+
+    with harness.session_factory() as session, session.begin():
+        record = session.get(IngestionJob, claimed["id"])
+        record.heartbeat_at = record.heartbeat_at.replace(year=2000)
+
+    assert harness.repositories.ingestion_jobs.recover_stale(0) == [claimed["id"]]
+    assert (
+        harness.client.get(f"/ingestion-jobs/{filename}").json()["job"]["state"]
+        == "cancelling"
+    )
+    assert harness.drain("worker-cleanup") == 1
+    final = harness.client.get(f"/ingestion-jobs/{filename}").json()["job"]
+    assert final["state"] == "cancelled"
+    assert final["worker_id"] is None
+
+
+@pytest.mark.full_stack
+def test_reindex_cancellation_keeps_the_ready_generation_queryable(full_stack_app):
+    """A cancelled reindex leaves the active Qdrant generation untouched."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    before = harness.qdrant.count(
+        collection_name=harness.collection_name, exact=True
+    ).count
+    assert before > 0
+
+    assert harness.client.post(f"/ingestion-jobs/{filename}/retry").status_code == 201
+    blocked = harness.client.post(
+        "/response", json={"filename": filename, "query": "What changed?"}
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["category"] == "document_indexing"
+
+    cancelled = harness.client.post(f"/ingestion-jobs/{filename}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["job"]["state"] == "cancelled"
+    after = harness.qdrant.count(
+        collection_name=harness.collection_name, exact=True
+    ).count
+    assert after == before
+
+    answer = harness.client.post(
+        "/response", json={"filename": filename, "query": "What changed?"}
+    )
+    assert answer.status_code == 200
+
+
+@pytest.mark.full_stack
 def test_upload_reaches_ready_through_a_durable_job(full_stack_app):
     """Upload returns queued work and the worker finishes the index."""
     harness = full_stack_app
@@ -608,15 +677,16 @@ def test_upload_reaches_ready_through_a_durable_job(full_stack_app):
     assert queued["progress"] == 0
     assert harness.embeddings.calls == [], "the request must not embed inline"
     assert (
-        harness.client.post(
-            "/file/is-processed", json={"filename": filename}
-        ).json()["is_processed"]
+        harness.client.post("/file/is-processed", json={"filename": filename}).json()[
+            "is_processed"
+        ]
         is False
     )
 
-    assert harness.client.post(
-        "/process-file", json={"filename": filename}
-    ).status_code == 202
+    assert (
+        harness.client.post("/process-file", json={"filename": filename}).status_code
+        == 202
+    )
     assert harness.drain("worker-1") == 1
 
     ready = harness.client.get(f"/ingestion-jobs/{filename}").json()["job"]
@@ -626,9 +696,9 @@ def test_upload_reaches_ready_through_a_durable_job(full_stack_app):
     assert ready["started_at"] and ready["finished_at"]
     assert ready["error_category"] is None
     assert (
-        harness.client.post(
-            "/file/is-processed", json={"filename": filename}
-        ).json()["is_processed"]
+        harness.client.post("/file/is-processed", json={"filename": filename}).json()[
+            "is_processed"
+        ]
         is True
     )
 
@@ -646,9 +716,10 @@ def test_worker_restart_recovers_an_interrupted_job(full_stack_app):
     """A job abandoned by a stopped worker is picked up by the next worker."""
     harness = full_stack_app
     filename = _upload_sample(harness)
-    assert harness.client.post(
-        "/process-file", json={"filename": filename}
-    ).status_code == 202
+    assert (
+        harness.client.post("/process-file", json={"filename": filename}).status_code
+        == 202
+    )
 
     jobs = harness.repositories.ingestion_jobs
     claimed = jobs.claim_next("worker-stopped")
@@ -659,9 +730,10 @@ def test_worker_restart_recovers_an_interrupted_job(full_stack_app):
         record = session.get(IngestionJob, claimed["id"])
         record.heartbeat_at = record.heartbeat_at.replace(year=2000)
 
-    assert harness.client.get(f"/ingestion-jobs/{filename}").json()["job"][
-        "state"
-    ] == "running", "the running job stays visible while it is recoverable"
+    assert (
+        harness.client.get(f"/ingestion-jobs/{filename}").json()["job"]["state"]
+        == "running"
+    ), "the running job stays visible while it is recoverable"
 
     assert harness.drain("worker-restarted") == 1
 
@@ -685,9 +757,7 @@ def test_postgres_allows_one_active_job_per_document(full_stack_app):
     # Four workers race for two queued documents. Each document must be
     # claimed exactly once: FOR UPDATE SKIP LOCKED plus the partial unique
     # index make a second claim of the same document impossible.
-    claimed = _claim_in_parallel(
-        jobs, "worker-1", "worker-2", "worker-3", "worker-4"
-    )
+    claimed = _claim_in_parallel(jobs, "worker-1", "worker-2", "worker-3", "worker-4")
     winners = [job for job in claimed if job]
     assert len(winners) == 2
     assert {job["file_id"] for job in winners} == {
@@ -709,5 +779,8 @@ def test_postgres_allows_one_active_job_per_document(full_stack_app):
     assert jobs.count_active() == 0
 
     for job in winners:
-        assert harness.client.post(f"/ingestion-jobs/{job['filename']}/retry").status_code == 201
+        assert (
+            harness.client.post(f"/ingestion-jobs/{job['filename']}/retry").status_code
+            == 201
+        )
     assert harness.drain() == 2
