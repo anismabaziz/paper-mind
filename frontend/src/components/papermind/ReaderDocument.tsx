@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import type { File as FileType } from "@/types/db";
 import { cn } from "@/lib/utils";
-import { sharedView } from "@/lib/bytes";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -69,14 +68,16 @@ export default function ReaderDocument({
 
   const data = externalData !== undefined ? externalData : internalData;
 
-  // Share one fetch buffer between the sheet and the thumbnail strip via a
-  // view over the same ArrayBuffer — no .slice() copy, so a 50 MB file does
-  // not become 100–150 MB in JS memory. Note the trade-off: pdf.js transfers
-  // the buffer to the worker on load, detaching the shared view afterwards.
-  // That is fine for the single-load path (both Documents mount from views
-  // created before the transfer); a remount from a detached buffer refetches
-  // via the effect below in ReaderPane's loader or this fallback loader.
-  const fileData = useMemo(() => (data ? { data: sharedView(data) } : null), [data]);
+  // Copy before handing to pdf.js: it transfers the buffer to the worker and
+  // detaches it. State initializer runs on every mount (including StrictMode
+  // remounts), so each Document gets a fresh buffer instead of reusing one
+  // the worker already detached.
+  const [fileData, setFileData] = useState<{ data: Uint8Array } | null>(() =>
+    data ? { data: data.slice() } : null,
+  );
+  useEffect(() => {
+    setFileData(data ? { data: data.slice() } : null);
+  }, [data]);
 
   useEffect(() => {
     if (externalData !== undefined) return;
