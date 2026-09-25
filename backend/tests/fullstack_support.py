@@ -132,6 +132,7 @@ class ControlledRepositories:
     app_settings: ControlledRepository
     conversations: ControlledRepository
     ingestion_jobs: Any
+    index_cleanups: Any
 
 
 class ControlledEmbeddingService(EmbeddingService):
@@ -145,6 +146,10 @@ class ControlledEmbeddingService(EmbeddingService):
     def fail(self, operation: str) -> None:
         """Fail the named embedding operation on its next call."""
         self.failures.add(operation)
+
+    def unfail(self, operation: str) -> None:
+        """Clear a requested failure so a retry can succeed."""
+        self.failures.discard(operation)
 
     def embed_texts(self, texts):
         """Return normalized feature-hashed vectors in input order."""
@@ -228,6 +233,13 @@ class ControlledVectorStore(VectorStore):
             include_metadata=include_metadata,
             filter=filter,
             **kwargs,
+        )
+
+    def generation_report(self, filter=None, limit=1000, value_keys=()):
+        """Report what a generation stores unless the count failure is active."""
+        _maybe_fail(self.failures, "count")
+        return self._delegate.generation_report(
+            filter=filter, limit=limit, value_keys=value_keys
         )
 
     def delete_unversioned(self, filename) -> dict:
@@ -365,6 +377,7 @@ def build_application(
         app_settings=ControlledRepository(repositories.app_settings),
         conversations=ControlledRepository(repositories.conversations),
         ingestion_jobs=repositories.ingestion_jobs,
+        index_cleanups=repositories.index_cleanups,
     )
     embeddings = ControlledEmbeddingService()
     reranker = ControlledReranker()

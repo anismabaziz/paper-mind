@@ -56,6 +56,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
     files_repository = services.repositories.files
     conversations_repository = services.repositories.conversations
     ingestion_jobs = services.repositories.ingestion_jobs
+    index_cleanups = services.repositories.index_cleanups
     storage = services.storage
     vector_service = services.vector_service
     storage_dir = services.settings.storage.storage_dir
@@ -560,6 +561,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                 if not failures:
                     try:
                         ingestion_jobs.delete_for_file(file_id)
+                        index_cleanups.delete_for_file(file_id)
                         files_repository.delete_file(file_id)
                     except Exception:
                         log.exception("metadata delete failed for %r", filename)
