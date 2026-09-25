@@ -1,5 +1,5 @@
 import client, { apiBaseUrl } from "./client";
-import { File as FileType, IngestionJob } from "@/types/db";
+import { File as FileType, DocumentIndex, IngestionJob } from "@/types/db";
 
 interface IGetFiles {
   files: FileType[];
@@ -34,6 +34,7 @@ export async function deleteFile(file: FileType) {
 interface ICheckIsProcessed {
   is_processed: boolean;
   ingestion: IngestionJob | null;
+  index: DocumentIndex;
 }
 
 export async function checkIsProcessed(file: FileType) {
@@ -42,6 +43,13 @@ export async function checkIsProcessed(file: FileType) {
       filename: file.name,
     })
   ).data;
+}
+
+export async function reindexFile(name: string) {
+  const response = await client.post<{ job: IngestionJob }>(
+    `/files/${encodeURIComponent(name)}/reindex`
+  );
+  return response.data.job;
 }
 
 export async function retryIngestionJob(name: string) {

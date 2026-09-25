@@ -79,8 +79,9 @@ except the chat LLM, which is configured once in Settings:
 | Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no chat key); `--live` with the LLM-as-judge needs a key |
 
 All free-path knobs live in `backend/.env.example`:
-`RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
-`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`.
+`RERANK`/`RERANK_MODEL`/`RERANK_REVISION`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
+`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`/`LOCAL_EMBEDDING_REVISION`. Changing any
+of them marks already indexed documents stale and asks for a reindex.
 
 The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only).
 Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backend/README.md).
@@ -99,6 +100,17 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
    answer streams back over SSE as it is generated.
 4. The finished answer is persisted to Postgres together with the sources
    that were used, so reloading a document restores the full conversation.
+
+Every indexed document records the manifest its vectors were built with:
+parser, chunk size and overlap, embedding model and revision, vector
+dimension, sparse method and tokenizer, reranker model and revision, and the
+collection schema version. When the running configuration no longer matches
+that manifest the document is marked stale — its vectors are kept, the
+library and chat panes show which setting changed, chat refuses with a
+reindex action, and a reindex queues an ordinary ingestion job that only
+replaces the active index generation once the replacement validates.
+Documents indexed before manifests existed are marked stale once, so their
+provenance gets recorded.
 
 ## Architecture
 
