@@ -11,6 +11,7 @@ from typing import Any
 
 from repositories.ingestion_jobs import IngestionJobRepository
 from services.embeddings.local_embeddings import EmbeddingService
+from services.indexing.manifest import manifest_builder as manifest_builder_for
 from services.ingestion.limits import (
     IngestionCancelled,
     IngestionLimitExceeded,
@@ -26,6 +27,7 @@ from services.retrieval.base import (
     VectorStoreUnavailableError,
 )
 from services.retrieval.vector_service import VectorService
+from settings import get_settings
 from storage import LocalStorage
 
 log = logging.getLogger(__name__)
@@ -175,6 +177,7 @@ class IngestionWorker:
         limits: Any | None = None,
         clock: Callable[[], float] = time.monotonic,
         memory_reader: Callable[[], int] = current_memory_bytes,
+        manifest_builder: Callable[[bytes, int], Any] | None = None,
     ) -> None:
         """Bind a worker to the dependencies it needs to process a job."""
         self._repositories = repositories
@@ -190,6 +193,11 @@ class IngestionWorker:
         self._limits = ResourceLimits.from_value(limits)
         self._clock = clock
         self._memory_reader = memory_reader
+        # The manifest records the configuration this worker indexes with, so
+        # the process that serves chat can tell when it no longer matches.
+        self._manifest_builder = manifest_builder or manifest_builder_for(
+            get_settings()
+        )
 
     @property
     def worker_id(self) -> str:
@@ -429,6 +437,9 @@ class IngestionWorker:
                         job["id"],
                         self._worker_id,
                         index_generation=job["generation"],
+                        index_manifest=self._manifest_builder(
+                            file_content, job["generation"]
+                        ).to_json(),
                     )
                     is None
                 ):

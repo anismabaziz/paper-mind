@@ -52,6 +52,14 @@ class FileRecord(Base):
     index_generation: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=None
     )
+    # JSON Index Manifest of the active generation, written when a job
+    # becomes ready and compared with the running configuration on read.
+    index_manifest: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    index_stale_reason: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
     last_opened_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

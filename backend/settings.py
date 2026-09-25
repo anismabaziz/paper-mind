@@ -86,6 +86,9 @@ class EmbeddingSettings(BaseSettings):
     embedding_model: str = Field(
         default="BAAI/bge-m3", validation_alias="LOCAL_EMBEDDING_MODEL"
     )
+    # Pinned immutable revision (a commit sha) of the embedding model. Changing
+    # it makes every stored vector incompatible and marks documents stale.
+    revision: str = Field(default="", validation_alias="LOCAL_EMBEDDING_REVISION")
 
 
 class ChunkingSettings(BaseSettings):
@@ -118,6 +121,9 @@ class RerankSettings(BaseSettings):
         validation_alias="RERANK_MODEL",
     )
     enabled: bool = Field(default=False, validation_alias="RERANK")
+    # Pinned immutable revision (a commit sha) of the reranker model. Changing
+    # it makes every stored rerank order incompatible and marks documents stale.
+    revision: str = Field(default="", validation_alias="RERANK_REVISION")
 
     @field_validator("enabled", mode="before")
     @classmethod

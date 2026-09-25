@@ -22,6 +22,7 @@ from composition import Services
 from repositories import build_repositories
 from services.embeddings.local_embeddings import EmbeddingService
 from services.ingestion.worker import IngestionWorker
+from services.indexing.manifest import manifest_builder
 from services.llm.base import ChatCredentials, LLMProvider
 from services.parsing.document_parser import DocumentIngestor
 from services.retrieval.base import VectorStore
@@ -318,6 +319,7 @@ class ApplicationHarness:
     server: Any
     server_thread: threading.Thread
     session_factory: Any
+    app_settings: Settings
     qdrant: QdrantClient
     collection_name: str
     storage: ControlledStorage
@@ -395,6 +397,7 @@ def build_application(
             vector_service=VectorService(vector_store, reranker),
             worker_id=worker_id,
             limits=app_settings.ingestion,
+            manifest_builder=manifest_builder(app_settings),
         )
 
     server = make_server("127.0.0.1", 0, application, threaded=True)
@@ -420,6 +423,7 @@ def build_application(
         server=server,
         server_thread=server_thread,
         session_factory=session_factory,
+        app_settings=app_settings,
         qdrant=qdrant,
         collection_name=app_settings.vector.index_name,
         storage=storage,

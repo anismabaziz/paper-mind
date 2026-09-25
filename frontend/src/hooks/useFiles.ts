@@ -9,6 +9,7 @@ import {
   getMessages,
   getFileMeta,
   markFileOpened,
+  reindexFile,
 } from "@/services/files";
 import type { IDeleteFile } from "@/services/files";
 import type { File as DbFile } from "@/types/db";
@@ -130,6 +131,22 @@ export function useCancelIngestion(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: cancelIngestionJob,
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: fileKeys.status(name) });
+    },
+    onError: (err, name) => {
+      options?.onError?.(err, name);
+    },
+  });
+}
+
+export function useReindex(
+  options?: MutationCallbacks<Awaited<ReturnType<typeof reindexFile>>, string>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: reindexFile,
     onSuccess: (_data, name) => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
       queryClient.invalidateQueries({ queryKey: fileKeys.status(name) });

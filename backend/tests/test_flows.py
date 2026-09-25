@@ -984,7 +984,7 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     } <= tables
     assert {"users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "a7b8c9d0e1f2",
+        "b8e4c1a97d30",
     )
     assert {
         "title",
@@ -993,6 +993,9 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
         "last_opened_at",
         "index_generation",
     } <= {row[1] for row in connection.execute("pragma table_info(files)")}
+    assert {"index_manifest", "index_stale_reason"} <= {
+        row[1] for row in connection.execute("pragma table_info(files)")
+    }
     assert {
         "cancel_requested_at",
         "cancelled_at",

@@ -8,6 +8,7 @@ import time
 import settings as settings_module
 from composition import Services
 from repositories import build_repositories
+from services.indexing.manifest import manifest_builder
 from services.ingestion.worker import IngestionWorker
 
 log = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ def build_worker() -> IngestionWorker:
         embedding_service=services.embedding_service,
         vector_service=services.vector_service,
         limits=services.settings.ingestion,
+        manifest_builder=manifest_builder(services.settings),
     )
 
 

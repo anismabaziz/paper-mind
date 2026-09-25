@@ -21,6 +21,7 @@ from services.accounts.secrets_service import (
     SecretsResaveRequiredError,
     decrypt_api_key,
 )
+from services.indexing.state import index_status
 from services.llm.base import ChatCredentials
 from services.retrieval.base import (
     VectorDimensionError,
@@ -190,6 +191,35 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                     "error": "This document is being reindexed. Try again when indexing finishes.",
                     "category": "document_indexing",
                     "job": ingestion_job,
+                }
+            ), 409
+        # A stale index still holds vectors, but they were built with a parser,
+        # model, or collection schema the app no longer serves, so querying it
+        # would answer from an incompatible index. A document that was never
+        # indexed has nothing to query either.
+        state = index_status(files_repository, file_record, services.settings)
+        if state.is_stale:
+            log.info("chat refused for stale index %s: %s", filename, state.changes)
+            return jsonify(
+                {
+                    "error": (
+                        "This document's index no longer matches the current "
+                        "settings. Reindex it to ask questions again."
+                    ),
+                    "category": "index_stale",
+                    "action": "reindex",
+                    "index": state.to_dict(services.settings),
+                }
+            ), 409
+        if state.state == "pending":
+            return jsonify(
+                {
+                    "error": (
+                        "This document is not indexed yet. Index it to ask questions."
+                    ),
+                    "category": "index_pending",
+                    "action": "reindex",
+                    "index": state.to_dict(services.settings),
                 }
             ), 409
         conversation_id = conversations_repository.get_conversation_id(
