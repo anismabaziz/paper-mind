@@ -197,6 +197,57 @@ class ConversationRepository(BaseRepository):
                 for turn in rows
             ]
 
+    def get_recent_turns(
+        self,
+        conversation_id: str,
+        limit: int,
+        statuses: tuple[str, ...] = (TURN_ANSWERED,),
+    ) -> list[dict[str, Any]]:
+        """
+        Return the newest turns that carry an answer, oldest first.
+
+        Only completed exchanges are eligible: a pending, failed, or cancelled
+        turn has nothing to refer back to, and letting one into the window
+        would hand the model a question the user never got answered.
+        """
+        if limit <= 0 or not statuses:
+            return []
+        with self._session_factory() as session:
+            rows = list(
+                session.scalars(
+                    select(Turn)
+                    .where(
+                        Turn.conversation_id == conversation_id,
+                        Turn.status.in_(statuses),
+                    )
+                    .order_by(Turn.sequence.desc())
+                    .limit(limit)
+                ).all()
+            )
+            return [
+                {
+                    "id": turn.id,
+                    "sequence": turn.sequence,
+                    "question": turn.question,
+                    "answer": turn.answer,
+                    "status": turn.status,
+                }
+                for turn in reversed(rows)
+            ]
+
+    def count_answered_turns(self, conversation_id: str) -> int:
+        """Return how many Turns in the Conversation carry an answer."""
+        with self._session_factory() as session:
+            return int(
+                session.scalar(
+                    select(func.count(Turn.id)).where(
+                        Turn.conversation_id == conversation_id,
+                        Turn.status == TURN_ANSWERED,
+                    )
+                )
+                or 0
+            )
+
     def get_messages(self, conversation_id: str) -> list[dict[str, Any]]:
         """Return the conversation's exchanges as an ordered message list."""
         messages: list[dict[str, Any]] = []

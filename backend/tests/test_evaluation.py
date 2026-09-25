@@ -187,7 +187,7 @@ class InMemoryIndex:
         return dot / norm if norm else 0.0
 
 
-def canned_generate(query, context):
+def canned_generate(query, context, prior_turns=""):
     """Do canned generate."""
     return "An answer fully supported by the provided context."
 
@@ -467,6 +467,50 @@ class TestEvaluator:
         assert per_id["no-gold"]["recall_at_k"] == 0.0
         assert report.retrieval.hit_rate == pytest.approx(2 / 3)
         assert report.retrieval.recall == pytest.approx(2 / 3)
+
+    def test_a_follow_up_case_expands_its_query_like_the_application(self):
+        """Both query forms reach the report, and retrieval uses the expansion."""
+        fixture = {
+            "documents": [{"filename": "synthetic.pdf"}],
+            "questions": [
+                {
+                    "id": "follow-up",
+                    "document": "synthetic.pdf",
+                    "question": "What about the second one?",
+                    "follow_up": ["What are the alpha and beta methods?"],
+                    "expected_answer": "expected",
+                    "gold_snippets": ["gold alpha"],
+                },
+            ],
+        }
+        token_map = {"gold": 0, "alpha": 1, "beta": 2}
+        index = InMemoryIndex()
+        index.vectors.append(
+            {
+                "id": "1",
+                "values": one_hot_embed(["gold alpha chunk"], token_map)[0],
+                "metadata": {
+                    "content": "gold alpha chunk",
+                    "pdf_name": "synthetic.pdf",
+                    "chunk_index": 0,
+                },
+            }
+        )
+        embedded = []
+
+        def embed(texts):
+            embedded.extend(texts)
+            return one_hot_embed(texts, token_map)
+
+        report = evaluator.evaluate(
+            fixture, index, embed, canned_generate, judge_fn=None
+        )
+
+        detail = report.per_question[0]
+        assert detail["original_query"] == "What about the second one?"
+        assert detail["query_expansion"] == "deterministic"
+        assert detail["expanded_query"].endswith("What about the second one?")
+        assert embedded == [detail["expanded_query"]]
 
     def test_partial_recall_when_gold_exceeds_top_k(self):
         """

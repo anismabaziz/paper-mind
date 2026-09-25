@@ -180,12 +180,12 @@ class FakeChatProvider:
         """Initialize."""
         self._factory = factory
 
-    def stream_response(self, query, context):
+    def stream_response(self, query, context, history=""):
         """Do stream response."""
         yield "The answer "
         yield "is 42."
 
-    def generate_response(self, query, context):
+    def generate_response(self, query, context, history=""):
         """Do generate response."""
         return "The answer is 42."
 

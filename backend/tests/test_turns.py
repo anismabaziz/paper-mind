@@ -125,11 +125,11 @@ class _ChatProvider:
         """Bind the provider to its factory."""
         self._factory = factory
 
-    def stream_response(self, query, context):
+    def stream_response(self, query, context, history=""):
         """Yield a fixed answer, or raise the requested provider error."""
         if self._factory.provider_error is not None:
             raise self._factory.provider_error
-        self._factory.streamed.append((query, context))
+        self._factory.streamed.append((query, context, history))
         yield "The answer "
         yield "is 42."
 

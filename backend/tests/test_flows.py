@@ -193,17 +193,17 @@ class FakeChatProvider:
         """Initialize."""
         self._factory = factory
 
-    def stream_response(self, query, context):
+    def stream_response(self, query, context, history=""):
         """Do stream response."""
         if self._factory.provider_error is not None:
             raise self._factory.provider_error
-        self._factory.streamed.append((query, context))
+        self._factory.streamed.append((query, context, history))
         yield "The answer "
         yield "is 42."
 
-    def generate_response(self, query, context):
+    def generate_response(self, query, context, history=""):
         """Do generate response."""
-        self._factory.answered.append((query, context))
+        self._factory.answered.append((query, context, history))
         return "The answer is 42."
 
 
@@ -377,7 +377,15 @@ def test_ask_streams_tokens_and_persists_sources(client, app, fake_vectors):
     done_name, done_data = events[-1]
     assert done_name == "done"
     assert done_data["done"] is True
-    assert done_data["retrieval"] == {"method": "dense", "outcome": "success"}
+    assert done_data["retrieval"] == {
+        "method": "dense",
+        "outcome": "success",
+        "original_query": "what?",
+        "expanded_query": "what?",
+        "query_expansion": "none",
+        "dropped_turns": 0,
+        "dropped_sources": 0,
+    }
     assert len(done_data["sources"]) == 1
     src = done_data["sources"][0]
     assert src["content"] == "chunk about topic"
@@ -587,7 +595,7 @@ def test_sources_panel_order_matches_llm_context_order(
     )
 
     # The LLM received the same chunks, in the same order, as its context.
-    _, context = fake_chat.streamed[0]
+    _, context, _ = fake_chat.streamed[0]
     assert context == "strong chunk\n\nweak chunk"
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
@@ -753,7 +761,15 @@ def test_empty_retrieval_is_a_successful_empty_result(client, app, fake_vectors)
     assert response.status_code == 200
     done = parse_sse(response.get_data(as_text=True))[-1][1]
     assert done["sources"] == []
-    assert done["retrieval"] == {"method": "dense", "outcome": "empty"}
+    assert done["retrieval"] == {
+        "method": "dense",
+        "outcome": "empty",
+        "original_query": "what?",
+        "expanded_query": "what?",
+        "query_expansion": "none",
+        "dropped_turns": 0,
+        "dropped_sources": 0,
+    }
 
 
 @pytest.mark.parametrize(

@@ -274,16 +274,18 @@ class DeterministicChatProvider(LLMProvider):
         """Return no client because this provider has no SDK."""
         return None
 
-    def _generate_response(self, query: str, context: str) -> str:
+    def _generate_response(self, query: str, context: str, history: str = "") -> str:
         """Return the fixed answer after recording its inputs."""
         _maybe_fail(self._factory.failures, "generate")
-        self._factory.generated.append((query, context))
+        self._factory.generated.append((query, context, history))
         return "The answer is grounded in the retrieved PDF text."
 
-    def _stream_response(self, query: str, context: str) -> Iterator[str]:
+    def _stream_response(
+        self, query: str, context: str, history: str = ""
+    ) -> Iterator[str]:
         """Yield the fixed answer after recording its inputs."""
         _maybe_fail(self._factory.failures, "stream")
-        self._factory.streamed.append((query, context))
+        self._factory.streamed.append((query, context, history))
         yield "The answer is "
         if self._factory.holding is not None:
             self._factory.holding.set()

@@ -104,7 +104,7 @@ class FakeEmbed:
 class FakeChatFactory:
     def __call__(self, creds):
         class _P:
-            def stream_response(self, q, ctx):
+            def stream_response(self, q, ctx, history=""):
                 yield "hi"
 
         return _P()

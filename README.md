@@ -73,6 +73,8 @@ except the chat LLM, which is configured once in Settings:
 | Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached locally via `HF_HOME` (`~/.cache/huggingface`) — no API key |
 | Retrieval | Hybrid 1,024-d dense + hashed term-frequency sparse with Qdrant IDF, fused by one Qdrant query using `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
 | Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata |
+| Follow-up context | The last `CHAT_RECENT_TURNS=4` answered turns, with the transcript capped at `CHAT_PRIOR_TURNS_TOKEN_BUDGET=1200` tokens and the evidence at `CHAT_CONTEXT_TOKEN_BUDGET=6000`. Oldest turns and lowest-ranked Citation Sources drop first, both counts are reported in the `retrieval` trace, and the current question is never truncated |
+| Query expansion | A follow-up ("the second method") is searched with recent user questions prepended. `CHAT_QUERY_REWRITE=false` (default) costs no extra model call; `true` rewrites with the model and falls back to the deterministic expansion on failure. Both query forms land in the `done` event's `retrieval` block and in evaluation detail |
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
 | Chat LLM | Single-instance Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest via `APP_SECRET` |
 | Document title | Derived from PDF metadata Title → original filename (without extension) → first heading; stored alongside the uuid `filename` |
@@ -80,8 +82,11 @@ except the chat LLM, which is configured once in Settings:
 
 All free-path knobs live in `backend/.env.example`:
 `RERANK`/`RERANK_MODEL`/`RERANK_REVISION`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
+`CHAT_RECENT_TURNS`/`CHAT_PRIOR_TURNS_TOKEN_BUDGET`/`CHAT_CONTEXT_TOKEN_BUDGET`/
+`CHAT_MAX_EXPANSION_CHARS`/`CHAT_QUERY_REWRITE`,
 `USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`/`LOCAL_EMBEDDING_REVISION`. Changing any
-of them marks already indexed documents stale and asks for a reindex.
+of those marks already indexed documents stale and asks for a reindex. The
+`CHAT_*` knobs shape a request, not an index, so they take effect immediately.
 
 The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only).
 Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backend/README.md).

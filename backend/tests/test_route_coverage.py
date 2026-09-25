@@ -153,7 +153,7 @@ class FakeChatFactory:
         factory = self
 
         class _Provider:
-            def stream_response(self, query, context):
+            def stream_response(self, query, context, history=""):
                 if factory.provider_error is not None:
                     raise factory.provider_error
                 yield "The answer is 42."
@@ -337,7 +337,15 @@ def test_sse_error_path_yields_error_and_empty_sources(client, app, fake_chat):
     assert by_name["done"] == {
         "done": True,
         "sources": [],
-        "retrieval": {"method": "dense", "outcome": "success"},
+        "retrieval": {
+            "method": "dense",
+            "outcome": "success",
+            "original_query": "what?",
+            "expanded_query": "what?",
+            "query_expansion": "none",
+            "dropped_turns": 0,
+            "dropped_sources": 0,
+        },
     }
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
