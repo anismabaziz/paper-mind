@@ -190,7 +190,7 @@ class FakeChatFactory:
         factory = self
 
         class Provider:
-            def stream_response(self, query, context):
+            def stream_response(self, query, context, history=""):
                 factory.streamed.append((query, context))
                 yield "The answer is 42."
 

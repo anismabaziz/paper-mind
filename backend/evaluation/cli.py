@@ -88,11 +88,11 @@ def make_live_components(
         else None
     )
 
-    def generate_fn(query, context):
+    def generate_fn(query, context, prior_turns=""):
         """Do generate fn."""
         if chat_provider is None:
             return ""
-        return chat_provider.generate_response(query, context)
+        return chat_provider.generate_response(query, context, prior_turns)
 
     def judge_fn(prompt):
         """Do judge fn."""

@@ -23,11 +23,13 @@ from services.accounts.secrets_service import (
 )
 from services.indexing.state import index_status
 from services.llm.base import ChatCredentials
+from services.chat_context import build_chat_context, build_model_rewriter
 from services.retrieval.base import (
     VectorDimensionError,
     VectorStoreConfigurationError,
     VectorStoreUnavailableError,
 )
+from services.retrieval.query_expansion import expand_query
 
 if TYPE_CHECKING:
     from composition import Services
@@ -232,21 +234,67 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         if len(query) > MAX_QUERY_CHARS:
             return jsonify({"error": "Query is too long"}), 400
 
+        limits = services.settings.query_context
         try:
-            query_embedding = embedding_service.embed_texts(query)[0]
+            recent_turns = conversations_repository.get_recent_turns(
+                conversation_id, limits.recent_turns
+            )
+            turns_in_conversation = conversations_repository.count_answered_turns(
+                conversation_id
+            )
+        except Exception:
+            log.exception("/response conversation read failed for %s", filename)
+            return jsonify({"error": "Internal server error"}), 500
+        # Two different windows, deliberately: expansion takes the recent
+        # questions up to the Turn limit, capped by max_expansion_chars; the
+        # transcript sent to the model is bounded by prior_turns_token_budget.
+        prior_questions = [
+            turn["question"] for turn in recent_turns if turn.get("question")
+        ]
+        rewriter = (
+            build_model_rewriter(chat_provider)
+            if limits.query_rewrite and prior_questions
+            else None
+        )
+        expansion = expand_query(
+            query,
+            prior_questions,
+            max_chars=limits.max_expansion_chars,
+            rewrite=rewriter,
+        )
+
+        try:
+            query_embedding = embedding_service.embed_texts(expansion.expanded_query)[0]
             retrieval_result = vector_service.query_vectors(
                 query_embedding,
                 filename,
-                query_text=query,
+                query_text=expansion.expanded_query,
                 generation=file_record.get("index_generation"),
                 include_legacy=file_record.get("index_generation") is None,
             )
+            sources = [_normalize_source(source) for source in retrieval_result.sources]
+            chat_context = build_chat_context(
+                query,
+                sources,
+                recent_turns,
+                expansion,
+                max_turns=limits.recent_turns,
+                prior_turns_token_budget=limits.prior_turns_token_budget,
+                context_token_budget=limits.context_token_budget,
+                turns_in_conversation=turns_in_conversation,
+            )
+            # Citations must match what the model actually saw, so a Citation
+            # Source the budget dropped is not stored against the answer.
+            sources = list(chat_context.sources)
+            context = chat_context.context
+            prior_turns_text = chat_context.prior_turns
             retrieval = {
                 "method": retrieval_result.method,
                 "outcome": retrieval_result.outcome,
+                **expansion.to_dict(),
+                "dropped_turns": chat_context.dropped_turns,
+                "dropped_sources": chat_context.dropped_sources,
             }
-            sources = [_normalize_source(source) for source in retrieval_result.sources]
-            context = "\n\n".join(source["content"] for source in sources)
         except (
             VectorStoreUnavailableError,
             VectorStoreConfigurationError,
@@ -312,7 +360,9 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         def generate():
             fragments = []
             try:
-                for token in chat_provider.stream_response(query, context):
+                for token in chat_provider.stream_response(
+                    query, context, prior_turns_text
+                ):
                     fragments.append(token)
                     yield event("token", {"text": token})
             except GeneratorExit:

@@ -24,6 +24,9 @@ from dataclasses import asdict, dataclass, field
 from typing import cast
 from pathlib import Path
 
+from services.chat_context import render_prior_turns
+from settings import get_settings
+
 from evaluation import judge as judge_module
 from evaluation.metrics import RetrievalReport, hit_at_k, recall_at_k, summarize
 from services.parsing.document_parser import DocumentIngestor
@@ -33,6 +36,7 @@ from services.retrieval.base import (
     VectorStoreConfigurationError,
 )
 from services.retrieval.hybrid import DEFAULT_FETCH_K, build_sparse_vector
+from services.retrieval.query_expansion import expand_query
 from services.retrieval.reranker import RerankerService
 from services.retrieval.vector_service import (
     build_vectors_from_chunks,
@@ -236,7 +240,18 @@ def evaluate(
 
     for item in fixture["questions"]:
         filename = item["document"]
-        query_embedding = embed_fn([item["question"]])[0]
+        # A follow-up case carries the earlier user questions it refers back
+        # to, so evaluation expands the query exactly as the application does.
+        prior_turns = [
+            {"question": question, "answer": None}
+            for question in item.get("follow_up", [])
+        ]
+        expansion = expand_query(
+            item["question"],
+            item.get("follow_up", []),
+            max_chars=get_settings().query_context.max_expansion_chars,
+        )
+        query_embedding = embed_fn([expansion.expanded_query])[0]
         t0 = time.time()
         retrieval_result = retrieve(
             query_embedding,
@@ -244,7 +259,7 @@ def evaluate(
             index,
             k=k,
             prefix=prefix,
-            query_text=item["question"],
+            query_text=expansion.expanded_query,
             rerank=rerank,
             reranker=rerank_service,
         )
@@ -266,11 +281,17 @@ def evaluate(
             **result,
             "retrieved_chunks": len(retrieved_texts),
             "retrieval_method": retrieval_result.method,
+            **expansion.to_dict(),
         }
 
         if judge_fn is not None:
             context = "\n\n".join(retrieved_texts)
-            answer = generate_fn(item["question"], context)
+            # A follow-up is answered with the same transcript the application
+            # would send, so the reported faithfulness describes the real shape
+            # of the request rather than a contextless question.
+            answer = generate_fn(
+                item["question"], context, render_prior_turns(prior_turns)
+            )
             verdict, score = judge_module.judge_faithfulness(
                 item["question"], answer, context, judge_fn
             )

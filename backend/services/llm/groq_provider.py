@@ -35,7 +35,9 @@ class GroqProvider(LLMProvider):
             return Groq(api_key=self.api_key)
         return _client(self.api_key)
 
-    def _generate_response(self, query: str, context: str) -> str:
+    def _generate_response(
+        self, query: str, context: str, prior_turns: str = ""
+    ) -> str:
         """Do generate response."""
         chat_completion = self._sdk_client().chat.completions.create(
             messages=[
@@ -45,7 +47,7 @@ class GroqProvider(LLMProvider):
                 },
                 {
                     "role": "user",
-                    "content": build_user_prompt(context, query),
+                    "content": build_user_prompt(context, query, prior_turns),
                 },
             ],
             model=self.model,
@@ -54,7 +56,9 @@ class GroqProvider(LLMProvider):
         result = chat_completion.choices[0].message.content
         return result or self.FALLBACK_ANSWER
 
-    def _stream_response(self, query: str, context: str) -> Iterator[str]:
+    def _stream_response(
+        self, query: str, context: str, prior_turns: str = ""
+    ) -> Iterator[str]:
         """Do stream response."""
         stream = self._sdk_client().chat.completions.create(
             messages=[
@@ -64,7 +68,7 @@ class GroqProvider(LLMProvider):
                 },
                 {
                     "role": "user",
-                    "content": build_user_prompt(context, query),
+                    "content": build_user_prompt(context, query, prior_turns),
                 },
             ],
             model=self.model,
