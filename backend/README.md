@@ -12,6 +12,8 @@ Same table as the top-level README (kept here so env docs stay local):
 - Retrieval: named dense vectors plus hashed term-frequency sparse vectors with Qdrant IDF, fused by one query using `RRF(k=60)` and 50 candidates
 - `RERANK=false` (default) / `true` — local cross-encoder over 50→5 (`cross-encoder/ms-marco-MiniLM-L-6-v2` 22M fast default, or `BAAI/bge-reranker-v2-m3`)
 - `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken cl100k_base`, per-page, with `page_no` + `content_hash`
+- Follow-up context: the last `CHAT_RECENT_TURNS=4` answered turns, with the transcript capped at `CHAT_PRIOR_TURNS_TOKEN_BUDGET=1200` tokens and the evidence at `CHAT_CONTEXT_TOKEN_BUDGET=6000`. Older turns and lower-ranked Citation Sources are dropped first; the current question is never truncated. Both drops are reported in the `retrieval` block of the terminal SSE event.
+- Query expansion: a follow-up is searched with the recent user questions prepended, so "the second method" has terms to match. `CHAT_QUERY_REWRITE=false` (default) spends no extra model call; set it to `true` to rewrite with the model instead, which falls back to the deterministic expansion on failure.
 - Parser: `pymupdf` fast path default; `USE_DOCLING=auto` (default) routes only image-only / borderless-table / 2-col PDFs to Docling (`.[docling]` extra, `granite-docling-258M`); `true` forces all, `false` never.
 - All knobs are documented in `.env.example`.
 

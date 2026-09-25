@@ -24,6 +24,7 @@ from settings import (
     DatabaseSettings,
     EmbeddingSettings,
     ParsingSettings,
+    QueryContextSettings,
     RerankSettings,
     Settings,
     StorageSettings,
@@ -42,6 +43,7 @@ TEST_SETTINGS = Settings(
     chunking=ChunkingSettings(),
     rerank=RerankSettings(),
     parsing=ParsingSettings(),
+    query_context=QueryContextSettings(),
     auth=AuthSettings(app_secret="test-app-secret"),
 )
 

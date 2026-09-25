@@ -211,7 +211,7 @@ class FakeChatFactory:
         """Build a provider streaming a fixed answer."""
 
         class Provider:
-            def stream_response(self, query, context):
+            def stream_response(self, query, context, history=""):
                 yield "The answer is 42."
 
         return Provider()

@@ -53,6 +53,7 @@ files = [
     "evaluation/evaluator.py",
     "repositories",
     "routes",
+    "services/chat_context.py",
     "services/indexing",
     "services/ingestion",
     "services/retrieval",

@@ -131,6 +131,36 @@ class RerankSettings(BaseSettings):
         return _parse_bool(value)
 
 
+class QueryContextSettings(BaseSettings):
+    """
+    Bounds on the context one chat request carries.
+
+    The Conversation window is bounded by both ``chat_recent_turns`` and
+    ``chat_prior_turns_token_budget``; retrieved evidence by
+    ``chat_context_token_budget``. Query rewriting spends an extra model call,
+    so it stays off until the evaluation set shows it earns its cost.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    recent_turns: int = Field(default=4, ge=0, validation_alias="CHAT_RECENT_TURNS")
+    prior_turns_token_budget: int = Field(
+        default=1200, ge=0, validation_alias="CHAT_PRIOR_TURNS_TOKEN_BUDGET"
+    )
+    context_token_budget: int = Field(
+        default=6000, ge=0, validation_alias="CHAT_CONTEXT_TOKEN_BUDGET"
+    )
+    query_rewrite: bool = Field(default=False, validation_alias="CHAT_QUERY_REWRITE")
+    max_expansion_chars: int = Field(
+        default=2000, ge=0, validation_alias="CHAT_MAX_EXPANSION_CHARS"
+    )
+
+    @field_validator("query_rewrite", mode="before")
+    @classmethod
+    def _coerce(cls, value):
+        return _parse_bool(value)
+
+
 class ParsingSettings(BaseSettings):
     """
     Docling branch routing (auto | true | false).
@@ -243,6 +273,10 @@ class Settings(BaseSettings):
         default_factory=RerankSettings, validation_alias=AliasChoices("rerank_group")
     )
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
+    query_context: QueryContextSettings = Field(
+        default_factory=QueryContextSettings,
+        validation_alias=AliasChoices("query_context_group"),
+    )
     auth: AuthSettings = Field(default_factory=AuthSettings)
     upload: UploadSettings = Field(default_factory=UploadSettings)
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)

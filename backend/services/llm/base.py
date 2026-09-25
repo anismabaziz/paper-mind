@@ -100,11 +100,11 @@ class LLMProvider(ABC):
     def _build_client(self):
         """Build the provider SDK client for the stored API key."""
 
-    def generate_response(self, query: str, context: str) -> str:
+    def generate_response(self, query: str, context: str, prior_turns: str = "") -> str:
         """Generate a full answer, falling back to the retrieved context."""
         try:
             return call_with_timeout(
-                lambda: self._generate_response(query, context),
+                lambda: self._generate_response(query, context, prior_turns),
                 GENERATE_TIMEOUT_SECONDS,
             )
         except Exception as e:
@@ -116,14 +116,19 @@ class LLMProvider(ABC):
                 )
             return self.FALLBACK_ANSWER
 
-    def stream_response(self, query: str, context: str) -> Iterator[str]:
+    def stream_response(
+        self, query: str, context: str, prior_turns: str = ""
+    ) -> Iterator[str]:
         """
         Yield answer fragments from the bound provider.
+
+        ``prior_turns`` is a bounded transcript of earlier Turns in this
+        Conversation, used to resolve references in the current question.
 
         Failures propagate: the caller surfaces them as an SSE error event.
         There is no cross-provider fallback — the user picked this provider.
         """
-        yield from self._stream_response(query, context)
+        yield from self._stream_response(query, context, prior_turns)
 
     @abstractmethod
     def verify(self) -> None:
@@ -134,9 +139,13 @@ class LLMProvider(ABC):
         call_with_timeout(ping, self.verification_timeout_seconds)
 
     @abstractmethod
-    def _generate_response(self, query: str, context: str) -> str:
+    def _generate_response(
+        self, query: str, context: str, prior_turns: str = ""
+    ) -> str:
         """Generate one full answer via the provider SDK."""
 
     @abstractmethod
-    def _stream_response(self, query: str, context: str) -> Iterator[str]:
+    def _stream_response(
+        self, query: str, context: str, prior_turns: str = ""
+    ) -> Iterator[str]:
         """Yield answer fragments via the provider SDK."""

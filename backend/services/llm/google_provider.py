@@ -36,12 +36,14 @@ class GoogleProvider(LLMProvider):
             return genai.Client(api_key=self.api_key)
         return _client(self.api_key)
 
-    def _generate_response(self, query: str, context: str) -> str:
+    def _generate_response(
+        self, query: str, context: str, prior_turns: str = ""
+    ) -> str:
         """Do generate response."""
         result = self._sdk_client().models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
-            contents=[build_user_prompt(context, query)],
+            contents=[build_user_prompt(context, query, prior_turns)],
         )
 
         text = getattr(result, "text", None)
@@ -62,12 +64,14 @@ class GoogleProvider(LLMProvider):
 
         return self.FALLBACK_ANSWER
 
-    def _stream_response(self, query: str, context: str) -> Iterator[str]:
+    def _stream_response(
+        self, query: str, context: str, prior_turns: str = ""
+    ) -> Iterator[str]:
         """Do stream response."""
         for chunk in self._sdk_client().models.generate_content_stream(
             model=self.model,
             config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
-            contents=[build_user_prompt(context, query)],
+            contents=[build_user_prompt(context, query, prior_turns)],
         ):
             text = getattr(chunk, "text", None)
             if text:
