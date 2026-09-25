@@ -122,6 +122,22 @@ def build_vectors_from_chunks(
     return vectors
 
 
+def _sparse_setting_problems(
+    label: str, found: list | None, expected: str
+) -> list[str]:
+    """
+    Check the sparse settings a generation was indexed with.
+
+    A generation missing the setting is as unusable as one built with another
+    version, so an absent value fails instead of passing unchecked.
+    """
+    if found is None or not found:
+        return [f"no {label} was recorded for the generation"]
+    if list(found) != [expected]:
+        return [f"indexed with {label} {found[0]!r} instead of {expected!r}"]
+    return []
+
+
 class VectorService:
     """
     Indexing and retrieval over an injected :class:`VectorStore`.
@@ -281,8 +297,85 @@ class VectorService:
             outcome="success" if shaped else "empty",
         )
 
-    def validate_generation(self, filename, generation, expected_count):
-        """Verify that a generation contains the expected point count."""
+    def validate_generation(
+        self,
+        filename,
+        generation,
+        expected_count,
+        page_count: int | None = None,
+    ):
+        """
+        Check a built index generation before it may be activated.
+
+        Activation is the moment chat starts reading a generation, so every
+        stage the pipeline ran is verified here: the expected number of
+        Passages, dense and sparse representations, payload metadata, Page
+        provenance, and the sparse indexing settings the running configuration
+        expects. A generation that fails any check is never activated and the
+        previous one keeps serving.
+        """
+        reporter = self._store.generation_report
+        report = reporter(
+            filter={"pdf_name": filename, "index_generation": generation},
+            limit=expected_count,
+            value_keys=("sparse_method", "sparse_tokenizer_version"),
+        )
+        if report is None:
+            return self._validate_generation_count(filename, generation, expected_count)
+        problems: list[str] = []
+        total = int(report.get("total", 0))
+        if total != expected_count:
+            problems.append(f"expected {expected_count} vectors but found {total}")
+        if report.get("truncated"):
+            problems.append(
+                f"the stored points were not fully inspected "
+                f"({report.get('inspected', 0)} of {total})"
+            )
+        without_dense = int(report.get("without_dense", 0) or 0)
+        if without_dense:
+            problems.append(f"{without_dense} Passages without a dense vector")
+        without_sparse = int(report.get("without_sparse", 0) or 0)
+        if without_sparse:
+            problems.append(f"{without_sparse} Passages without a sparse vector")
+        for key, count in sorted((report.get("missing_payload") or {}).items()):
+            if count:
+                problems.append(f"{count} Passages missing payload for {key}")
+        for key, count in sorted((report.get("empty_payload") or {}).items()):
+            if count:
+                problems.append(f"{count} Passages with blank {key}")
+        pages = [int(page) for page in report.get("pages") or []]
+        if expected_count and not pages:
+            problems.append("Passages have no Page provenance")
+        if page_count:
+            outside = [page for page in pages if page < 1 or page > page_count]
+            if outside:
+                problems.append(
+                    f"Pages {sorted(outside)} fall outside the document's "
+                    f"{page_count} Pages"
+                )
+        distinct = report.get("distinct_values") or {}
+        problems.extend(
+            _sparse_setting_problems(
+                "sparse method", distinct.get("sparse_method"), SPARSE_METHOD
+            )
+        )
+        problems.extend(
+            _sparse_setting_problems(
+                "sparse tokenizer version",
+                distinct.get("sparse_tokenizer_version"),
+                TOKENIZER_VERSION,
+            )
+        )
+        if problems:
+            raise VectorStoreConfigurationError(
+                f"Index generation {generation} of {filename} failed validation: "
+                + "; ".join(problems)
+                + "."
+            )
+        return report
+
+    def _validate_generation_count(self, filename, generation, expected_count):
+        """Verify the point count when the store cannot report a generation."""
         counter = getattr(self._store, "count", None)
         if not callable(counter):
             return None

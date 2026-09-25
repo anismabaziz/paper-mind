@@ -978,13 +978,14 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
         "app_settings",
         "conversations",
         "files",
+        "index_generation_cleanups",
         "ingestion_jobs",
         "messages",
         "sources",
     } <= tables
     assert {"users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "b8e4c1a97d30",
+        "c3d7e1f4a9b2",
     )
     assert {
         "title",

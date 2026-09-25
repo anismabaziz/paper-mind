@@ -339,6 +339,9 @@ class TestChunkMetadata:
         class CountingStore:
             """Store double that reports an incomplete generation."""
 
+            def generation_report(self, filter=None, limit=1000, value_keys=()):
+                return None
+
             def count(self, filter=None):
                 return 1
 
