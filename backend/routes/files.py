@@ -18,6 +18,7 @@ from routes.common import (
     traversal_check,
 )
 from repositories.ingestion_jobs import JobConflictError
+from services.indexing.state import index_status
 from services.titles import backfill_title, derive_title
 
 if TYPE_CHECKING:
@@ -61,6 +62,11 @@ def register_file_routes(app: Flask, services: "Services") -> None:
     max_upload_bytes = services.settings.upload.max_upload_bytes
     allowed_extensions = services.settings.upload.allowed_extensions
     allowed_mime_types = services.settings.upload.allowed_mime_types
+
+    def _index_status(file_record: dict) -> dict:
+        """Judge a document's index against the running configuration."""
+        state = index_status(files_repository, file_record, services.settings)
+        return state.to_dict(services.settings)
 
     @app.route("/files/<path:filename>/meta", methods=["GET"])
     def get_file_meta(filename):
@@ -225,6 +231,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                 {
                     "is_processed": file_record["is_processed"],
                     "ingestion": ingestion_jobs.get_latest(filename),
+                    "index": _index_status(file_record),
                 }
             )
         except Exception:
@@ -322,6 +329,45 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             log.exception("retry_ingestion_job failed for %r", filename)
             return jsonify({"error": "Internal server error"}), 500
 
+    @app.route("/files/<path:filename>/reindex", methods=["POST"])
+    def reindex_file(filename):
+        """Queue a replacement index for a document whose index went stale."""
+        try:
+            guard = traversal_check(storage, filename)
+            if guard is not None:
+                return guard
+            file_record = files_repository.get_file(filename)
+            if not file_record:
+                return jsonify({"error": "File not found"}), 404
+            if _is_deleting(file_record):
+                return _deletion_blocked_response(file_record)
+            if not storage.exists(filename):
+                return jsonify({"error": "File is missing from storage"}), 400
+            active = ingestion_jobs.get_active(file_record["id"])
+            if active:
+                return jsonify(
+                    {
+                        "message": "A reindex is already running for this document.",
+                        "job": active,
+                    }
+                ), 202
+            try:
+                job = ingestion_jobs.enqueue(file_record["id"], filename)
+            except JobConflictError:
+                active = ingestion_jobs.get_active(file_record["id"])
+                return jsonify(
+                    {
+                        "message": "A reindex is already running for this document.",
+                        "job": active,
+                    }
+                ), 202
+            # The active generation stays queryable until the replacement
+            # validates, so a failed reindex never leaves the document unusable.
+            return jsonify({"job": job, "index": _index_status(file_record)}), 201
+        except Exception:
+            log.exception("reindex_file failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
+
     @app.route("/process-file", methods=["POST"])
     def process_file():
         """Queue indexing work for one document; the worker runs the stages."""
@@ -404,6 +450,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                         "deletion_error": db_file.get("deletion_error"),
                         "deletion_attempts": db_file.get("deletion_attempts", 0),
                         "ingestion": ingestion_jobs.get_latest(filename),
+                        "index": _index_status(db_file),
                         "metadata": {
                             "size": storage_item["size"] if storage_item else 0,
                             "content_type": "application/pdf",

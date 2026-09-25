@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings, AlertTriangle, RotateCw, Square } from "lucide-react";
+import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings, AlertTriangle, RotateCw, RefreshCw, Square } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useFiles, useUploadFile, useDeleteFile, useRetryIngestion, useCancelIngestion, useTouchFileOpened } from "@/hooks/useFiles";
+import { useFiles, useUploadFile, useDeleteFile, useRetryIngestion, useCancelIngestion, useReindex, useTouchFileOpened } from "@/hooks/useFiles";
 import { formatFileSize } from "@/lib/format";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
@@ -14,7 +14,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import type { File as DbFile, IngestionJob } from "@/types/db";
-import { displayTitle, ingestionStageLabel, isIngestionActive, isIngestionCancellable, isIngestionRetryable } from "@/types/db";
+import { displayTitle, indexStatusLine, ingestionStageLabel, isIndexStale, isIngestionActive, isIngestionCancellable, isIngestionRetryable } from "@/types/db";
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -111,6 +111,9 @@ export function LibraryRail() {
   const cancelMutation = useCancelIngestion();
   const cancelTarget = cancelMutation.variables as string | undefined;
   const cancelError = cancelMutation.error instanceof Error ? cancelMutation.error.message : null;
+  const reindexMutation = useReindex();
+  const reindexTarget = reindexMutation.variables as string | undefined;
+  const reindexError = reindexMutation.error instanceof Error ? reindexMutation.error.message : null;
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files?.[0]) uploadMutation.mutate(e.target.files[0]);
@@ -205,13 +208,19 @@ export function LibraryRail() {
           )}
         </div>
 
-        {(uploadError || retryError || cancelError) && (
+        {(uploadError || retryError || cancelError || reindexError) && (
           <div role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2">
             <p className="text-xs font-medium text-destructive">
-              {cancelError ? "Cancellation failed" : retryError ? "Retry failed" : "Upload failed"}
+              {reindexError
+                ? "Reindex failed"
+                : cancelError
+                  ? "Cancellation failed"
+                  : retryError
+                    ? "Retry failed"
+                    : "Upload failed"}
             </p>
             <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-soft">
-              {cancelError ?? retryError ?? uploadError}
+              {reindexError ?? cancelError ?? retryError ?? uploadError}
             </p>
             <button
               type="button"
@@ -219,6 +228,7 @@ export function LibraryRail() {
                 setUploadError(null);
                 retryMutation.reset();
                 cancelMutation.reset();
+                reindexMutation.reset();
               }}
               className="mt-2 border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
             >
@@ -300,6 +310,8 @@ export function LibraryRail() {
               const isJobActive = isIngestionActive(job?.state) || isRetrying || isCancelling;
               const isJobRetryable = isIngestionRetryable(job?.state) && !isRetrying;
               const isJobFailed = job?.state === "failed" && !isRetrying;
+              const isReindexing = reindexMutation.isPending && reindexTarget === item.name;
+              const isStaleIndex = isIndexStale(item.index) && !isJobActive && !isReindexing;
 
               const isDeleting = item.deletion_state === "deleting" || isRemoving;
               const isDeleteFailed = item.deletion_state === "delete_failed";
@@ -332,6 +344,11 @@ export function LibraryRail() {
                             </span>
                           ) : isDeleteFailed ? (
                             <span className="text-destructive">Delete failed</span>
+                          ) : isStaleIndex || isReindexing ? (
+                            <span className="inline-flex items-center gap-1 text-destructive">
+                              {isReindexing ? <Loader2 className="size-2.5 animate-spin" /> : <AlertTriangle className="size-2.5" />}
+                              {isReindexing ? "Reindexing" : "Stale"}
+                            </span>
                           ) : isJobFailed ? (
                             <span className="inline-flex items-center gap-1 text-destructive">
                               <AlertTriangle className="size-2.5" />
@@ -366,7 +383,9 @@ export function LibraryRail() {
                           ? "Deleting"
                           : isDeleteFailed
                             ? (item.deletion_error ?? "Delete failed — retry")
-                            : jobStatusLine(job)}
+                            : isStaleIndex || isReindexing
+                              ? indexStatusLine(item.index)
+                              : jobStatusLine(job)}
                       </span>
                     </button>
 
@@ -380,6 +399,18 @@ export function LibraryRail() {
                           className="mr-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
                         >
                           Retry
+                        </button>
+                      ) : isStaleIndex || isReindexing ? (
+                        <button
+                          type="button"
+                          onClick={() => reindexMutation.mutate(item.name)}
+                          disabled={isReindexing}
+                          title={item.index?.change_details.map((c) => c.label).join(", ") ?? "Reindex"}
+                          aria-label={`Reindex ${displayTitle(item)}`}
+                          className="mr-1 inline-flex items-center gap-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
+                        >
+                          {isReindexing ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                          Reindex
                         </button>
                       ) : isJobRetryable ? (
                         <button

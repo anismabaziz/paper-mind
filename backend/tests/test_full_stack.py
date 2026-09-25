@@ -258,7 +258,7 @@ def test_migrations_apply_to_an_empty_postgres_database(migrated_database):
     }
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            "a7b8c9d0e1f2"
+            "b8e4c1a97d30"
         )
         for table in (
             "app_settings",
@@ -784,3 +784,77 @@ def test_postgres_allows_one_active_job_per_document(full_stack_app):
             == 201
         )
     assert harness.drain() == 2
+
+
+@pytest.mark.full_stack
+def test_real_document_goes_stale_and_reindexes_into_a_new_generation(
+    full_stack_app, monkeypatch
+):
+    """A model change stops chat and a reindex replaces only the active index."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+
+    def index_status() -> dict:
+        response = harness.client.post(
+            "/file/is-processed", json={"filename": filename}
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["index"]
+
+    def generation_points(generation: int) -> int:
+        return harness.qdrant.count(
+            collection_name=harness.collection_name,
+            count_filter={
+                "must": [{"key": "index_generation", "match": {"value": generation}}]
+            },
+            exact=True,
+        ).count
+
+    assert index_status()["state"] == "ready"
+    manifest = index_status()["manifest"]
+    assert manifest["vector_dimension"] == 1024
+    assert manifest["collection_name"] == harness.collection_name
+    assert manifest["index_generation"] == 1
+    assert manifest["parser"] == "false"
+    assert manifest["reranker_model"] == harness.app_settings.rerank.rerank_model
+
+    monkeypatch.setattr(harness.app_settings.embedding, "revision", "9f1c2ab")
+
+    stale = index_status()
+    assert stale["state"] == "stale"
+    assert "embedding_revision" in stale["changes"]
+
+    refused = harness.client.post(
+        "/response", json={"query": "What is a RAG pipeline?", "filename": filename}
+    )
+    assert refused.status_code == 409
+    body = refused.json()
+    assert body["category"] == "index_stale"
+    assert body["action"] == "reindex"
+    assert [d["label"] for d in body["index"]["change_details"]] == [
+        "embedding revision"
+    ]
+    # The vectors the user was reading are still there, untouched.
+    assert generation_points(1) > 0
+
+    reindex = harness.client.post(f"/files/{filename}/reindex")
+    assert reindex.status_code == 201, reindex.text
+    assert reindex.json()["job"]["generation"] == 2
+    assert generation_points(1) > 0, "the active generation survives the reindex"
+
+    assert harness.drain() == 1
+
+    after = index_status()
+    assert after["state"] == "ready"
+    assert after["manifest"]["embedding_revision"] == "9f1c2ab"
+    assert after["manifest"]["index_generation"] == 2
+    assert generation_points(1) == 0, "the replaced generation is cleaned up"
+    assert generation_points(2) > 0
+
+    answered = harness.client.post(
+        "/response", json={"query": "What is a RAG pipeline?", "filename": filename}
+    )
+    assert answered.status_code == 200, answered.text
+    assert parse_sse(answered.text)[-1][1]["done"] is True

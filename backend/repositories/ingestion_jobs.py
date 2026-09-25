@@ -316,6 +316,7 @@ class IngestionJobRepository(BaseRepository):
         job_id: str,
         worker_id: str,
         index_generation: int | None = None,
+        index_manifest: str | None = None,
     ) -> dict[str, Any] | None:
         """Finish a job only while its worker still owns the claim."""
         with self._session_factory() as session, session.begin():
@@ -329,6 +330,11 @@ class IngestionJobRepository(BaseRepository):
                 if file_record is not None:
                     file_record.index_generation = index_generation
                     file_record.is_processed = True
+                    if index_manifest is not None:
+                        file_record.index_manifest = index_manifest
+                    # The new generation matches the running configuration,
+                    # so whatever made the previous one stale no longer holds.
+                    file_record.index_stale_reason = None
             record.state = "ready"
             record.stage = "ready"
             record.progress = 100

@@ -3,9 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryRail } from "./LibraryRail";
-import { cancelIngestionJob, getFiles, retryIngestionJob } from "@/services/files";
+import { cancelIngestionJob, getFiles, reindexFile, retryIngestionJob } from "@/services/files";
 import usePdfStore from "@/store/pdf-state";
-import type { File, IngestionJob } from "@/types/db";
+import type { DocumentIndex, File, IngestionJob } from "@/types/db";
 
 vi.mock("@/services/files", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/services/files")>();
@@ -14,6 +14,7 @@ vi.mock("@/services/files", async (importOriginal) => {
     getFiles: vi.fn(),
     retryIngestionJob: vi.fn(),
     cancelIngestionJob: vi.fn(),
+    reindexFile: vi.fn(),
   };
 });
 
@@ -44,7 +45,43 @@ function makeJob(overrides: Partial<IngestionJob> = {}): IngestionJob {
   };
 }
 
-function makeFile(ingestion: IngestionJob | null): File {
+function makeManifest(overrides: Partial<DocumentIndex["manifest"]> = {}): NonNullable<DocumentIndex["manifest"]> {
+  return {
+    content_hash: "abc123",
+    parser: "auto",
+    parser_version: "pymupdf-docling-page-chunks-v1",
+    chunk_size_tokens: 512,
+    chunk_overlap_tokens: 50,
+    embedding_model: "BAAI/bge-m3",
+    embedding_revision: "",
+    vector_dimension: 1024,
+    sparse_method: "hashed-tf-qdrant-idf-v1",
+    sparse_tokenizer_version: "lowercase-regex-stopwords-v1",
+    reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    reranker_revision: "",
+    reranker_enabled: false,
+    collection_name: "pdf-index",
+    collection_schema_version: "named-dense-sparse-v1",
+    index_generation: 1,
+    ...overrides,
+  };
+}
+
+function makeStaleIndex(overrides: Partial<DocumentIndex> = {}): DocumentIndex {
+  const manifest = makeManifest({ chunk_size_tokens: 512 });
+  return {
+    state: "stale",
+    manifest,
+    runtime_manifest: makeManifest({ chunk_size_tokens: 1024 }),
+    changes: ["chunk_size_tokens"],
+    change_details: [
+      { field: "chunk_size_tokens", label: "chunk size", indexed: 512, current: 1024 },
+    ],
+    ...overrides,
+  };
+}
+
+function makeFile(ingestion: IngestionJob | null, index?: DocumentIndex | null): File {
   return {
     id: "file-1",
     is_processed: false,
@@ -53,6 +90,7 @@ function makeFile(ingestion: IngestionJob | null): File {
     deletion_error: null,
     deletion_attempts: 0,
     ingestion,
+    index: index ?? null,
     metadata: { content_type: "application/pdf", size: 2048 },
     name: "doc.pdf",
     title: "Attention Is All You Need",
@@ -79,6 +117,9 @@ beforeEach(() => {
   );
   vi.mocked(retryIngestionJob).mockResolvedValue(
     makeJob({ state: "queued", stage: "queued", progress: 0, attempt: 2 })
+  );
+  vi.mocked(reindexFile).mockResolvedValue(
+    makeJob({ state: "queued", stage: "queued", progress: 0, generation: 2 })
   );
 });
 
@@ -200,5 +241,61 @@ describe("LibraryRail ingestion state", () => {
     await waitFor(() => {
       expect(usePdfStore.getState().file?.name).toBe("doc.pdf");
     });
+  });
+});
+
+describe("LibraryRail stale index", () => {
+  const readyJob = makeJob({ state: "ready", stage: "ready", progress: 100 });
+
+  it("names the setting that changed and offers a reindex", async () => {
+    vi.mocked(getFiles).mockResolvedValue({
+      files: [
+        { ...makeFile(readyJob, makeStaleIndex()), is_processed: true },
+      ],
+    });
+    renderRail();
+
+    expect(
+      await screen.findByText(/Index is stale · reindex to update chunk size/)
+    ).toBeInTheDocument();
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Reindex Attention Is All You Need/ })
+    );
+
+    await waitFor(() => expect(reindexFile).toHaveBeenCalledWith("doc.pdf"));
+  });
+
+  it("keeps a matching index marked as indexed", async () => {
+    const manifest = makeManifest();
+    vi.mocked(getFiles).mockResolvedValue({
+      files: [
+        {
+          ...makeFile(readyJob, {
+            state: "ready",
+            manifest,
+            runtime_manifest: manifest,
+            changes: [],
+            change_details: [],
+          }),
+          is_processed: true,
+        },
+      ],
+    });
+    renderRail();
+
+    expect(await screen.findByText(/Indexed/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reindex/ })).not.toBeInTheDocument();
+  });
+
+  it("shows progress instead of a reindex while a job is already running", async () => {
+    vi.mocked(getFiles).mockResolvedValue({
+      files: [{ ...makeFile(makeJob(), makeStaleIndex()), is_processed: true }],
+    });
+    renderRail();
+
+    expect(await screen.findByText(/Embedding · 45%/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reindex/ })).not.toBeInTheDocument();
   });
 });

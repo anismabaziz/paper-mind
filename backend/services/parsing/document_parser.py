@@ -27,6 +27,10 @@ from services.parsing.pdf_heuristics import should_use_docling
 
 log = logging.getLogger(__name__)
 
+# Bumped when parsing or chunking output changes shape, so indexes built by an
+# older parser are recognised as incompatible and reindexed.
+PARSER_VERSION = "pymupdf-docling-page-chunks-v1"
+
 # cl100k_base is the tokenizer for gpt-4 / embeddings; stable, no download.
 _ENCODING = tiktoken.get_encoding("cl100k_base")
 

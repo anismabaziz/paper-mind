@@ -45,10 +45,57 @@ export interface IngestionJob {
   usage?: Record<string, number>;
 }
 
+export interface IndexManifest {
+  content_hash: string;
+  parser: string;
+  parser_version: string;
+  chunk_size_tokens: number;
+  chunk_overlap_tokens: number;
+  embedding_model: string;
+  embedding_revision: string;
+  vector_dimension: number;
+  sparse_method: string;
+  sparse_tokenizer_version: string;
+  reranker_model: string;
+  reranker_revision: string;
+  reranker_enabled: boolean;
+  collection_name: string;
+  collection_schema_version: string;
+  index_generation: number;
+}
+
+export interface IndexChange {
+  field: string;
+  label: string;
+  indexed: string | number | boolean | null;
+  current: string | number | boolean | null;
+}
+
+export type IndexState = "pending" | "ready" | "stale";
+
+export interface DocumentIndex {
+  state: IndexState;
+  manifest: IndexManifest | null;
+  runtime_manifest: IndexManifest;
+  changes: string[];
+  change_details: IndexChange[];
+}
+
+export function isIndexStale(index: DocumentIndex | null | undefined): boolean {
+  return index?.state === "stale";
+}
+
+export function indexStatusLine(index: DocumentIndex | null | undefined): string {
+  if (!index || index.state !== "stale") return "";
+  const reasons = index.change_details.map((change) => change.label).join(", ");
+  return `Index is stale · reindex to update ${reasons}`;
+}
+
 export interface File {
   id: string;
   is_processed: boolean;
   index_generation?: number | null;
+  index?: DocumentIndex | null;
   last_opened_at: string | null;
   deletion_state: DeletionState;
   deletion_error: string | null;

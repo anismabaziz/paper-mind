@@ -92,6 +92,20 @@ class FileRepository(BaseRepository):
             if record:
                 record.is_processed = status
 
+    def set_index_stale(self, filename: str, reason: str | None) -> None:
+        """Persist which settings no longer match a document's index."""
+        self._update(filename, index_stale_reason=reason)
+
+    def _update(self, filename: str, **columns: Any) -> None:
+        """Write the given index columns for one document."""
+        with self._session_factory() as session, session.begin():
+            record = session.scalars(
+                select(FileRecord).where(FileRecord.filename == filename)
+            ).first()
+            if record:
+                for column, value in columns.items():
+                    setattr(record, column, value)
+
     def touch_opened(self, filename: str) -> dict[str, Any] | None:
         """Mark a document as opened now; drives the recent-readings order."""
         with self._session_factory() as session, session.begin():
@@ -145,6 +159,8 @@ class FileRepository(BaseRepository):
             original_filename=record.original_filename,
             is_processed=record.is_processed,
             index_generation=getattr(record, "index_generation", None),
+            index_manifest=getattr(record, "index_manifest", None),
+            index_stale_reason=getattr(record, "index_stale_reason", None),
             last_opened_at=opened.isoformat() if opened else None,
             deletion_state=getattr(record, "deletion_state", "active") or "active",
             deletion_error=getattr(record, "deletion_error", None),

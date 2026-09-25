@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, Settings, FileText } from "lucide-react";
+import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, RefreshCw, Settings, FileText } from "lucide-react";
 import { chatStream, type IRetrievalResult, type ISource } from "@/services/files";
-import { useFileStatus, useFileMessages } from "@/hooks/useFiles";
+import { useFileStatus, useFileMessages, useReindex } from "@/hooks/useFiles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
 import { cn } from "@/lib/utils";
-import { isIngestionActive } from "@/types/db";
+import { isIndexStale, isIngestionActive, type DocumentIndex } from "@/types/db";
 
 type ChatMessage = {
   id: string;
@@ -26,6 +26,59 @@ const suggestedPrompts = [
   "Summarize key findings",
   "Methodology used?",
 ];
+
+function formatManifestValue(value: string | number | boolean | null): string {
+  if (typeof value === "boolean") return value ? "on" : "off";
+  return value === null || value === "" ? "unpinned" : String(value);
+}
+
+function StaleIndexNotice({ index }: { index: DocumentIndex }) {
+  const file = usePdfStore((s) => s.file);
+  const reindex = useReindex();
+  return (
+    <div role="status" className="rounded-sm border border-destructive/30 bg-destructive/5 p-5">
+      <div className="flex items-center gap-2">
+        <RefreshCw className="size-3.5 text-destructive" />
+        <h4 className="font-mono text-[0.68rem] font-semibold uppercase tracking-widest text-destructive">
+          Index needs reindexing
+        </h4>
+      </div>
+      <p className="mt-2 font-serif text-xs leading-relaxed text-ink-soft">
+        These settings changed after this paper was indexed, so its passages no longer match how
+        the app searches. Reindex to ask questions again.
+      </p>
+      <dl className="mt-3 space-y-1.5">
+        {index.change_details.map((change) => (
+          <div key={change.field} className="flex flex-wrap items-baseline gap-x-2 text-[0.65rem]">
+            <dt className="font-mono text-ink-faint">{change.label}</dt>
+            <dd className="text-ink-soft">
+              {change.indexed === null
+                ? "not recorded"
+                : `${formatManifestValue(change.indexed)} → ${formatManifestValue(change.current)}`}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="label-meta mt-3">
+        Active index generation {index.manifest?.index_generation ?? "?"}
+      </p>
+      {reindex.isError && (
+        <p className="mt-2 text-[0.65rem] text-destructive">
+          {reindex.error instanceof Error ? reindex.error.message : "The reindex could not be queued."}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() => file && reindex.mutate(file.name)}
+        disabled={reindex.isPending || !file}
+        className="mt-3 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90 disabled:opacity-40"
+      >
+        {reindex.isPending ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+        {reindex.isPending ? "Queueing reindex…" : "Reindex this paper"}
+      </button>
+    </div>
+  );
+}
 
 function SourceList({ sources }: { sources: ISource[] }) {
   const [open, setOpen] = useState(true);
@@ -111,6 +164,8 @@ export function ChatPane() {
 
   const checkProcessedQuery = useFileStatus(file);
   const ingestionJob = checkProcessedQuery.data?.ingestion;
+  const documentIndex = checkProcessedQuery.data?.index;
+  const isStaleIndex = isIndexStale(documentIndex);
   const isIndexing = isIngestionActive(ingestionJob?.state);
   const messagesQuery = useFileMessages(
     file,
@@ -224,7 +279,7 @@ export function ChatPane() {
   }
 
   const isProcessed = checkProcessedQuery.data?.is_processed;
-  const inputDisabled = !file || !isProcessed || isIndexing;
+  const inputDisabled = !file || !isProcessed || isIndexing || isStaleIndex;
 
   return (
     <section className="flex w-[26rem] shrink-0 flex-col border-l border-rule bg-background">
@@ -266,7 +321,11 @@ export function ChatPane() {
           </div>
         )}
 
-        {file && isProcessed && !isIndexing && messages.length === 0 && !thinking && (
+        {file && isStaleIndex && !isIndexing && documentIndex && (
+          <StaleIndexNotice index={documentIndex} />
+        )}
+
+        {file && isProcessed && !isIndexing && !isStaleIndex && messages.length === 0 && !thinking && (
           <div className="rounded-sm border border-rule bg-paper p-5 text-center shadow-sm">
             <h4 className="font-mono text-[0.68rem] font-semibold uppercase tracking-widest">Session Initialized</h4>
             <p className="mx-auto mt-2 max-w-[30ch] font-serif text-xs leading-relaxed text-ink-faint">
@@ -360,7 +419,15 @@ export function ChatPane() {
                 send(value);
               }
             }}
-            placeholder={file ? (isProcessed ? "Ask this paper something…" : "Indexing — questions paused…") : "Select a paper…"}
+            placeholder={
+              !file
+                ? "Select a paper…"
+                : isStaleIndex
+                  ? "Reindex this paper to ask questions…"
+                  : isProcessed
+                    ? "Ask this paper something…"
+                    : "Indexing — questions paused…"
+            }
             disabled={inputDisabled}
             className="w-full resize-none bg-transparent text-[0.85rem] leading-relaxed placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
           />
