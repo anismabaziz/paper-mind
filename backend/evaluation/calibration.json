@@ -1,0 +1,34 @@
+{
+  "rubric_version": "faithfulness-rubric-v2",
+  "note": "Answers a person labelled by reading the answer against the context. The indeterminate case is labelled as such on purpose: it is the case a run must not turn into a score.",
+  "cases": [
+    {
+      "id": "calibration-faithful",
+      "question": "How many program jumps were counted correctly by the identification algorithm?",
+      "context": "The identification algorithm counted 39 of the 41 program jumps correctly, with one false positive.",
+      "answer": "The identification algorithm counted 39 of the 41 program jumps correctly.",
+      "human_verdict": "faithful"
+    },
+    {
+      "id": "calibration-partial",
+      "question": "Where was the jump monitor worn, and what did it record?",
+      "context": "The jump monitor is a waist-mounted inertial measurement unit used to detect take-off and landing.",
+      "answer": "The monitor is a waist-mounted inertial measurement unit. It also keeps a log of the battery level of the sensor.",
+      "human_verdict": "partial"
+    },
+    {
+      "id": "calibration-unfaithful",
+      "question": "Where was the jump monitor worn on the body?",
+      "context": "The jump monitor is a waist-mounted inertial measurement unit.",
+      "answer": "The jump monitor is an ankle-mounted sensor strapped below the knee.",
+      "human_verdict": "unfaithful"
+    },
+    {
+      "id": "calibration-indeterminate",
+      "question": "What errors were found with the peak-to-peak scaling algorithm?",
+      "context": "Flight time and jump height errors were reported for the peak-to-peak scaling algorithm, with the flight time errors consistently smaller than the jump height errors.",
+      "answer": "The context gives no figure for either error. It may be that flight time errors were under 7% and jump height errors under 15%, or the errors may have been larger.",
+      "human_verdict": "unknown"
+    }
+  ]
+}

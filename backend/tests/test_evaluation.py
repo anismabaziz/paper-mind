@@ -21,7 +21,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from composition import Services
-from evaluation import cli, evaluator, judge
+from evaluation import cli, evaluator, graders, judge
+from evaluation.calibration import load_calibration
 from evaluation.harness import build_environment, remove_documents
 from services.accounts.chat_settings_service import model_for
 from services.llm.base import ChatBudget, LLMProvider
@@ -163,6 +164,13 @@ def faithful_judge(prompt):
     return "faithful"
 
 
+def a_judge(grade=faithful_judge, provider="google", model="gemini-2.5-flash"):
+    """Return a judge with the identity a run records beside its scores."""
+    return judge.Judge(
+        settings=judge.JudgeSettings(provider=provider, model=model), grade=grade
+    )
+
+
 class FailingProvider(LLMProvider):
     """A real provider whose one-shot call always fails."""
 
@@ -187,78 +195,6 @@ class FailingProvider(LLMProvider):
     def _stream_response(self, query: str, context: str, history: str = ""):
         """Streaming is not exercised over the judge."""
         raise NotImplementedError
-
-
-class TestMetrics:
-    """TestMetrics."""
-
-    def test_hit_at_k_true_within_top_k(self):
-        """Do test hit at k true within top k."""
-        from evaluation.metrics import hit_at_k
-
-        assert hit_at_k(
-            ["irrelevant", "the count was 41 jumps in total"], ["41 jumps"], 2
-        )
-
-    def test_recall_fraction_over_all_gold_snippets(self):
-        """Do test recall fraction over all gold snippets."""
-        from evaluation.metrics import recall_at_k
-
-        assert (
-            recall_at_k(["first gold: alpha", "nothing here"], ["alpha", "beta"], 2)
-            == 0.5
-        )
-
-    def test_summarize_averages_question_results(self):
-        """Do test summarize averages question results."""
-        from evaluation.metrics import summarize
-
-        report = summarize(
-            [
-                {"hit_at_k": True, "recall_at_k": 1.0},
-                {"hit_at_k": False, "recall_at_k": 0.0},
-            ],
-            k=3,
-        )
-        assert report.questions == 2
-        assert report.hit_rate == 0.5
-
-
-class TestJudgeProtocol:
-    """A verdict word, its score, and the prompt that asks for one."""
-
-    def test_a_clean_verdict_is_read_as_its_score(self):
-        """Do test a clean verdict is read as its score."""
-        assert judge.parse_verdict("faithful") == ("faithful", 1.0)
-        assert judge.parse_verdict("partial") == ("partial", 0.5)
-        assert judge.parse_verdict("unfaithful") == ("unfaithful", 0.0)
-
-    def test_a_verdict_inside_a_sentence_is_still_read(self):
-        """Do test a verdict inside a sentence is still read."""
-        assert judge.parse_verdict('The verdict is: "Unfaithful"') == (
-            "unfaithful",
-            0.0,
-        )
-
-    def test_a_reply_that_is_not_a_verdict_scores_zero(self):
-        """Do test a reply that is not a verdict scores zero."""
-        assert judge.parse_verdict("I think it is fine") == ("unparseable", 0.0)
-
-    def test_the_prompt_carries_the_question_the_answer_and_the_context(self):
-        """Do test the prompt carries the question the answer and the context."""
-        captured = {}
-
-        def spy(prompt):
-            """Do spy."""
-            captured["prompt"] = prompt
-            return "partial"
-
-        verdict, score = judge.judge_faithfulness("Q", "A", "CTX", spy)
-
-        assert (verdict, score) == ("partial", 0.5)
-        assert "Q" in captured["prompt"]
-        assert "A" in captured["prompt"]
-        assert "CTX" in captured["prompt"]
 
 
 class TestFixtureIntegrity:
@@ -392,11 +328,11 @@ class TestProductionPath:
             fixture,
             environment,
             MODEL,
-            judge_fn=faithful_judge,
+            judge=a_judge(),
         )
 
-        assert report.faithfulness["judged"] == len(fixture["questions"])
-        assert report.faithfulness["mean"] == 1.0
+        assert report.answers.faithfulness.scored == len(fixture["questions"])
+        assert report.answers.faithfulness.mean == 1.0
         assert all(case.verdict == "faithful" for case in report.cases)
 
 
@@ -414,7 +350,7 @@ class TestCaseOutcomes:
             case,
             environment,
             MODEL,
-            judge_fn=faithful_judge,
+            judge=a_judge(),
         )
 
         result = report.cases[0]
@@ -422,7 +358,8 @@ class TestCaseOutcomes:
         assert result.detail == "provider"
         assert result.generated is False
         assert result.verdict is None
-        assert report.faithfulness["judged"] == 0
+        assert report.answers.faithfulness.scored == 0
+        assert report.answers.faithfulness.mean is None
 
     def test_a_stalled_provider_is_recorded_as_a_timeout(
         self, fixture, environment, chat
@@ -533,14 +470,15 @@ class TestCaseOutcomes:
             case,
             environment,
             MODEL,
-            judge_fn=faithful_judge,
+            judge=a_judge(),
         )
 
         result = report.cases[0]
         assert result.outcome == evaluator.CONTEXT_FALLBACK
         assert result.generated is False
         assert result.verdict is None
-        assert report.faithfulness["judged"] == 0
+        assert report.answers.faithfulness.scored == 0
+        assert report.answers.faithfulness.mean is None
 
     def test_every_outcome_a_case_can_have_is_reported_even_at_zero(
         self, fixture, environment
@@ -713,6 +651,532 @@ class TestSameResultOverHttp:
             remove_documents(through_evaluator)
 
 
+class TestRetrievalScores:
+    """The run's retrieval numbers, per question and in aggregate."""
+
+    def test_every_question_that_reached_retrieval_is_scored_and_named(
+        self, fixture, environment
+    ):
+        """The run names the cases it scored, so an average can be traced back."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        assert [row["id"] for row in report.retrieval.per_question] == [
+            case["id"] for case in fixture["questions"]
+        ]
+        assert report.retrieval.questions == len(fixture["questions"])
+
+    def test_the_aggregate_reports_all_four_ways_of_scoring_a_ranking(
+        self, fixture, environment
+    ):
+        """A rate that counts a hit, a rate that counts every gold snippet, a rate that rewards rank, and a rate that discounts it."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        assert 0.0 <= report.retrieval.hit_rate <= 1.0
+        assert 0.0 <= report.retrieval.recall <= 1.0
+        assert 0.0 <= report.retrieval.mrr <= 1.0
+        assert 0.0 <= report.retrieval.ndcg <= 1.0
+        assert report.retrieval.mrr <= report.retrieval.hit_rate + 1e-9
+        assert report.retrieval.ndcg <= report.retrieval.hit_rate + 1e-9
+
+    def test_a_per_question_row_carries_the_own_numbers_of_that_question(
+        self, fixture, environment
+    ):
+        """The per-question row is the case's own numbers, not a second measurement of them."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+        first = report.retrieval.per_question[0]
+        case = report.cases[0]
+
+        assert first["recall_at_k"] == case.recall_at_k
+        assert first["reciprocal_rank"] == case.reciprocal_rank
+        assert first["ndcg_at_k"] == case.ndcg_at_k
+        assert first["hit_at_k"] == case.hit_at_k
+
+
+class TestLatencyAndCost:
+    """How long the run took, and what it cost, measured rather than assumed."""
+
+    def test_the_first_case_is_a_cold_start_and_the_rest_are_warm(
+        self, fixture, environment
+    ):
+        """One case pays for whatever loads lazily; the others do not."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        assert [case.phase for case in report.cases] == [
+            evaluator.COLD_START,
+            *(evaluator.WARM for _ in fixture["questions"][1:]),
+        ]
+
+    def test_a_case_that_never_retrieved_does_not_get_to_be_the_cold_start(
+        self, fixture, build_run
+    ):
+        """
+        A refused case measures nothing, so it cannot own the cold start.
+
+            Otherwise the first case that actually reached the vector store is
+            labelled warm, and the seconds that paid for a lazy load are averaged
+            into the steady-state distribution as if every question cost them.
+        """
+        environment = build_run()
+        try:
+            case = one_case(fixture)
+            environment.repositories.files.set_processed(
+                environment.stored_name(PRIMER), False
+            )
+            # Two documents, so marking the primer unanswerable refuses the
+            # first case without refusing the second one as well.
+            refused = {
+                "documents": fixture["documents"],
+                "questions": [
+                    {
+                        "id": "refused-first",
+                        "document": PRIMER,
+                        "question": "What are the stages of a RAG pipeline?",
+                    },
+                    *case["questions"],
+                ],
+            }
+            refused["questions"][1] = {
+                **refused["questions"][1],
+                "document": next(
+                    document["filename"]
+                    for document in fixture["documents"]
+                    if document["filename"] != PRIMER
+                ),
+            }
+
+            report = evaluator.evaluate(refused, environment, MODEL)
+
+            assert [result.phase for result in report.cases] == [
+                evaluator.NOT_MEASURED,
+                evaluator.COLD_START,
+            ]
+            assert report.cases[0].outcome == evaluator.REFUSED
+            assert report.latency.cold_start["retrieval_seconds"].samples == 1
+            assert report.latency.steady_state["retrieval_seconds"].samples == 0
+        finally:
+            remove_documents(environment)
+
+    def test_a_run_measures_retrieval_first_token_and_total_from_its_clock(
+        self, fixture, build_run
+    ):
+        """
+        The clock is an input, so every interval the run reports is checkable.
+
+            A clock that returns consecutive integers makes every pair of reads
+            one second apart, whatever else read it first, so the three
+            measurements a case makes are exact rather than plausible.
+        """
+        ticks = iter(float(index) for index in range(10_000))
+        environment = build_run(clock=lambda: next(ticks))
+        try:
+            report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+            case = report.cases[0]
+            assert case.provenance["retrieval_seconds"] == 1.0
+            assert case.first_token_seconds == 1.0
+            assert case.total_seconds == 2.0
+        finally:
+            remove_documents(environment)
+
+    def test_an_answer_that_never_streamed_a_token_has_no_time_to_first_token(
+        self, fixture, build_run, chat
+    ):
+        """A case that failed before any output has nothing to wait for."""
+        ticks = iter(float(index) for index in range(10_000))
+        environment = build_run(clock=lambda: next(ticks))
+        try:
+            chat.fail_with(RuntimeError("provider down"), before_output=True)
+
+            report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+            assert report.cases[0].first_token_seconds is None
+            assert report.cases[0].total_seconds == 1.0
+        finally:
+            remove_documents(environment)
+
+    def test_the_cold_start_is_summarized_apart_from_the_steady_state(
+        self, fixture, build_run
+    ):
+        """A p95 that averaged a lazy load in would describe nobody's question."""
+        ticks = iter(float(index) for index in range(100_000))
+        environment = build_run(clock=lambda: next(ticks))
+        try:
+            report = evaluator.evaluate(fixture, environment, MODEL)
+
+            cold = report.latency.cold_start["total_seconds"]
+            steady = report.latency.steady_state["total_seconds"]
+            assert cold.samples == 1
+            assert steady.samples == len(fixture["questions"]) - 1
+            # Every interval the tick clock produces is two seconds, so the
+            # steady-state distribution is flat and the cold start is its own.
+            assert (steady.p50, steady.p95) == (2.0, 2.0)
+            assert (cold.p50, cold.p95) == (2.0, 2.0)
+        finally:
+            remove_documents(environment)
+
+    def test_retrieval_latency_is_reported_at_p50_and_p95(self, fixture, environment):
+        """Every measurement a run makes is reported as a median and a tail."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        for phase in (report.latency.cold_start, report.latency.steady_state):
+            for name in ("retrieval_seconds", "first_token_seconds", "total_seconds"):
+                assert phase[name].p50 is not None
+                assert phase[name].p95 is not None
+
+    def test_tokens_and_cost_are_counted_for_the_answers_a_model_wrote(
+        self, fixture, environment
+    ):
+        """A run reports what its calls cost, priced from the catalog."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        answered = [case for case in report.cases if case.generated]
+        assert report.cost.priced_cases == len(answered)
+        assert report.cost.input_tokens == sum(case.input_tokens for case in answered)
+        assert report.cost.output_tokens > 0
+        assert report.cost.usd > 0.0
+        assert report.cost.model == MODEL.id
+        assert report.cost.input_cost_per_million_usd == (
+            MODEL.input_cost_per_million_usd
+        )
+
+    def test_a_case_that_never_reached_a_model_is_not_priced(
+        self, fixture, environment, store, chat
+    ):
+        """A failure that generated nothing has nothing to charge for."""
+        store.delete(filter={"pdf_name": environment.stored_name(PRIMER)})
+
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        case = report.cases[0]
+        assert case.outcome == evaluator.ABSTAINED
+        assert case.output_tokens is None
+        assert case.cost_usd is None
+        assert report.cost.priced_cases == 0
+        assert report.cost.usd == 0.0
+        # The token totals count the same cases the dollar figure does, or the
+        # run would print a token count it is not charging for.
+        assert report.cost.input_tokens == 0
+        assert report.cost.output_tokens == 0
+
+    def test_the_input_count_includes_the_system_instruction_every_call_carries(
+        self, fixture, environment
+    ):
+        """Counting only the question would understate every case by the same."""
+        from services.chat_context import token_count
+        from services.prompts import SYSTEM_INSTRUCTION
+
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        case = report.cases[0]
+        assert case.input_tokens > token_count(SYSTEM_INSTRUCTION)
+        assert case.input_tokens == token_count(SYSTEM_INSTRUCTION) + token_count(
+            case.context
+        ) + token_count(case.question)
+
+    def test_the_output_count_includes_the_claims_block_the_model_wrote(
+        self, fixture, environment
+    ):
+        """The block is stripped before storage and billed before it was."""
+        from services.chat_context import token_count
+
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        case = report.cases[0]
+        assert case.output_tokens > token_count(case.answer)
+        assert case.claims, "the scripted answer declares a claim to count"
+
+    def test_finish_reasons_are_counted_across_the_run(self, fixture, environment):
+        """How the provider said the answer was over, counted across the run."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        assert report.answers.finish_reasons == {"stop": len(fixture["questions"])}
+        assert report.answers.generated == len(fixture["questions"])
+        assert report.answers.truncated == 0
+
+    def test_an_answer_cut_short_is_reported_as_truncated(self, fixture, environment):
+        """An answer that arrived whole is not counted as cut short."""
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        assert report.cases[0].finish_reason == "stop"
+        assert report.answers.truncated == 0
+
+
+class TestDeterministicGrading:
+    """What the graders decide without asking a model."""
+
+    def test_every_case_is_graded_by_every_deterministic_grader(
+        self, fixture, environment
+    ):
+        """A case nobody graded is a case whose quality nobody knows."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        for case in report.cases:
+            assert set(case.grades) == {
+                "provider_status",
+                "required_abstention",
+                "exact_evidence",
+                "claims_schema",
+                "source_ids",
+                "page_references",
+            }
+        assert len(graders.DETERMINISTIC_GRADERS) == 6
+
+    def test_an_answer_citing_the_passage_that_says_it_passes_the_evidence_grade(
+        self, fixture, environment, chat
+    ):
+        """Citations that reach the evidence pass every citation-shaped grade."""
+        case = one_case(fixture)
+        chat.answer_with_claims(ANSWER, [{"claim": GOLD, "sources": ["S1"]}])
+
+        report = evaluator.evaluate(case, environment, MODEL)
+
+        grades = report.cases[0].grades
+        assert grades["exact_evidence"].outcome == graders.PASSED
+        assert grades["source_ids"].outcome == graders.PASSED
+        assert grades["claims_schema"].outcome == graders.PASSED
+        assert report.cases[0].citation_recall == 1.0
+        assert report.cases[0].citation_precision == 1.0
+
+    def test_a_claim_citing_no_passage_fails_the_source_grade_and_costs_recall(
+        self, fixture, environment, chat
+    ):
+        """A claim a reader cannot follow is a claim that counts against recall."""
+        case = one_case(fixture)
+        chat.answer_with_claims(ANSWER, [{"claim": GOLD, "sources": []}])
+
+        report = evaluator.evaluate(case, environment, MODEL)
+
+        result = report.cases[0]
+        assert result.outcome == evaluator.ANSWERED
+        assert result.grades["source_ids"].outcome == graders.FAILED
+        assert result.citation_recall == 0.0
+        assert report.answers.citation_recall.mean == 0.0
+        assert report.answers.citation_recall.failed == 1
+
+    def test_a_claim_pointed_at_a_passage_that_does_not_say_it_is_not_precise(
+        self, fixture, environment, chat
+    ):
+        """A citation can resolve and still not support what it is attached to."""
+        case = one_case(fixture)
+        chat.answer_with_claims(
+            ANSWER, [{"claim": "The monitor is ankle-mounted", "sources": ["S1"]}]
+        )
+
+        report = evaluator.evaluate(case, environment, MODEL)
+
+        result = report.cases[0]
+        assert result.grades["source_ids"].outcome == graders.PASSED
+        assert result.citation_precision == 0.0
+        assert result.citation_recall == 1.0
+        assert report.answers.citation_precision.mean == 0.0
+        assert report.answers.citation_precision.failed == 1
+
+    def test_a_claim_with_no_citation_loses_citation_recall(self, fixture, environment):
+        """A citation that resolves is not automatically one that supports the claim."""
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        # The scripted answer cites S1 for a claim about nothing in particular,
+        # so the citation resolves but does not support what it is attached to.
+        assert report.cases[0].citation_recall == 1.0
+        assert report.cases[0].citation_precision == 0.0
+        assert report.answers.citation_recall.mean == 1.0
+
+    def test_page_references_are_checked_against_the_passages_cited(
+        self, fixture, environment, chat
+    ):
+        """A page the reader is sent to has to be a page of a cited Passage."""
+        case = one_case(fixture)
+        chat.answer_with_claims(
+            f"{ANSWER} See page 3 for the table.",
+            [{"claim": GOLD, "sources": ["S1"]}],
+        )
+
+        report = evaluator.evaluate(case, environment, MODEL)
+
+        grade = report.cases[0].grades["page_references"]
+        assert grade.outcome == graders.FAILED
+        assert "3" in grade.detail
+
+    def test_a_provider_failure_fails_the_run_and_improves_no_score(
+        self, fixture, environment, chat
+    ):
+        """A dead provider is a failure everywhere, never a quiet zero."""
+        chat.fail_with(RuntimeError("provider down"), before_output=True)
+
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        case = report.cases[0]
+        assert case.grades["provider_status"].outcome == graders.FAILED
+        assert case.grades["required_abstention"].outcome == graders.FAILED
+        assert case.citation_precision is None
+        assert case.citation_recall is None
+        assert report.answers.citation_precision.scored == 0
+        assert report.answers.citation_precision.passed == 0
+        assert report.answers.abstention.failed == 1
+        assert report.answers.abstention.passed == 0
+        assert report.answers.generated == 0
+        assert report.cost.priced_cases == 0
+
+    def test_an_abstention_on_an_answerable_question_is_scored_as_a_mistake(
+        self, fixture, environment, store
+    ):
+        """Refusing a question the evidence answers is a defect, not a safety."""
+        store.delete(filter={"pdf_name": environment.stored_name(PRIMER)})
+
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        abstention = report.answers.abstention
+        assert report.cases[0].outcome == evaluator.ABSTAINED
+        assert abstention.failed == 1
+        assert abstention.mean == 0.0
+
+    def test_a_run_where_every_case_answered_scores_the_abstention_metric_full(
+        self, fixture, environment
+    ):
+        """Answering every answerable question is the abstention metric at full marks."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        assert report.answers.abstention.mean == 1.0
+        assert report.answers.abstention.passed == len(fixture["questions"])
+
+
+class TestModelGrading:
+    """The two metrics only a judge can settle, and the judge's own labels."""
+
+    def test_the_run_names_the_judge_and_the_rubric_it_answered_against(
+        self, fixture, environment
+    ):
+        """A judged number is only comparable next to the judge that produced it."""
+        grader = a_judge(provider="groq", model="openai/gpt-oss-20b")
+
+        report = evaluator.evaluate(fixture, environment, MODEL, judge=grader)
+
+        assert report.run["judge"] == {
+            "provider": "groq",
+            "model": "openai/gpt-oss-20b",
+            "rubric_version": judge.RUBRIC_VERSION,
+        }
+
+    def test_a_run_with_no_judge_names_no_judge_and_claims_nothing_judged(
+        self, fixture, environment
+    ):
+        """A retrieval-only run reports nothing as judged."""
+        report = evaluator.evaluate(fixture, environment, MODEL)
+
+        assert report.run["judge"] is None
+        assert report.calibration is None
+        assert report.answers.faithfulness.scored == 0
+        assert report.answers.correctness.scored == 0
+
+    def test_a_judge_is_calibrated_against_the_hand_labelled_set(
+        self, fixture, environment
+    ):
+        """A judge is trusted with what reading cannot settle, so it is checked against labels."""
+        report = evaluator.evaluate(fixture, environment, MODEL, judge=a_judge())
+
+        calibration = report.calibration
+        assert calibration["cases"] == len(load_calibration())
+        assert calibration["rubric_version"] == judge.RUBRIC_VERSION
+        # The scripted judge grades every labelled case faithful, so it matches
+        # only the one case a person also called faithful.
+        assert calibration["agreed"] == 1
+        assert calibration["disagreed"] >= 1
+
+    def test_correctness_is_only_asked_where_the_case_set_expects_an_answer(
+        self, fixture, environment
+    ):
+        """Two graders, two questions: support from the evidence, and agreement with the label."""
+        calls = []
+
+        def spy(prompt):
+            """Do spy."""
+            calls.append(prompt)
+            return "correct" if "expected answer" in prompt else "faithful"
+
+        report = evaluator.evaluate(fixture, environment, MODEL, judge=a_judge(spy))
+
+        assert report.answers.correctness.scored == len(fixture["questions"])
+        assert report.answers.correctness.mean == 1.0
+        assert report.answers.faithfulness.mean == 1.0
+        assert all(case.correctness_verdict == "correct" for case in report.cases)
+
+    def test_a_judge_that_returns_nothing_is_counted_as_unknown_not_as_zero(
+        self, fixture, environment
+    ):
+        """A judge that cannot read its own verdict has graded nothing."""
+        report = evaluator.evaluate(
+            fixture, environment, MODEL, judge=a_judge(lambda prompt: "I cannot say")
+        )
+
+        faithfulness = report.answers.faithfulness
+        assert faithfulness.scored == 0
+        assert faithfulness.unknown == len(fixture["questions"])
+        assert faithfulness.mean is None
+        assert faithfulness.failed == 0
+
+    def test_calibration_can_be_switched_off_for_a_run_that_skips_it(
+        self, fixture, environment
+    ):
+        """Calibration costs judge calls, so a run can leave it out."""
+        report = evaluator.evaluate(
+            fixture, environment, MODEL, judge=a_judge(), calibrate=False
+        )
+
+        assert report.calibration is None
+
+
+class TestReportSerialization:
+    """The report a reader parses is the report the run measured."""
+
+    def test_the_whole_report_survives_being_written_as_json(
+        self, fixture, environment
+    ):
+        """The report a reader parses is the report the run measured."""
+        report = evaluator.evaluate(fixture, environment, MODEL, judge=a_judge())
+
+        payload = json.loads(json.dumps(report.as_dict()))
+
+        assert payload["run"]["prompt_version"] == "grounded-claims-v1"
+        assert payload["answers"]["faithfulness"]["scored"] == len(fixture["questions"])
+        assert (
+            payload["latency"]["steady_state"]["total_seconds"]["samples"]
+            == len(fixture["questions"]) - 1
+        )
+        assert payload["cost"]["model"] == MODEL.id
+        assert len(payload["cases"]) == len(fixture["questions"])
+
+    def test_a_case_carries_the_page_of_each_supplied_passage_not_its_text(
+        self, fixture, environment
+    ):
+        """The evidence is measured, not reprinted: the report keeps the pages."""
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        case = report.as_dict()["cases"][0]
+        assert "retrieved_texts" not in case
+        assert "sources" not in case
+        assert set(case["source_pages"]) <= {"S1", "S2", "S3", "S4", "S5"}
+
+    def test_a_case_records_what_it_was_measured_on(self, fixture, environment):
+        """Every case carries the measurements its own numbers came from."""
+        report = evaluator.evaluate(one_case(fixture), environment, MODEL)
+
+        case = report.as_dict()["cases"][0]
+        for field in (
+            "retrieval_seconds",
+            "first_token_seconds",
+            "total_seconds",
+            "input_tokens",
+            "output_tokens",
+            "cost_usd",
+            "phase",
+            "finish_reason",
+            "reciprocal_rank",
+            "ndcg_at_k",
+        ):
+            assert field in case, field
+        assert case["generated"] is True
+
+
 class TestCliConfiguration:
     """Keys come from the environment, and the two roles are configured apart."""
 
@@ -738,7 +1202,7 @@ class TestCliConfiguration:
         monkeypatch.setattr("settings.get_settings", lambda: _pinned())
 
         with pytest.raises(SystemExit) as exc:
-            cli.run(live=True, judge=False, k=5)
+            cli.run(live=True, use_judge=False, k=5)
 
         assert cli.GENERATOR_API_KEY_ENV in str(exc.value.code)
 
@@ -750,7 +1214,7 @@ class TestCliConfiguration:
         with pytest.raises(SystemExit) as exc:
             cli.run(
                 live=True,
-                judge=True,
+                use_judge=True,
                 k=5,
                 provider="google",
                 model="gemini-2.5-flash",
@@ -801,7 +1265,7 @@ class TestCliConfiguration:
             return FailingProvider("sk-judge-secret")
 
         monkeypatch.setattr(cli, "build_chat_provider", fake_build)
-        cli.build_judge("groq", "openai/gpt-oss-120b", "groq-secret")
+        cli.build_evaluation_judge("groq", "openai/gpt-oss-120b", "groq-secret")
 
         credentials = captured["credentials"]
         assert credentials.provider == "groq"
@@ -816,10 +1280,10 @@ class TestCliConfiguration:
             "build_chat_provider",
             lambda *a, **k: FailingProvider(secret),
         )
-        judge_fn = cli.build_judge("google", "gemini-2.5-flash", secret)
+        grader = cli.build_evaluation_judge("google", "gemini-2.5-flash", secret)
 
         with pytest.raises(RuntimeError) as failure:
-            judge_fn("grade this")
+            grader("grade this")
 
         assert secret not in str(failure.value)
         assert "the provider call failed" in str(failure.value)
@@ -876,7 +1340,16 @@ class TestCliConfiguration:
         cli.main(["--live", "--no-judge", "--json"])
 
         payload = json.loads(capsys.readouterr().out)
-        assert set(payload) == {"run", "retrieval", "outcomes", "faithfulness", "cases"}
+        assert set(payload) == {
+            "run",
+            "retrieval",
+            "outcomes",
+            "answers",
+            "latency",
+            "cost",
+            "calibration",
+            "cases",
+        }
         assert payload["run"]["prompt_version"] == "grounded-claims-v1"
         assert payload["outcomes"]["answered"] == 0
 
@@ -887,6 +1360,60 @@ class TestCliConfiguration:
         assert settings_obj.rerank.enabled is False
         assert flipped.query_context == settings_obj.query_context
 
+    def test_the_summary_names_the_metrics_the_cost_and_the_judge(self, capsys):
+        """The operator-facing summary is where the numbers are read first."""
+        cli._print(_empty_report())
+        printed = capsys.readouterr().out
+
+        assert "not judged" in printed
+        assert "Retrieval@5" in printed
+        for name in ("correctness", "faithfulness", "citation_recall", "abstention"):
+            assert name in printed
+        assert "Latency (steady state)" in printed
+        assert "cold start" in printed
+        assert "Cost: $0.0000" in printed
+
+    def test_a_printed_run_names_its_judge_and_the_grades_that_failed(
+        self, fixture, environment, chat, capsys
+    ):
+        """A printed run says who judged it and which graders objected."""
+        report = evaluator.evaluate(
+            one_case(fixture),
+            environment,
+            MODEL,
+            judge=a_judge(provider="groq", model="openai/gpt-oss-20b"),
+        )
+        cli._print(report.as_dict())
+        printed = capsys.readouterr().out
+
+        assert "judged by groq/openai/gpt-oss-20b" in printed
+        assert f"rubric {judge.RUBRIC_VERSION}" in printed
+        assert "judge=faithful" in printed
+        assert "ndcg=" in printed
+
+    def test_the_calibration_set_can_be_left_out_of_a_run(self, monkeypatch):
+        """The flag reaches the run rather than only the argument parser."""
+        monkeypatch.setenv(cli.GENERATOR_API_KEY_ENV, "generator-secret")
+        monkeypatch.delenv(cli.JUDGE_API_KEY_ENV, raising=False)
+        monkeypatch.setattr("settings.get_settings", _pinned)
+        seen = []
+
+        def fake_once(fixture, app_settings, **kwargs):
+            seen.append(kwargs["calibrate"])
+            return _empty_report()
+
+        monkeypatch.setattr(cli, "_run_once", fake_once)
+        cli.run(
+            live=True,
+            use_judge=False,
+            k=5,
+            provider="google",
+            model="gemini-2.5-flash",
+            calibrate=False,
+        )
+
+        assert seen == [False]
+
     def test_comparing_reranking_reports_both_runs(self, monkeypatch, capsys):
         """An ablation is two runs of the same case set, reported side by side."""
         monkeypatch.setenv(cli.GENERATOR_API_KEY_ENV, "generator-secret")
@@ -894,14 +1421,14 @@ class TestCliConfiguration:
         monkeypatch.setattr("settings.get_settings", _pinned)
         seen = []
 
-        def fake_once(fixture, app_settings, *args, **kwargs):
+        def fake_once(fixture, app_settings, **kwargs):
             seen.append(app_settings.rerank.enabled)
             return _empty_report()
 
         monkeypatch.setattr(cli, "_run_once", fake_once)
         report = cli.run(
             live=True,
-            judge=False,
+            use_judge=False,
             k=5,
             provider="google",
             model="gemini-2.5-flash",
@@ -919,18 +1446,74 @@ def _pinned():
 
 
 def _empty_report() -> dict:
+    """Return the report shape a run with nothing in it serializes as."""
+    metric = {
+        "graded": 0,
+        "scored": 0,
+        "mean": None,
+        "passed": 0,
+        "failed": 0,
+        "unknown": 0,
+    }
+    latency = {"samples": 0, "p50": None, "p95": None}
     return {
         "run": {
             "k": 5,
             "prompt_version": "grounded-claims-v1",
             "provider": "google",
             "model": "gemini-2.5-flash",
+            "judge": None,
             "settings": {},
             "documents": {},
             "retrieval_methods": [],
         },
-        "retrieval": {"questions": 0, "k": 5, "hit_rate": 0.0, "recall": 0.0},
+        "retrieval": {
+            "questions": 0,
+            "k": 5,
+            "hit_rate": 0.0,
+            "recall": 0.0,
+            "mrr": 0.0,
+            "ndcg": 0.0,
+            "per_question": [],
+        },
         "outcomes": {outcome: 0 for outcome in evaluator.OUTCOMES},
-        "faithfulness": {"mean": None, "judged": 0, "faithful": 0},
+        "answers": {
+            "correctness": dict(metric),
+            "faithfulness": dict(metric),
+            "citation_precision": dict(metric),
+            "citation_recall": dict(metric),
+            "abstention": dict(metric),
+            "generated": 0,
+            "truncated": 0,
+            "finish_reasons": {},
+        },
+        "latency": {
+            "cold_start": {
+                name: dict(latency)
+                for name in (
+                    "retrieval_seconds",
+                    "first_token_seconds",
+                    "total_seconds",
+                )
+            },
+            "steady_state": {
+                name: dict(latency)
+                for name in (
+                    "retrieval_seconds",
+                    "first_token_seconds",
+                    "total_seconds",
+                )
+            },
+        },
+        "cost": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "usd": 0.0,
+            "priced_cases": 0,
+            "model": "gemini-2.5-flash",
+            "input_cost_per_million_usd": 0.30,
+            "output_cost_per_million_usd": 2.50,
+        },
+        "calibration": None,
         "cases": [],
     }

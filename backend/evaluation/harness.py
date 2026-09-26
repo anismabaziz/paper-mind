@@ -68,6 +68,10 @@ class EvaluationEnvironment:
     #: Wall time each Document took to become answerable, keyed by fixture name.
     indexed_seconds: dict[str, float] = field(default_factory=dict)
     worker: IngestionWorker | None = None
+    #: The clock the run measures with, held here because a report's latency is
+    #: a measurement of something and the measurement is an input, not a
+    #: decision the answer path makes.
+    clock: Callable[[], float] = time.monotonic
 
     def stored_name(self, fixture_filename: str) -> str:
         """Return the stored Document a fixture document was indexed as."""
@@ -242,6 +246,7 @@ def build_environment(
         documents=documents,
         indexed_seconds=indexed_seconds,
         worker=worker,
+        clock=clock,
     )
     for stored in documents.values():
         record = repositories.files.get_file(stored)

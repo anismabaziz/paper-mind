@@ -80,7 +80,7 @@ except the chat LLM, which is configured once in Settings:
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
 | Chat LLM | Single-instance Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest via `APP_SECRET` |
 | Document title | Derived from PDF metadata Title → original filename (without extension) → first heading; stored alongside the uuid `filename` |
-| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant; keys come from `PAPERMIND_EVAL_GENERATOR_API_KEY` and `PAPERMIND_EVAL_JUDGE_API_KEY`, never from a command-line argument. The generator and the judge are configured separately |
+| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant; keys come from `PAPERMIND_EVAL_GENERATOR_API_KEY` and `PAPERMIND_EVAL_JUDGE_API_KEY`, never from a command-line argument. The generator and the judge are configured separately, and the judge's rubric version is recorded with the run. `--no-calibration` skips grading the hand-labelled set |
 
 All free-path knobs live in `backend/.env.example`:
 `RERANK`/`RERANK_MODEL`/`RERANK_REVISION`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
@@ -243,9 +243,11 @@ or generation path to drift out of sync.
 
 Each case ends as whatever it actually was — an answer, an abstention, a
 provider failure, an unusable citation, a failed save, or a refusal — and only
-an answer the model wrote is handed to the grader. Retrieved text quoted back
+an answer the model wrote is handed to a grader. Retrieved text quoted back
 after a provider failure is a fallback, not an answer, so scoring it would
-credit the model with the retrieval. A run records the index manifest and
+credit the model with the retrieval. Graders say Unknown when they have nothing
+to decide, and a failure is scored as a failure rather than as a quiet zero. A
+run records the index manifest and
 generation, the retrieval method, the prompt version, the provider, the model,
 and the settings behind every number, and the retrieval contract is checked
 once up front: a store that cannot serve hybrid fails the run rather than
@@ -276,9 +278,26 @@ cd backend
 
 The full-stack run applies every migration to an empty database, uses deterministic local embedding, reranking, and chat providers, and removes its database, collection, and containers when it finishes. It needs Docker but no model API keys or paid services.
 
-The evaluator (`backend/evaluation/`) scores `fixture.json` with `hit@5` and
-`recall@5` (k=5) plus a per-case outcome breakdown, through the production
-answer path. Live runs are opt-in (`--live`); `--compare-rerank` runs the case
+The evaluator (`backend/evaluation/`) runs `fixture.json` through the
+production answer path and reports three things together. Retrieval is scored
+per question and in aggregate with hit rate, recall, MRR, and nDCG, where the
+ideal ranking is one relevant chunk per gold snippet, so a run that found only
+some of the evidence cannot read as a perfect one. Answers are graded twice
+over: six deterministic graders decide the case outcome, the abstention
+decision, whether the citations reach the evidence, whether the claims are
+readable, whether every claim names a supplied Passage, and whether every page
+the answer points at is a page that claim cited, while a separately configured
+judge grades faithfulness against the context and correctness against the
+expected answer against a versioned rubric. Every metric reports what it could
+not decide as Unknown rather than as a zero, and a provider failure fails the
+case instead of improving a score. Latency is reported at p50 and p95 for
+retrieval, time to first token, and total, with the run's first measured case
+held apart from the rest so a cold start is not reported as steady state, next
+to input and output tokens, finish reasons, and a cost estimated from the
+catalog's prices. A judged run also grades a hand-labelled calibration set and
+reports where the judge disagreed with the person.
+
+Live runs are opt-in (`--live`); `--compare-rerank` runs the case
 set twice, once with the reranker gate off and once with it on, and reports
 both. See [backend/README.md](backend/README.md) for free local live
 instructions (`http://localhost:6333` with `--no-judge` needs no chat key).
