@@ -320,7 +320,7 @@ def test_process_retry_after_embed_failure_succeeds(
     )
 
 
-def test_sse_error_path_yields_error_and_empty_sources(client, app, fake_chat):
+def test_sse_provider_error_path_is_the_only_terminal_event(client, app, fake_chat):
     filename = upload(client).get_json()["file"]["name"]
     client.post("/process-file", json={"filename": filename})
     build_test_worker(app).drain()
@@ -332,25 +332,13 @@ def test_sse_error_path_yields_error_and_empty_sources(client, app, fake_chat):
     assert response.mimetype == "text/event-stream"
     events = parse_sse(response.get_data(as_text=True))
     by_name = {name: data for name, data in events}
-    assert "error" in by_name
-    assert by_name["error"]["error"]
-    assert by_name["done"] == {
-        "done": True,
-        "sources": [],
-        "retrieval": {
-            "method": "dense",
-            "outcome": "success",
-            "original_query": "what?",
-            "expanded_query": "what?",
-            "query_expansion": "none",
-            "dropped_turns": 0,
-            "dropped_sources": 0,
-        },
-    }
+    assert list(by_name) == ["start", "provider_error"]
+    assert by_name["provider_error"]["error"]
+    assert by_name["provider_error"]["category"] == "provider"
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
     assert [m["sender"] for m in history] == ["user", "bot"]
-    assert history[-1]["text"] == by_name["error"]["error"]
+    assert history[-1]["text"] == by_name["provider_error"]["error"]
 
 
 def test_mark_opened_tracks_recents(client):

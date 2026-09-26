@@ -2,7 +2,9 @@
 Google chat provider.
 
 Clients are built per API key (cached) so the stored key can be used
-without process-global state.
+without process-global state. Every call carries the model's output budget,
+and the stream stops as soon as Gemini reports a finish reason it knows, so
+a truncated answer is never padded out past the reason that ended it.
 """
 
 from functools import lru_cache
@@ -11,7 +13,7 @@ from typing import Iterator
 from google import genai
 from google.genai import types
 
-from services.llm.base import LLMProvider
+from services.llm.base import LLMProvider, normalize_finish_reason
 from services.prompts import SYSTEM_INSTRUCTION, build_user_prompt
 
 
@@ -36,13 +38,20 @@ class GoogleProvider(LLMProvider):
             return genai.Client(api_key=self.api_key)
         return _client(self.api_key)
 
+    def _config(self) -> "types.GenerateContentConfig":
+        """Return the generation config one call runs under."""
+        return types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            max_output_tokens=self.budget.max_output_tokens,
+        )
+
     def _generate_response(
         self, query: str, context: str, prior_turns: str = ""
     ) -> str:
         """Do generate response."""
         result = self._sdk_client().models.generate_content(
             model=self.model,
-            config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
+            config=self._config(),
             contents=[build_user_prompt(context, query, prior_turns)],
         )
 
@@ -70,12 +79,23 @@ class GoogleProvider(LLMProvider):
         """Do stream response."""
         for chunk in self._sdk_client().models.generate_content_stream(
             model=self.model,
-            config=types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION),
+            config=self._config(),
             contents=[build_user_prompt(context, query, prior_turns)],
         ):
+            # Gemini can put the last fragment and the reason on one chunk, so
+            # the text is taken before the reason is read.
             text = getattr(chunk, "text", None)
             if text:
                 yield text
+            for candidate in getattr(chunk, "candidates", None) or []:
+                reason = normalize_finish_reason(
+                    getattr(candidate, "finish_reason", None)
+                )
+                if reason is None:
+                    continue
+                self.last_finish_reason = reason
+                if reason in self.budget.finish_reasons:
+                    return
 
     def verify(self) -> None:
         """Verify the key with the same framing chat uses, under a timeout."""

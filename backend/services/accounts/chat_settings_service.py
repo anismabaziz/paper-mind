@@ -10,12 +10,59 @@ one list.
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-from services.llm.base import VERIFY_TIMEOUT_SECONDS, ChatCredentials
+from services.llm.base import (
+    COMPLETE_FINISH_REASONS,
+    VERIFY_TIMEOUT_SECONDS,
+    ChatBudget,
+    ChatCredentials,
+)
+
+# How long a chat stream may run before the model is abandoned. Well above the
+# time a 4096-token answer needs on a fast provider, well below the point a
+# user would assume the request had died.
+DEFAULT_GENERATION_TIMEOUT_SECONDS = 90.0
+
+# The most answer text the app stores. A Turn answer is unbounded text, so this
+# is a reading-budget choice rather than a column limit; it is still the last
+# stop before an absurdly long answer reaches the history read model.
+MAX_ANSWER_CHARS = 8_000
+
+# How many tokens an answer may spend. A grounded answer is a few paragraphs;
+# past this the model is writing past the point the citations support, so the
+# budget is set where a complete grounded answer already fits.
+DEFAULT_ANSWER_TOKEN_BUDGET = 1_024
+
+# Finish reasons each provider's API reports, normalized to lower case. The
+# vocabularies differ, so each provider declares its own and the app compares
+# against the normalized value.
+_GOOGLE_FINISH_REASONS = frozenset(
+    {
+        "stop",
+        "max_tokens",
+        "safety",
+        "recitation",
+        "blocklist",
+        "prohibited_content",
+        "spii",
+        "malformed_function_call",
+        "other",
+    }
+)
+_GROQ_FINISH_REASONS = frozenset(
+    {"stop", "length", "tool_calls", "function_call", "content_filter"}
+)
 
 
 @dataclass(frozen=True)
 class ModelCapabilities:
-    """Published capabilities for one supported chat model."""
+    """
+    Published capabilities and budgets for one supported chat model.
+
+    ``context_window_tokens`` is what the model can hold; the two budgets below
+    split it into what a request may read (``max_input_tokens``) and what an
+    answer may write (``answer_token_budget``). The sum stays inside the window
+    so a request at the input budget still has room to answer.
+    """
 
     provider: str
     id: str
@@ -28,6 +75,23 @@ class ModelCapabilities:
     pricing_tier: Literal["standard"]
     data_location: Literal["cloud", "local"]
     timeout_seconds: float
+    max_input_tokens: int
+    answer_token_budget: int
+    generation_timeout_seconds: float
+    finish_reasons: frozenset[str]
+    complete_finish_reasons: frozenset[str]
+    max_answer_chars: int = MAX_ANSWER_CHARS
+
+    def chat_budget(self) -> ChatBudget:
+        """Return the bounds one chat call to this model runs under."""
+        return ChatBudget(
+            max_input_tokens=self.max_input_tokens,
+            max_output_tokens=self.answer_token_budget,
+            max_answer_chars=self.max_answer_chars,
+            timeout_seconds=self.generation_timeout_seconds,
+            finish_reasons=frozenset(self.finish_reasons),
+            complete_finish_reasons=frozenset(self.complete_finish_reasons),
+        )
 
 
 MODEL_CATALOG = (
@@ -43,6 +107,11 @@ MODEL_CATALOG = (
         pricing_tier="standard",
         data_location="cloud",
         timeout_seconds=VERIFY_TIMEOUT_SECONDS,
+        max_input_tokens=1_000_000,
+        answer_token_budget=DEFAULT_ANSWER_TOKEN_BUDGET,
+        generation_timeout_seconds=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+        finish_reasons=_GOOGLE_FINISH_REASONS,
+        complete_finish_reasons=COMPLETE_FINISH_REASONS,
     ),
     ModelCapabilities(
         provider="google",
@@ -56,6 +125,11 @@ MODEL_CATALOG = (
         pricing_tier="standard",
         data_location="cloud",
         timeout_seconds=VERIFY_TIMEOUT_SECONDS,
+        max_input_tokens=1_000_000,
+        answer_token_budget=DEFAULT_ANSWER_TOKEN_BUDGET,
+        generation_timeout_seconds=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+        finish_reasons=_GOOGLE_FINISH_REASONS,
+        complete_finish_reasons=COMPLETE_FINISH_REASONS,
     ),
     ModelCapabilities(
         provider="groq",
@@ -69,6 +143,11 @@ MODEL_CATALOG = (
         pricing_tier="standard",
         data_location="cloud",
         timeout_seconds=VERIFY_TIMEOUT_SECONDS,
+        max_input_tokens=128_000,
+        answer_token_budget=DEFAULT_ANSWER_TOKEN_BUDGET,
+        generation_timeout_seconds=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+        finish_reasons=_GROQ_FINISH_REASONS,
+        complete_finish_reasons=COMPLETE_FINISH_REASONS,
     ),
     ModelCapabilities(
         provider="groq",
@@ -82,6 +161,11 @@ MODEL_CATALOG = (
         pricing_tier="standard",
         data_location="cloud",
         timeout_seconds=VERIFY_TIMEOUT_SECONDS,
+        max_input_tokens=128_000,
+        answer_token_budget=DEFAULT_ANSWER_TOKEN_BUDGET,
+        generation_timeout_seconds=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+        finish_reasons=_GROQ_FINISH_REASONS,
+        complete_finish_reasons=COMPLETE_FINISH_REASONS,
     ),
 )
 
@@ -98,10 +182,20 @@ SUPPORTED_MODEL_DEFINITIONS = {
 }
 
 
+def _published(model: ModelCapabilities) -> dict[str, object]:
+    """Return one model's capabilities in a JSON-serializable shape."""
+    published = asdict(model)
+    # The finish-reason contract is a set; the wire format is a sorted list so
+    # two identical models always publish the same bytes.
+    for key in ("finish_reasons", "complete_finish_reasons"):
+        published[key] = sorted(published[key])  # type: ignore[index, call-overload]
+    return published
+
+
 def supported_models_payload() -> dict[str, list[dict[str, object]]]:
     """Return the model catalog grouped by provider."""
     return {
-        provider: [asdict(model) for model in models]
+        provider: [_published(model) for model in models]
         for provider, models in SUPPORTED_MODEL_DEFINITIONS.items()
     }
 

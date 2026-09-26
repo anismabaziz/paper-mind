@@ -253,6 +253,22 @@ def test_get_settings_exposes_current_model_capabilities(client):
         "pricing_tier": "standard",
         "data_location": "cloud",
         "timeout_seconds": 15.0,
+        "max_input_tokens": 1_000_000,
+        "answer_token_budget": 1_024,
+        "generation_timeout_seconds": 90.0,
+        "max_answer_chars": 8_000,
+        "finish_reasons": [
+            "blocklist",
+            "malformed_function_call",
+            "max_tokens",
+            "other",
+            "prohibited_content",
+            "recitation",
+            "safety",
+            "spii",
+            "stop",
+        ],
+        "complete_finish_reasons": ["stop"],
     }
     assert catalog[("google", "gemini-3.5-flash")]["input_cost_per_million_usd"] == 1.50
     assert (
@@ -270,6 +286,18 @@ def test_get_settings_exposes_current_model_capabilities(client):
         "pricing_tier": "standard",
         "data_location": "cloud",
         "timeout_seconds": 15.0,
+        "max_input_tokens": 128_000,
+        "answer_token_budget": 1_024,
+        "generation_timeout_seconds": 90.0,
+        "max_answer_chars": 8_000,
+        "finish_reasons": [
+            "content_filter",
+            "function_call",
+            "length",
+            "stop",
+            "tool_calls",
+        ],
+        "complete_finish_reasons": ["stop"],
     }
 
 
@@ -721,19 +749,11 @@ def test_get_settings_old_row_returns_resave_400(
     body = response.get_json()
     assert body["error"] == RESAVE_MESSAGE
     assert body["needs_resave"] is True
-    assert set(body["supported_models"]["google"][0]) == {
-        "provider",
-        "id",
-        "context_window_tokens",
-        "max_output_tokens",
-        "structured_output",
-        "tool_use",
-        "input_cost_per_million_usd",
-        "output_cost_per_million_usd",
-        "pricing_tier",
-        "data_location",
-        "timeout_seconds",
-    }
+    published = body["supported_models"]["google"][0]
+    assert published["id"] == "gemini-2.5-flash"
+    assert published["max_input_tokens"] == 1_000_000
+    assert published["answer_token_budget"] == 1_024
+    assert published["complete_finish_reasons"] == ["stop"]
     assert plaintext not in body["error"]
 
 

@@ -91,15 +91,105 @@ export interface IRetrievalResult {
   outcome: "success" | "empty";
 }
 
+/** Why the model could not answer. Each one reads differently to the user. */
+export type ChatFailureCategory = "provider" | "timeout" | "empty_output";
+
 export interface IChatDone {
   sources: ISource[];
   retrieval?: IRetrievalResult;
+  /** The answer was cut short — a token cap, not a finished sentence. */
+  truncated: boolean;
+  finishReason: string | null;
 }
 
-interface IStreamHandlers {
+export interface IStreamHandlers {
+  onStart?: (info: { turnId: string }) => void;
   onToken: (text: string) => void;
-  onError: (message: string) => void;
+  onProviderError?: (message: string, category: ChatFailureCategory) => void;
+  onPersistenceError?: (message: string) => void;
+  onCancelled?: (reason: string) => void;
   onDone: (result: IChatDone) => void;
+}
+
+/**
+ * A stream that does not follow the event contract.
+ *
+ * Thrown rather than swallowed: a loader that never resolves is worse than a
+ * readable error, because the user cannot tell a slow answer from a dead one.
+ */
+export class StreamProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StreamProtocolError";
+  }
+}
+
+const FAILURE_CATEGORIES: ChatFailureCategory[] = ["provider", "timeout", "empty_output"];
+
+const ENDED_WITHOUT_ANSWER =
+  "The answer stream ended before it finished. Please ask the question again.";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(data: Record<string, unknown>, key: string, event: string): string {
+  const value = data[key];
+  if (typeof value !== "string") {
+    throw new StreamProtocolError(`The ${event} event has no ${key}.`);
+  }
+  return value;
+}
+
+/**
+ * Dispatch one event to its handler.
+ *
+ * An event this protocol does not define, or one whose payload does not match
+ * it, is a protocol error. Ignoring it would leave the loader spinning on a
+ * stream the client no longer understands.
+ */
+function dispatch(
+  event: { name: string; data: Record<string, unknown> },
+  handlers: IStreamHandlers,
+): boolean {
+  const { name, data } = event;
+  switch (name) {
+    case "start":
+      handlers.onStart?.({ turnId: readString(data, "turn_id", name) });
+      return false;
+    case "token":
+      handlers.onToken(readString(data, "text", name));
+      return false;
+    case "provider_error": {
+      const category = data.category;
+      if (!FAILURE_CATEGORIES.includes(category as ChatFailureCategory)) {
+        throw new StreamProtocolError("The provider_error event has no category.");
+      }
+      handlers.onProviderError?.(
+        readString(data, "error", name),
+        category as ChatFailureCategory,
+      );
+      return true;
+    }
+    case "persistence_error":
+      handlers.onPersistenceError?.(readString(data, "error", name));
+      return true;
+    case "cancelled":
+      handlers.onCancelled?.(readString(data, "reason", name));
+      return true;
+    case "done": {
+      const { sources, retrieval, truncated, finish_reason: finishReason } = data;
+      handlers.onDone({
+        sources: Array.isArray(sources) ? (sources as ISource[]) : [],
+        retrieval: retrieval as IRetrievalResult | undefined,
+        truncated: truncated === true,
+        finishReason: typeof finishReason === "string" ? finishReason : null,
+      });
+      return true;
+    }
+    default:
+      throw new StreamProtocolError(`The stream sent an unknown ${name} event.`);
+  }
 }
 
 export async function chatStream(
@@ -125,28 +215,42 @@ export async function chatStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let finished = false;
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    let boundary;
-    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
-      const block = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      const event = parseSSEBlock(block);
-      if (!event) continue;
-
-      if (event.name === "token") handlers.onToken(event.data.text as string);
-      else if (event.name === "error") handlers.onError(event.data.error as string);
-      else if (event.name === "done")
-        handlers.onDone({
-          sources: (event.data.sources as ISource[]) ?? [],
-          retrieval: event.data.retrieval as IRetrievalResult | undefined,
-        });
+      let boundary;
+      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (isKeepAlive(block)) continue;
+        const event = parseSSEBlock(block);
+        if (!event) {
+          throw new StreamProtocolError("The stream sent an unreadable event.");
+        }
+        // A terminal event ends the stream; anything after it is not an answer.
+        if (dispatch(event, handlers)) {
+          finished = true;
+          break;
+        }
+      }
+      if (finished) break;
     }
+  } finally {
+    reader.releaseLock?.();
   }
+
+  if (!finished) throw new StreamProtocolError(ENDED_WITHOUT_ANSWER);
+}
+
+/** A block carrying only comment lines keeps the connection warm, not a message. */
+function isKeepAlive(block: string): boolean {
+  const lines = block.split("\n").filter((line) => line.trim() !== "");
+  return lines.length > 0 && lines.every((line) => line.startsWith(":"));
 }
 
 export function parseSSEBlock(block: string): { name: string; data: Record<string, unknown> } | null {
@@ -158,7 +262,8 @@ export function parseSSEBlock(block: string): { name: string; data: Record<strin
   }
   if (!data) return null;
   try {
-    return { name, data: JSON.parse(data) as Record<string, unknown> };
+    const parsed: unknown = JSON.parse(data);
+    return isRecord(parsed) ? { name, data: parsed } : null;
   } catch {
     return null;
   }

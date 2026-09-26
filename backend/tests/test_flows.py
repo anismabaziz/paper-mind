@@ -554,10 +554,13 @@ def test_provider_failure_still_leaves_a_visible_reply(
 
     events = parse_sse(response.get_data(as_text=True))
     names = [name for name, _ in events]
-    assert "error" in names, "a provider failure must surface as an error event"
+    assert names == ["start", "provider_error"], (
+        "a provider failure must surface as one terminal event"
+    )
 
-    error_data = next(data for name, data in events if name == "error")
+    error_data = next(data for name, data in events if name == "provider_error")
     assert error_data["error"], "the error event should carry a readable message"
+    assert error_data["category"] == "provider"
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
     assert [m["sender"] for m in history] == ["user", "bot"], (
@@ -1008,7 +1011,7 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     } <= tables
     assert {"messages", "users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "d4f1a8b3c6e2",
+        "e5b7d2c4a918",
     )
     assert {
         "title",

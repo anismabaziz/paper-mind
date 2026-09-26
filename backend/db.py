@@ -226,9 +226,11 @@ class Turn(Base):
     question: Mapped[str | None] = mapped_column(
         String(8192), nullable=True, default=None
     )
-    answer: Mapped[str | None] = mapped_column(
-        String(8192), nullable=True, default=None
-    )
+    # Unbounded: a chat answer runs to the model's output budget, and a
+    # fixed-width column would turn a long answer into a failed write rather
+    # than a stored one. The budget in the model catalog is what keeps the
+    # answer a readable length.
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     status: Mapped[str] = mapped_column(String(16), default=TURN_PENDING)
     failure_reason: Mapped[str | None] = mapped_column(
         String(255), nullable=True, default=None

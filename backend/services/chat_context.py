@@ -36,6 +36,10 @@ REWRITE_INSTRUCTION = (
     "unchanged."
 )
 
+# Room held back for the system instruction and the prompt's section tags, so
+# a model's read budget is never spent entirely on evidence.
+_PROMPT_OVERHEAD = 256
+
 
 def build_model_rewriter(provider: LLMProvider) -> Callable[[str, str], str]:
     """
@@ -151,16 +155,35 @@ def build_chat_context(
     prior_turns_token_budget: int,
     context_token_budget: int,
     turns_in_conversation: int | None = None,
+    input_token_budget: int | None = None,
 ) -> ChatContext:
-    """Assemble the bounded evidence, transcript, and question for one request."""
+    """
+    Assemble the bounded evidence, transcript, and question for one request.
+
+    ``input_token_budget`` is the chosen model's own read budget. The app's
+    evidence and transcript budgets are what this codebase thinks is useful;
+    the model's window is what the provider will actually accept. When the
+    model's budget is the tighter of the two, the evidence budget shrinks to
+    whatever the question and transcript leave behind — and because evidence
+    is dropped from the lowest-ranked end, the best passages are the ones that
+    survive.
+    """
     kept_turns, dropped_turns = bounded_turns(
         turns, max_turns, prior_turns_token_budget, turns_in_conversation
     )
-    kept_sources, dropped_sources = bounded_sources(sources, context_token_budget)
+    prior_turns_text = render_prior_turns(kept_turns)
+    evidence_budget = context_token_budget
+    if input_token_budget is not None:
+        # The system instruction and the prompt's section tags ride along with
+        # the question, so what is left is an over-estimate, never an
+        # under-estimate.
+        spent = token_count(query) + token_count(prior_turns_text) + _PROMPT_OVERHEAD
+        evidence_budget = max(0, min(context_token_budget, input_token_budget - spent))
+    kept_sources, dropped_sources = bounded_sources(sources, evidence_budget)
     return ChatContext(
         query=query,
         context="\n\n".join(source.get("content") or "" for source in kept_sources),
-        prior_turns=render_prior_turns(kept_turns),
+        prior_turns=prior_turns_text,
         sources=tuple(kept_sources),
         expansion=expansion,
         dropped_turns=dropped_turns,
