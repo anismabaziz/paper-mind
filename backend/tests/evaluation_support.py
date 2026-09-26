@@ -24,6 +24,7 @@ from services.llm.base import (
     LLMProvider,
     ProviderTimeoutError,
 )
+from services.citations import claims_block
 from services.retrieval.base import VectorStore, VectorStoreConfigurationError
 from services.retrieval.hybrid import RRF_K, build_sparse_vector
 from storage import LocalStorage
@@ -290,6 +291,14 @@ class ScriptedChatFactory:
     def answer(self, text: str, *, cite: bool = True) -> None:
         """Answer the next question with this text and a valid claims block."""
         self.plans = [ScriptedPlan(fragments=[text, self._claims(text, cite)])]
+
+    def answer_with_claims(self, text: str, claims: list[dict[str, Any]]) -> None:
+        """Answer with claims the test wrote, so a grader's input is chosen."""
+        self.plans = [
+            ScriptedPlan(
+                fragments=[text, f"<claims>\n{claims_block(claims)}\n</claims>"]
+            )
+        ]
 
     def fail_with(self, error: BaseException, *, before_output: bool = False) -> None:
         """Make the next stream raise, before or after any visible output."""

@@ -133,12 +133,65 @@ reports how long each took to index.
 
 Each case ends as whatever it was: an answer, an abstention, a provider
 failure, an unusable citation, a failed save, or a refusal. Only an answer the
-model wrote reaches the grader — retrieved context quoted back after a
+model wrote reaches a grader — retrieved context quoted back after a
 provider failure is a fallback, not an answer. Every run records the index
 manifest and generation, the retrieval method, the prompt version, the
 provider, the model, and the settings behind the numbers, and the retrieval
 contract is checked once up front, so a store that cannot serve hybrid fails
 the run rather than quietly reporting dense numbers.
+
+### What a run reports
+
+**Retrieval** (`evaluation/metrics.py`) scores each question four ways and
+reports every question's row beside the aggregate: hit rate, recall, MRR for
+the rank of the first relevant chunk, and nDCG. The ideal nDCG ranking is one
+relevant chunk per gold snippet, so a run that found some of the evidence cannot
+score a perfect ranking with what it did find — which is the difference between
+this and hit rate, where half the evidence at rank 1 reads as a full hit. A
+chunk counts once however many gold snippets it holds, so the score does not
+move when the chunk size setting changes.
+
+**Answers** (`evaluation/graders.py` and `evaluation/judge.py`) carry two kinds
+of grader, and the split matters. Six graders decide by reading the run's own
+record and never call a model: whether the case ended as the case set expected
+(provider status), whether a question that had to be refused was refused and
+one that could be answered was answered (abstention), whether the answer's own
+citations reach the expected evidence, whether the stored claims are readable,
+whether every claim names a supplied Passage, and whether every page the answer
+points at is a page of a Passage that claim cites. Two more are fractions:
+citation precision (does the cited Passage repeat the claim's own wording) and
+citation recall (does each claim cite something at all).
+
+The other two need a judge: faithfulness against the retrieved context, and
+correctness against the case set's expected answer. The judge is a second
+model, built through the app's own provider factory with its own provider,
+model, and key, and it answers against a versioned rubric
+(`faithfulness-rubric-v2`) that the run record names. A judge that returns no
+verdict is reported as **Unknown**, never as unfaithful — a broken judge is not
+evidence of a hallucinating model, and a reply that negates the word it names
+("not faithful") is a sentence rather than a verdict, so it is Unknown too.
+Every judged run also grades the hand-labelled set in
+`evaluation/calibration.json` (faithful, partial, unfaithful, and one case a
+person could not settle) and reports where the judge disagreed with the
+person. `--no-calibration` skips it.
+
+Every metric reports `graded`, `scored`, `mean`, `passed`, `failed`, and
+`unknown` counts, so a case nothing could be decided about is visible rather
+than averaged in as a zero. A provider failure fails the case: it never
+improves a quality score, and a case that generated nothing is not priced.
+
+**Latency and cost** come from the clock the run was given. Retrieval, time to
+first token, and total latency are each reported at p50 and p95, and the first
+case whose retrieval actually ran is held apart from the rest, because that is
+the one paying for whatever loads lazily; a case refused before retrieval
+measures nothing and is labelled as such rather than counted as warm. A run
+also reports input and output tokens, how many answers were truncated, each
+finish reason, and the cost estimated from the catalog's published prices, next
+to the prices themselves. Input tokens count the system instruction every call
+carries alongside the question, transcript, and evidence; output tokens count
+the claims block the model wrote, which is stripped before the answer is stored
+but was billed for. The token totals and the dollar figure count the same cases:
+the ones that reached a model and answered.
 
 `uv run pytest` runs the whole thing offline against deterministic embedding,
 vector store, and provider doubles. No Qdrant, no LLM, no paid calls.
@@ -152,7 +205,8 @@ cd backend
 # (requires: docker compose -f compose.yaml up -d qdrant, or QDRANT_URL=http://localhost:6333)
 export PAPERMIND_EVAL_GENERATOR_API_KEY=...
 uv run python -m evaluation.cli --live --no-judge          # retrieval and outcomes, no judge
-uv run python -m evaluation.cli --live                     # + model-judged faithfulness
+uv run python -m evaluation.cli --live                     # + model-judged faithfulness and correctness
+uv run python -m evaluation.cli --live --no-calibration    # judge without the labelled set
 uv run python -m evaluation.cli --live --json              # machine-readable
 uv run python -m evaluation.cli --live --rerank            # force RERANK=true (local cross-encoder 50→5)
 uv run python -m evaluation.cli --live --compare-rerank    # the case set twice: gate off, then on
