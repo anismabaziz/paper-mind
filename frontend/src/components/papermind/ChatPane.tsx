@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, RefreshCw, Settings, FileText } from "lucide-react";
-import { chatStream, type IRetrievalResult, type ISource } from "@/services/files";
+import { chatStream, type ChatFailureCategory, type IRetrievalResult, type ISource } from "@/services/files";
 import { useFileStatus, useFileMessages, useReindex } from "@/hooks/useFiles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import usePdfStore from "@/store/pdf-state";
@@ -16,6 +16,14 @@ type ChatMessage = {
   retrieval?: IRetrievalResult;
   failed?: boolean;
   needsSettings?: boolean;
+  /** The answer was cut short by the model's output budget. */
+  truncated?: boolean;
+  /** True once the user walked away from this answer. */
+  cancelled?: boolean;
+  /** Why the answer was stopped, when the server said. */
+  stopReason?: string;
+  /** Which outcome ended this answer, for styling and for tests. */
+  failure?: ChatFailureCategory | "persistence";
 };
 
 const SETTINGS_ERROR_PATTERNS = ["No chat provider configured", "Re-save your provider settings"];
@@ -234,24 +242,68 @@ export function ChatPane() {
             if (isStale()) return;
             setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, text: msg.text + t } : msg)));
           },
-          onError: (message) => {
+          onProviderError: (message, category) => {
             if (isStale()) return;
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === botId ? { ...msg, text: message, failed: true, needsSettings: isSettingsError(message) } : msg,
+                msg.id === botId
+                  ? { ...msg, text: message, failed: true, failure: category, needsSettings: isSettingsError(message) }
+                  : msg,
               ),
             );
           },
-          onDone: ({ sources, retrieval }) => {
+          onPersistenceError: (message) => {
             if (isStale()) return;
-            setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources, retrieval } : msg)));
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botId ? { ...msg, text: message, failed: true, failure: "persistence" } : msg,
+              ),
+            );
+          },
+          onCancelled: (reason) => {
+            if (isStale()) return;
+            // The answer the user already read is not thrown away because it
+            // was never stored. It is marked as not saved, the same as a stop.
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botId
+                  ? {
+                      ...msg,
+                      cancelled: true,
+                      stopReason: reason,
+                      text: msg.text
+                        ? `${msg.text}\n\n_Stopped before this answer was saved._`
+                        : "",
+                    }
+                  : msg,
+              ),
+            );
+          },
+          onDone: ({ sources, retrieval, truncated }) => {
+            if (isStale()) return;
+            setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources, retrieval, truncated } : msg)));
           },
         },
         { signal: controller.signal },
       );
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
-        setMessages((prev) => prev.filter((msg) => msg.id !== botId || msg.text !== ""));
+        // The user left this answer. The server recorded the turn as
+        // cancelled, so what is on screen is not what history will replay —
+        // it is marked stopped rather than presented as a stored answer.
+        setMessages((prev) =>
+          prev.flatMap((msg) => {
+            if (msg.id !== botId) return [msg];
+            if (!msg.text) return [];
+            return [
+              {
+                ...msg,
+                cancelled: true,
+                text: `${msg.text}\n\n_Stopped before this answer was saved._`,
+              },
+            ];
+          }),
+        );
         setThinking(false);
         return;
       }
@@ -353,8 +405,22 @@ export function ChatPane() {
               <p className="max-w-[85%] rounded-lg rounded-br-[2px] bg-ink px-3.5 py-2.5 text-[0.85rem] leading-snug text-paper">{m.text}</p>
             </div>
           ) : (
-            <div key={m.id} className="rise-in">
-              <p className="label-meta mb-2">Synthesis · {m.failed ? "failed" : "grounded"}</p>
+            <div key={m.id} className="rise-in" data-outcome={m.failure ?? (m.cancelled ? "cancelled" : m.truncated ? "truncated" : undefined)}>
+              <p className="label-meta mb-2">
+                Synthesis · {m.failed ? "failed" : m.cancelled ? "stopped" : m.truncated ? "truncated" : "grounded"}
+              </p>
+              {m.cancelled && !m.text && (
+                <p className="font-serif text-xs italic text-ink-faint">
+                  {m.stopReason
+                    ? `This answer was stopped (${m.stopReason}) before it finished, so it was not saved.`
+                    : "This answer was stopped before it finished, so it was not saved."}
+                </p>
+              )}
+              {m.truncated && !m.failed && !m.cancelled && (
+                <p className="mb-1.5 font-mono text-[0.62rem] tracking-wide text-ink-faint">
+                  The model hit its answer limit, so this stops mid-thought.
+                </p>
+              )}
               <div
                 className={cn(
                   "rounded-sm border px-3.5 py-3",

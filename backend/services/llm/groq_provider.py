@@ -2,7 +2,9 @@
 Groq chat provider.
 
 Clients are built per API key (cached) so the stored key can be used
-without process-global state.
+without process-global state. Every call carries the model's output budget,
+and the stream stops as soon as Groq reports a finish reason it knows, so a
+truncated answer is never padded out past the reason that ended it.
 """
 
 from functools import lru_cache
@@ -10,7 +12,7 @@ from typing import Iterator
 
 from groq import Groq
 
-from services.llm.base import LLMProvider
+from services.llm.base import LLMProvider, normalize_finish_reason
 from services.prompts import SYSTEM_INSTRUCTION, build_user_prompt
 
 
@@ -35,22 +37,21 @@ class GroqProvider(LLMProvider):
             return Groq(api_key=self.api_key)
         return _client(self.api_key)
 
+    def _messages(self, query: str, context: str, prior_turns: str) -> list[dict]:
+        """Return the system and user messages one call sends."""
+        return [
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user", "content": build_user_prompt(context, query, prior_turns)},
+        ]
+
     def _generate_response(
         self, query: str, context: str, prior_turns: str = ""
     ) -> str:
         """Do generate response."""
         chat_completion = self._sdk_client().chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": SYSTEM_INSTRUCTION,
-                },
-                {
-                    "role": "user",
-                    "content": build_user_prompt(context, query, prior_turns),
-                },
-            ],
+            messages=self._messages(query, context, prior_turns),
             model=self.model,
+            max_tokens=self.budget.max_output_tokens,
         )
 
         result = chat_completion.choices[0].message.content
@@ -61,24 +62,25 @@ class GroqProvider(LLMProvider):
     ) -> Iterator[str]:
         """Do stream response."""
         stream = self._sdk_client().chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": SYSTEM_INSTRUCTION,
-                },
-                {
-                    "role": "user",
-                    "content": build_user_prompt(context, query, prior_turns),
-                },
-            ],
+            messages=self._messages(query, context, prior_turns),
             model=self.model,
+            max_tokens=self.budget.max_output_tokens,
             stream=True,
         )
 
         for chunk in stream:
-            delta = chunk.choices[0].delta.content if chunk.choices else None
-            if delta:
-                yield delta
+            choice = chunk.choices[0] if chunk.choices else None
+            if choice is None:
+                continue
+            # Groq can put the last fragment and the reason on one chunk, so
+            # the text is taken before the reason is read.
+            if choice.delta.content:
+                yield choice.delta.content
+            reason = normalize_finish_reason(choice.finish_reason)
+            if reason is not None:
+                self.last_finish_reason = reason
+                if reason in self.budget.finish_reasons:
+                    return
 
     def verify(self) -> None:
         """Verify the key with the same framing chat uses, under a timeout."""

@@ -267,7 +267,9 @@ class DeterministicChatProvider(LLMProvider):
         self, factory: "DeterministicChatFactory", credentials: ChatCredentials
     ):
         """Bind the provider to the test factory and stored credentials."""
-        super().__init__(credentials.api_key, credentials.model)
+        super().__init__(
+            credentials.api_key, credentials.model, budget=credentials.budget
+        )
         self._factory = factory
 
     def _build_client(self):
@@ -291,6 +293,7 @@ class DeterministicChatProvider(LLMProvider):
             self._factory.holding.set()
             self._factory.released.wait(timeout=_HOLD_TIMEOUT_SECONDS)
         yield "grounded in the retrieved PDF text."
+        self.last_finish_reason = "stop"
 
     def verify(self) -> None:
         """Verify the deterministic provider without an external call."""

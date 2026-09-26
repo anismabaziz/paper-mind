@@ -2,6 +2,7 @@
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -22,7 +23,7 @@ from services.accounts.secrets_service import (
     decrypt_api_key,
 )
 from services.indexing.state import index_status
-from services.llm.base import ChatCredentials
+from services.llm.base import ChatCredentials, EmptyAnswerError, ProviderTimeoutError
 from services.chat_context import build_chat_context, build_model_rewriter
 from services.retrieval.base import (
     VectorDimensionError,
@@ -37,6 +38,14 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 MAX_QUERY_CHARS = 8192
+
+
+@dataclass(frozen=True)
+class AnswerFailure:
+    """What one way an answer can fail shows the user and records on the Turn."""
+
+    message: str
+    reason: str
 
 
 def _normalize_source(source: dict) -> dict:
@@ -153,6 +162,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 model=model,
                 api_key=api_key,
                 verification_timeout_seconds=model_definition.timeout_seconds,
+                budget=model_definition.chat_budget(),
             )
             chat_provider = chat_provider_factory(credentials)
         except ValueError as exc:
@@ -282,6 +292,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 prior_turns_token_budget=limits.prior_turns_token_budget,
                 context_token_budget=limits.context_token_budget,
                 turns_in_conversation=turns_in_conversation,
+                input_token_budget=model_definition.max_input_tokens,
             )
             # Citations must match what the model actually saw, so a Citation
             # Source the budget dropped is not stored against the answer.
@@ -336,10 +347,27 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
             return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
 
         def done(answer_sources):
-            """Return the terminal event for a stream that stopped early."""
+            """
+            Return the terminal event for a stream that stored an answer.
+
+            Only ever sent after ``complete_turn`` committed, so a browser that
+            sees it knows the answer and its Citation Sources are in history.
+            """
+            reason = getattr(chat_provider, "last_finish_reason", None)
+            # No finish reason at all means the provider never said the answer
+            # was over — the app's own cap stopped it, or the stream ended
+            # early. That is not proof the answer is whole, so it is reported
+            # as unproven rather than as complete.
+            truncated = reason not in model_definition.complete_finish_reasons
             return event(
                 "done",
-                {"done": True, "sources": answer_sources, "retrieval": retrieval},
+                {
+                    "done": True,
+                    "sources": answer_sources,
+                    "retrieval": retrieval,
+                    "finish_reason": reason,
+                    "truncated": truncated,
+                },
             )
 
         def record_outcome(record, *args):
@@ -357,7 +385,50 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                     "/response could not record turn outcome for %s", filename
                 )
 
+        # Each way an answer can end before it is stored gets its own event
+        # and its own copy. A browser reads one terminal event and knows which
+        # of these happened, instead of guessing from silence.
+        provider_down = AnswerFailure(
+            "Sorry. The language model is unavailable right now. Please try again.",
+            "provider failure",
+        )
+        provider_slow = AnswerFailure(
+            "This answer took too long and was stopped. Try asking a narrower question.",
+            "provider timeout",
+        )
+        provider_silent = AnswerFailure(
+            "The model returned nothing for this question. Try rephrasing it.",
+            "empty answer",
+        )
+        unsaved = AnswerFailure(
+            "The answer could not be saved. Please ask the question again.",
+            "answer could not be saved",
+        )
+
+        def provider_error(failure, category):
+            """Close the turn as failed and return the terminal event."""
+            record_outcome(
+                conversations_repository.fail_turn,
+                turn_id,
+                failure.message,
+                failure.reason,
+            )
+            return event(
+                "provider_error", {"error": failure.message, "category": category}
+            )
+
+        def persistence_error(failure):
+            """Close the turn as failed and return the terminal event."""
+            record_outcome(
+                conversations_repository.fail_turn,
+                turn_id,
+                failure.message,
+                failure.reason,
+            )
+            return event("persistence_error", {"error": failure.message})
+
         def generate():
+            yield event("start", {"turn_id": turn_id})
             fragments = []
             try:
                 for token in chat_provider.stream_response(
@@ -367,42 +438,51 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                     yield event("token", {"text": token})
             except GeneratorExit:
                 # The client left mid-answer. The question stays on record as
-                # cancelled rather than pending, so it is never stranded.
+                # cancelled rather than pending, so it is never stranded, and
+                # no fragment the provider still holds can reach a later
+                # request.
                 record_outcome(
                     conversations_repository.cancel_turn,
                     turn_id,
                     "client disconnected",
                 )
                 raise
+            except ProviderTimeoutError as exc:
+                log.warning("/response generation timed out for %s", filename)
+                yield provider_error(provider_slow, "timeout")
+                return
+            except EmptyAnswerError as exc:
+                log.warning("/response generation was empty for %s", filename)
+                yield provider_error(provider_silent, "empty_output")
+                return
             except Exception as exc:
                 log.error(
                     "/response generation failed for %s: %s",
                     filename,
                     type(exc).__name__,
                 )
-                failure = (
-                    "Sorry. The language model is unavailable right now. "
-                    "Please try again."
-                )
-                record_outcome(
-                    conversations_repository.fail_turn,
-                    turn_id,
-                    failure,
-                    "provider failure",
-                )
-                yield event("error", {"error": failure})
-                yield done([])
+                yield provider_error(provider_down, "provider")
                 return
 
-            answer = (
-                "".join(fragments).strip() or "I don't know based on the given context."
-            )
+            answer = "".join(fragments).strip()
             if not _still_present():
+                # The Document and its Conversation went away mid-answer, so
+                # there is nothing left to store this in. Saying the answer was
+                # saved would be a lie the browser would replay from history.
+                # The Turn is closed as cancelled rather than left pending if
+                # the delete has not reached it yet; a Turn that the delete
+                # already took is a no-op here, not an error.
                 log.warning(
-                    "/response skipping persist after concurrent delete for %s",
-                    filename,
+                    "/response abandoning answer for deleted document %s", filename
                 )
-                yield done(sources)
+                try:
+                    conversations_repository.cancel_turn(turn_id, "document deleted")
+                except Exception:
+                    log.exception(
+                        "/response could not cancel turn for deleted document %s",
+                        filename,
+                    )
+                yield event("cancelled", {"reason": "document deleted"})
                 return
             try:
                 completed = conversations_repository.complete_turn(
@@ -410,20 +490,15 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 )
             except Exception:
                 log.exception("failed to persist answer for %s", filename)
-                unsaved = (
-                    "The answer could not be saved. Please ask the question again."
-                )
-                record_outcome(
-                    conversations_repository.fail_turn,
-                    turn_id,
-                    unsaved,
-                    "answer could not be saved",
-                )
-                yield event("error", {"error": unsaved})
-                yield done([])
+                yield persistence_error(unsaved)
                 return
             if not completed:
+                # The Turn already reached a terminal state, so this answer is
+                # not in history. A success event would put it on screen as if
+                # it were.
                 log.warning("/response turn %s already ended for %s", turn_id, filename)
+                yield persistence_error(unsaved)
+                return
             yield done(sources)
 
         return Response(

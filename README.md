@@ -180,6 +180,28 @@ can fix their own key or quota. That no-fallback rule is deliberate — with
 a single BYO key, a silent switch would hide the billing owner's error
 (see [docs/adr/0001-per-user-byo-provider-keys.md](docs/adr/0001-per-user-byo-provider-keys.md)).
 
+**One terminal event per answer.** The stream opens with `start` (the recorded
+Turn), carries `token` events, and ends with exactly one of `done`,
+`provider_error`, `persistence_error`, or `cancelled`. `done` is sent only
+after the Turn and its Citation Sources are committed, so a stored answer on
+screen is an answer in history. The browser rejects an event the protocol does
+not define, and treats a stream that ends without a terminal event as a
+failure — an indefinite loader would be indistinguishable from a slow answer.
+Each way an answer can end reads differently: a timeout, an empty answer, a
+provider failure, a save failure, and a stop are five separate messages, not
+one generic error.
+
+**Bounded by the model's own budget.** Every catalogued model declares an
+input budget, an answer budget, a generation timeout, and the finish reasons
+its API reports. The prompt is trimmed to fit the input budget, the answer
+budget is sent to the provider on every call, and a stream that stalls is
+abandoned at the timeout rather than left running. An answer is only called
+complete when the provider said so; anything else is flagged as truncated
+rather than presented as a finished thought. A transient provider failure is
+retried once on the same provider, and only before the first fragment reaches
+the user — retrying later would either duplicate text on screen or bill the
+same account twice for a partial answer.
+
 **Single-instance BYO keys.** Provider, model, and API key are global app
 settings configured in the Settings dialog, not server environment variables.
 Keys are encrypted at rest with Fernet and only ever returned masked. The app

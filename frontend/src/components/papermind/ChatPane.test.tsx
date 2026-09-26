@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPane } from "./ChatPane";
-import { reindexFile } from "@/services/files";
+import { chatStream, reindexFile, StreamProtocolError, type IStreamHandlers } from "@/services/files";
 import { checkIsProcessed, getMessages } from "@/services/files";
 import usePdfStore from "@/store/pdf-state";
 import type { DocumentIndex, File } from "@/types/db";
@@ -164,5 +164,142 @@ describe("ChatPane stale index", () => {
 
     expect(await screen.findByPlaceholderText(/Ask this paper something/)).toBeEnabled();
     expect(screen.queryByText(/Index needs reindexing/)).not.toBeInTheDocument();
+  });
+});
+
+/** Renders the pane, asks a question, and runs the given stream script. */
+async function ask(run: (handlers: IStreamHandlers) => void) {
+  vi.mocked(chatStream).mockImplementation(async (_query, _file, handlers) => {
+    run(handlers);
+  });
+  renderPane();
+  const input = await screen.findByPlaceholderText(/Ask this paper something/);
+  await act(async () => {
+    fireEvent.change(input, { target: { value: "what?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  });
+  return vi.mocked(chatStream).mock.calls[0];
+}
+
+function outcomeOf(label: string | RegExp): string | null | undefined {
+  return screen.getByText(label).closest("[data-outcome]")?.getAttribute("data-outcome");
+}
+
+describe("ChatPane answer outcomes", () => {
+  beforeEach(() => {
+    vi.mocked(checkIsProcessed).mockResolvedValue({
+      is_processed: true,
+      ingestion: null,
+      index: {
+        state: "ready",
+        manifest,
+        runtime_manifest: manifest,
+        changes: [],
+        change_details: [],
+      },
+    });
+  });
+
+  it("sends the question for the open document", async () => {
+    const [query, filename, handlers] = await ask((h) =>
+      h.onDone?.({ sources: [], truncated: false, finishReason: "stop" }),
+    );
+
+    expect(query).toBe("what?");
+    expect(filename).toBe("doc.pdf");
+    expect(typeof handlers.onToken).toBe("function");
+  });
+
+  it("shows the answer as it streams in", async () => {
+    await ask((h) => {
+      h.onToken?.("The answer ");
+      h.onToken?.("is 42.");
+    });
+
+    expect(screen.getByText("The answer is 42.")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["provider", "The model is unavailable."],
+    ["timeout", "This answer took too long."],
+    ["empty_output", "The model returned nothing."],
+  ] as const)("shows a %s failure as its own outcome", async (category, message) => {
+    await ask((h) => h.onProviderError?.(message, category));
+
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(screen.getByText("Synthesis · failed")).toBeInTheDocument();
+    expect(outcomeOf("Synthesis · failed")).toBe(category);
+  });
+
+  it("shows a save failure as its own outcome", async () => {
+    await ask((h) => h.onPersistenceError?.("The answer could not be saved."));
+
+    expect(outcomeOf("Synthesis · failed")).toBe("persistence");
+  });
+
+  it("says why a cancelled answer was not saved, not a loader", async () => {
+    await ask((h) => h.onCancelled?.("document deleted"));
+
+    expect(
+      screen.getByText(/stopped \(document deleted\) before it finished/),
+    ).toBeInTheDocument();
+    expect(outcomeOf(/Synthesis · stopped/)).toBe("cancelled");
+  });
+
+  it("keeps the answer a cancellation interrupted", async () => {
+    await ask((h) => {
+      h.onToken?.("Half an answer");
+      h.onCancelled?.("document deleted");
+    });
+
+    expect(screen.getByText(/Half an answer/)).toBeInTheDocument();
+    expect(screen.getByText(/Stopped before this answer was saved/)).toBeInTheDocument();
+  });
+
+  it("flags an answer the model cut short", async () => {
+    await ask((h) =>
+      h.onDone?.({ sources: [], truncated: true, finishReason: "length" }),
+    );
+
+    expect(outcomeOf("Synthesis · truncated")).toBe("truncated");
+    expect(screen.getByText(/hit its answer limit/)).toBeInTheDocument();
+  });
+
+  it("stops the loader when the stream ends with a protocol error", async () => {
+    vi.mocked(chatStream).mockRejectedValue(
+      new StreamProtocolError("The answer stream ended before it finished."),
+    );
+    renderPane();
+    const input = await screen.findByPlaceholderText(/Ask this paper something/);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "what?" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    expect(
+      screen.getByText("The answer stream ended before it finished."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Reading passages/)).not.toBeInTheDocument();
+  });
+
+  it("does not carry a late token into the next document", async () => {
+    // A stream that resolves late: its token arrives after the pane moved on.
+    let late: ((text: string) => void) | undefined;
+    vi.mocked(chatStream).mockImplementation(async (_query, _file, handlers) => {
+      late = handlers.onToken;
+    });
+    renderPane();
+    const input = await screen.findByPlaceholderText(/Ask this paper something/);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "what?" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    usePdfStore.getState().setFile({ ...file, id: "file-2", name: "other.pdf" });
+    await waitFor(() => expect(screen.getByText("Session Initialized")).toBeInTheDocument());
+
+    act(() => late?.("A token from the old document."));
+
+    expect(screen.queryByText("A token from the old document.")).not.toBeInTheDocument();
   });
 });

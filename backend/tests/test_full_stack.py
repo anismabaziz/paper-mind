@@ -54,7 +54,7 @@ ADMIN_DATABASE_URL = os.getenv(
 )
 QDRANT_URL = os.getenv("FULL_STACK_QDRANT_URL", "http://127.0.0.1:56333")
 PRE_TURN_REVISION = "c3d7e1f4a9b2"
-CURRENT_REVISION = "d4f1a8b3c6e2"
+CURRENT_REVISION = "e5b7d2c4a918"
 
 
 @dataclass(frozen=True)
@@ -399,12 +399,16 @@ def test_pdf_flow_persists_across_http_postgres_qdrant_and_storage(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     events = parse_sse(response.text)
+    assert [name for name, _ in events][0] == "start"
     tokens = [payload["text"] for name, payload in events if name == "token"]
     assert "".join(tokens) == "The answer is grounded in the retrieved PDF text."
     terminal = events[-1]
     assert terminal[0] == "done"
     assert terminal[1]["done"] is True
-    assert terminal[1]["retrieval"] == {"method": "hybrid", "outcome": "success"}
+    assert terminal[1]["truncated"] is False
+    assert terminal[1]["finish_reason"] == "stop"
+    assert terminal[1]["retrieval"]["method"] == "hybrid"
+    assert terminal[1]["retrieval"]["outcome"] == "success"
     assert any(
         "A RAG pipeline has five stages" in source["content"]
         for source in terminal[1]["sources"]
@@ -464,7 +468,7 @@ def test_pdf_flow_persists_across_http_postgres_qdrant_and_storage(
         pytest.param("vector", 500, None, id="vector"),
         pytest.param("embedding", 500, None, id="embedding"),
         pytest.param("reranking", 500, None, id="reranking"),
-        pytest.param("provider", 200, "error", id="provider"),
+        pytest.param("provider", 200, "provider_error", id="provider"),
     ],
 )
 def test_injected_service_failures_reach_visible_http_responses(
@@ -514,13 +518,10 @@ def test_injected_service_failures_reach_visible_http_responses(
         assert response.json() == {"error": "Internal server error"}
     else:
         events = parse_sse(response.text)
-        assert [name for name, _ in events] == ["error", "done"]
-        assert events[0][1]["error"]
-        assert events[1][1] == {
-            "done": True,
-            "sources": [],
-            "retrieval": {"method": "hybrid", "outcome": "success"},
-        }
+        assert [name for name, _ in events] == ["start", expected_event]
+        assert events[0][1]["turn_id"]
+        assert events[1][1]["error"]
+        assert events[1][1].get("category") == "provider"
 
 
 @pytest.mark.full_stack
@@ -1203,7 +1204,10 @@ def test_a_provider_failure_stores_a_failed_turn(full_stack_app):
         "/response", json={"filename": filename, "query": "What is a RAG pipeline?"}
     )
 
-    assert [name for name, _ in parse_sse(response.text)] == ["error", "done"]
+    assert [name for name, _ in parse_sse(response.text)] == [
+        "start",
+        "provider_error",
+    ]
     turn = _turns(harness, filename)[0]
     assert turn["status"] == "failed"
     assert turn["question"] == "What is a RAG pipeline?"
@@ -1227,7 +1231,7 @@ def test_an_answer_that_postgres_cannot_save_closes_the_turn_as_failed(full_stac
         "/response", json={"filename": filename, "query": "What is a RAG pipeline?"}
     )
 
-    assert [name for name, _ in parse_sse(response.text)][-2:] == ["error", "done"]
+    assert [name for name, _ in parse_sse(response.text)][-1] == "persistence_error"
     harness.repositories.conversations.unfail("complete_turn")
     turn = _turns(harness, filename)[0]
     assert turn["status"] == "failed"

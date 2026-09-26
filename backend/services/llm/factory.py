@@ -36,6 +36,7 @@ def build_chat_provider(
         model=credentials.model,
         client=client,
         use_cache=use_cache,
+        budget=credentials.budget,
     )
     provider.verification_timeout_seconds = credentials.verification_timeout_seconds
     return provider
