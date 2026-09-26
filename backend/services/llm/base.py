@@ -80,6 +80,29 @@ class EmptyAnswerError(RuntimeError):
     """A stream completed without producing any answer text."""
 
 
+#: What a one-shot call answers with when the provider failed and there is
+#: context to fall back on. It is retrieved document text wearing the shape of
+#: an answer, so anything that grades answers has to be able to name it.
+CONTEXT_FALLBACK_PREFIX = (
+    "I couldn't use the language model right now, so here is relevant "
+    "context from your document:"
+)
+
+#: How much fallback context a failed one-shot call is allowed to quote.
+CONTEXT_FALLBACK_CHARS = 1200
+
+
+def is_context_fallback(text: str | None) -> bool:
+    """
+    Report whether one piece of text is a failed call's fallback, not an answer.
+
+    The fallback quotes the document back to the reader, so treating it as a
+    generated answer would score the retrieval as though the model had written
+    it.
+    """
+    return bool(text) and CONTEXT_FALLBACK_PREFIX in str(text)
+
+
 def call_with_timeout(fn: Callable[[], _T], timeout: float) -> _T:
     """Run ``fn`` with a bound, raising TimeoutError when it overruns."""
     box: dict[str, _T | BaseException] = {}
@@ -249,8 +272,7 @@ class LLMProvider(ABC):
             print(f"AI Generation Error ({self.name}): {type(e).__name__}")
             if context and context.strip():
                 return (
-                    "I couldn't use the language model right now, so here is relevant context from your document:\n\n"
-                    f"{context[:1200]}"
+                    f"{CONTEXT_FALLBACK_PREFIX}\n\n{context[:CONTEXT_FALLBACK_CHARS]}"
                 )
             return self.FALLBACK_ANSWER
 

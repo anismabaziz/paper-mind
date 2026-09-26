@@ -13,11 +13,11 @@ from flask import Flask, jsonify, request, send_from_directory
 from routes.common import (
     deletion_blocked_response,
     file_url,
-    is_deleting_record,
     is_safe_filename,
     traversal_check,
 )
 from repositories.ingestion_jobs import JobConflictError
+from services.deletion import is_deleting_record
 from services.indexing.state import index_status
 from services.titles import backfill_title, derive_title
 

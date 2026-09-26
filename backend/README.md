@@ -59,8 +59,8 @@ Settings dialog:
 The settings routes are open (no auth) and use the single `app_settings` row.
 Chat runs on those global settings — a workspace with no saved settings gets
 a clear "configure a provider in Settings" error, and the backend boots fine
-with no keys at all. Retrieval-only evaluation (`evaluation.cli --live
---no-judge`) needs no chat key either.
+with no keys at all. Evaluation reads its keys from
+`PAPERMIND_EVAL_GENERATOR_API_KEY` and `PAPERMIND_EVAL_JUDGE_API_KEY` instead.
 
 ## Setup (manual, without Docker)
 
@@ -121,32 +121,54 @@ Its embedding, reranking, and chat providers are deterministic and local. The te
 
 ## Evaluation
 
-`evaluation/` measures retrieval and answer quality against a committed
-ground-truth fixture (`evaluation/fixture.json`): ten questions over two
-sample documents in `evaluation/sample_docs/` — one authored in-repo
-(CC0), one published paper (CC BY 4.0). The evaluator reports
-`hit@5`/`recall@5` (k=5, 50 candidates fetched internally) + per-question breakdown and
-ingest `sec/PDF` (parse/embed/upsert wall time via `evaluation/evaluator.py`).
-`uv run pytest` exercises the scoring on deterministic fakes and stays
-headless (no Qdrant/LLM, heavy models mocked).
+`evaluation/` asks a committed labeled case set
+(`evaluation/fixture.json`): ten questions over two sample documents in
+`evaluation/sample_docs/` — one authored in-repo (CC0), one published paper
+(CC BY 4.0). Every case goes through the application's answer path, the one
+`POST /response` uses, so the numbers describe the app rather than a second
+implementation of it. The sample documents are stored and indexed by the same
+ingestion job and worker the upload route uses, which gives each one a real
+Conversation, a real index generation, and a real index manifest, and the run
+reports how long each took to index.
 
-Live run — opt-in because it writes into the real vector index (and the
-judge costs LLM calls):
+Each case ends as whatever it was: an answer, an abstention, a provider
+failure, an unusable citation, a failed save, or a refusal. Only an answer the
+model wrote reaches the grader — retrieved context quoted back after a
+provider failure is a fallback, not an answer. Every run records the index
+manifest and generation, the retrieval method, the prompt version, the
+provider, the model, and the settings behind the numbers, and the retrieval
+contract is checked once up front, so a store that cannot serve hybrid fails
+the run rather than quietly reporting dense numbers.
+
+`uv run pytest` runs the whole thing offline against deterministic embedding,
+vector store, and provider doubles. No Qdrant, no LLM, no paid calls.
+
+Live run, opt-in because it indexes real documents and (optionally) bills a
+provider. Keys come from the environment, never from a command-line argument:
 
 ```bash
 cd backend
-# Free local path: Qdrant on http://localhost:6333, no API key needed
+# Free local path: Qdrant on http://localhost:6333, no chat key needed
 # (requires: docker compose -f compose.yaml up -d qdrant, or QDRANT_URL=http://localhost:6333)
-uv run python -m evaluation.cli --live --no-judge          # retrieval only, no LLM key
-uv run python -m evaluation.cli --live                     # + LLM-as-judge faithfulness (needs a chat key)
+export PAPERMIND_EVAL_GENERATOR_API_KEY=...
+uv run python -m evaluation.cli --live --no-judge          # retrieval and outcomes, no judge
+uv run python -m evaluation.cli --live                     # + model-judged faithfulness
 uv run python -m evaluation.cli --live --json              # machine-readable
 uv run python -m evaluation.cli --live --rerank            # force RERANK=true (local cross-encoder 50→5)
-uv run python -m evaluation.cli --live --compare-rerank    # with vs without reranker + latency delta
+uv run python -m evaluation.cli --live --compare-rerank    # the case set twice: gate off, then on
 ```
 
-A live run indexes the sample docs under an `eval-` prefix in the vector
-index and deletes them afterwards. The index lives at `http://localhost:6333`
-(compose exposes 6333→6333 and
-6334→6334);
-no chat key is required for retrieval-only (`--no-judge`). The LLM-as-judge
-currently accepts Google settings; use `--no-judge` for Groq generation runs.
+The generator and the judge are configured apart, so a run can generate with
+one account and grade with another:
+
+```bash
+export PAPERMIND_EVAL_GENERATOR_API_KEY=...   # for --provider/--model
+export PAPERMIND_EVAL_JUDGE_API_KEY=...       # for --judge-provider/--judge-model
+uv run python -m evaluation.cli --live \
+  --provider groq --model openai/gpt-oss-20b \
+  --judge-provider google --judge-model gemini-2.5-flash
+```
+
+A live run stores the sample documents under an `eval-` prefix and deletes
+them afterwards. The index lives at `http://localhost:6333` (compose exposes
+6333→6333 and 6334→6334).
