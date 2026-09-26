@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, RefreshCw, Settings, FileText } from "lucide-react";
-import { chatStream, type ChatFailureCategory, type IRetrievalResult, type ISource } from "@/services/files";
+import { chatStream, type ChatAbstentionReason, type ChatFailureCategory, type IRetrievalResult, type ISource } from "@/services/files";
 import { useFileStatus, useFileMessages, useReindex } from "@/hooks/useFiles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import usePdfStore from "@/store/pdf-state";
@@ -24,7 +24,36 @@ type ChatMessage = {
   stopReason?: string;
   /** Which outcome ended this answer, for styling and for tests. */
   failure?: ChatFailureCategory | "persistence";
+  /** The app answered without a model call: there was no evidence. */
+  abstained?: boolean;
+  /** Why it abstained, which decides what the reader can do next. */
+  abstentionReason?: ChatAbstentionReason;
 };
+
+/**
+ * What the reader can do about an abstention.
+ *
+ * Nothing to read is not a fault: the paper simply does not cover the question.
+ * Matches that could not be used are a different case, and a reindex is the
+ * only thing that clears them.
+ */
+const ABSTENTION_HINTS: Record<ChatAbstentionReason, string> = {
+  no_evidence: "Nothing in this paper answers that. Try a different question, or one of the prompts above.",
+  evidence_unusable: "The passages this question matched could not be read. Reindex the paper to search it again.",
+};
+
+/** How an answer ended, in one place: the machine-readable outcome and the word for it. */
+type Outcome = { outcome: string | undefined; label: string };
+
+const GROUNDED: Outcome = { outcome: undefined, label: "grounded" };
+
+function describe(m: ChatMessage): Outcome {
+  if (m.failure) return { outcome: m.failure, label: "failed" };
+  if (m.cancelled) return { outcome: "cancelled", label: "stopped" };
+  if (m.abstained) return { outcome: m.abstentionReason, label: "abstained" };
+  if (m.truncated) return { outcome: "truncated", label: "truncated" };
+  return GROUNDED;
+}
 
 const SETTINGS_ERROR_PATTERNS = ["No chat provider configured", "Re-save your provider settings"];
 const isSettingsError = (message: string) => SETTINGS_ERROR_PATTERNS.some((p) => message.includes(p));
@@ -179,6 +208,7 @@ export function ChatPane() {
     file,
     checkProcessedQuery.data?.is_processed === true && !isIndexing
   );
+  const reindex = useReindex();
   const watchedFileId = file?.id ?? null;
 
   useEffect(() => {
@@ -205,7 +235,18 @@ export function ChatPane() {
 
   useEffect(() => {
     if (watchedFileId && messagesQuery.data?.messages) {
-      setMessages(messagesQuery.data.messages.map((m) => ({ id: m.id, text: m.text, sender: m.sender, sources: m.sources })));
+      setMessages(
+        messagesQuery.data.messages.map((m) => ({
+          id: m.id,
+          text: m.text,
+          sender: m.sender,
+          sources: m.sources,
+          // An abstention stored in history is still an abstention, not an
+          // answer that came back empty.
+          abstained: m.turn_status === "abstained",
+          abstentionReason: m.turn_abstention_reason ?? undefined,
+        })),
+      );
     }
   }, [watchedFileId, messagesQuery.data]);
 
@@ -275,6 +316,18 @@ export function ChatPane() {
                         ? `${msg.text}\n\n_Stopped before this answer was saved._`
                         : "",
                     }
+                  : msg,
+              ),
+            );
+          },
+          onAbstained: ({ message, reason, retrieval }) => {
+            if (isStale()) return;
+            // Not a failure and not an empty answer: the app knows there is
+            // nothing to ground one in, so it says so and cites nothing.
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botId
+                  ? { ...msg, text: message, abstained: true, abstentionReason: reason, retrieval }
                   : msg,
               ),
             );
@@ -399,22 +452,41 @@ export function ChatPane() {
           </div>
         )}
 
-        {messages.map((m) =>
-          m.sender === "user" ? (
+        {messages.map((m) => {
+          const outcome = describe(m);
+          return m.sender === "user" ? (
             <div key={m.id} className="rise-in flex justify-end">
               <p className="max-w-[85%] rounded-lg rounded-br-[2px] bg-ink px-3.5 py-2.5 text-[0.85rem] leading-snug text-paper">{m.text}</p>
             </div>
           ) : (
-            <div key={m.id} className="rise-in" data-outcome={m.failure ?? (m.cancelled ? "cancelled" : m.truncated ? "truncated" : undefined)}>
-              <p className="label-meta mb-2">
-                Synthesis · {m.failed ? "failed" : m.cancelled ? "stopped" : m.truncated ? "truncated" : "grounded"}
-              </p>
+            <div key={m.id} className="rise-in" data-outcome={outcome.outcome}>
+              <p className="label-meta mb-2">Synthesis · {outcome.label}</p>
               {m.cancelled && !m.text && (
                 <p className="font-serif text-xs italic text-ink-faint">
                   {m.stopReason
                     ? `This answer was stopped (${m.stopReason}) before it finished, so it was not saved.`
                     : "This answer was stopped before it finished, so it was not saved."}
                 </p>
+              )}
+              {m.abstained && m.abstentionReason && (
+                <p className="mb-1.5 font-mono text-[0.62rem] leading-relaxed tracking-wide text-ink-faint">
+                  {ABSTENTION_HINTS[m.abstentionReason]}
+                </p>
+              )}
+              {m.abstained && m.abstentionReason === "evidence_unusable" && (
+                <button
+                  type="button"
+                  onClick={() => file && reindex.mutate(file.name)}
+                  disabled={reindex.isPending || !file}
+                  className="mb-1.5 inline-flex items-center gap-1.5 border border-rule px-2.5 py-1 font-mono text-[0.62rem] uppercase tracking-wide text-ink-soft transition-colors hover:border-ink hover:text-ink disabled:opacity-40"
+                >
+                  {reindex.isPending ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3" />
+                  )}
+                  {reindex.isPending ? "Queueing reindex…" : "Reindex this paper"}
+                </button>
               )}
               {m.truncated && !m.failed && !m.cancelled && (
                 <p className="mb-1.5 font-mono text-[0.62rem] tracking-wide text-ink-faint">
@@ -442,8 +514,8 @@ export function ChatPane() {
               </div>
               {m.sources && m.sources.length > 0 && <SourceList sources={m.sources} />}
             </div>
-          ),
-        )}
+          );
+        })}
 
         {thinking && messages[messages.length - 1]?.sender !== "bot" && (
           <div className="rise-in">

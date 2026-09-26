@@ -754,17 +754,21 @@ def test_process_retry_cleans_stale_vectors_before_rewrite(client, app, fake_vec
     )
 
 
-def test_empty_retrieval_is_a_successful_empty_result(client, app, fake_vectors):
-    """A valid query with no evidence completes with an empty result marker."""
+def test_empty_retrieval_abstains_instead_of_calling_the_model(
+    client, app, fake_vectors
+):
+    """A valid query with no evidence is answered by the app, not by a model."""
     filename = index_document(client, app)
     fake_vectors.matches = []
 
     response = client.post("/response", json={"query": "what?", "filename": filename})
 
     assert response.status_code == 200
-    done = parse_sse(response.get_data(as_text=True))[-1][1]
-    assert done["sources"] == []
-    assert done["retrieval"] == {
+    abstained = parse_sse(response.get_data(as_text=True))[-1][1]
+    assert abstained["abstained"] is True
+    assert abstained["reason"] == "no_evidence"
+    assert abstained["retrieved"] == 0
+    assert abstained["retrieval"] == {
         "method": "dense",
         "outcome": "empty",
         "original_query": "what?",
@@ -1011,7 +1015,7 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     } <= tables
     assert {"messages", "users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "e5b7d2c4a918",
+        "b3a7c9e1f4d2",
     )
     assert {
         "title",
@@ -1041,6 +1045,7 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
         "answer",
         "status",
         "failure_reason",
+        "abstention_reason",
         "created_at",
         "completed_at",
     } <= {row[1] for row in connection.execute("pragma table_info(turns)")}

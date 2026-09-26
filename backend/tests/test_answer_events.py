@@ -33,7 +33,13 @@ __all__ = [
     "session_factory",
 ]
 
-TERMINAL_EVENTS = {"done", "provider_error", "persistence_error", "cancelled"}
+TERMINAL_EVENTS = {
+    "done",
+    "abstained",
+    "provider_error",
+    "persistence_error",
+    "cancelled",
+}
 
 
 def ask(client, filename, query="what?", **kwargs):
@@ -279,6 +285,19 @@ def test_every_outcome_ends_the_stream_with_exactly_one_terminal_event(
     terminal = [name for name in names(events) if name in TERMINAL_EVENTS]
     assert terminal == [expected]
     assert names(events)[0] == "start"
+
+
+def test_an_answer_with_no_evidence_ends_the_stream_as_an_abstention(
+    client, app, fake_chat
+):
+    """No evidence is its own terminal event, not an empty or failed answer."""
+    filename = indexed_document(client, app)
+    app.config["TEST_VECTORS"].script()
+
+    events = ask(client, filename)
+
+    assert names(events) == ["start", "abstained"]
+    assert fake_chat.streamed == []
 
 
 def test_a_disconnected_client_records_a_cancelled_turn(client, app, repositories):

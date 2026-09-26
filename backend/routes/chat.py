@@ -23,6 +23,7 @@ from services.accounts.secrets_service import (
     decrypt_api_key,
 )
 from services.indexing.state import index_status
+from services.abstention import abstention_for
 from services.llm.base import ChatCredentials, EmptyAnswerError, ProviderTimeoutError
 from services.chat_context import build_chat_context, build_model_rewriter
 from services.retrieval.base import (
@@ -337,6 +338,9 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
             return deletion_blocked_response(
                 files_repository.get_file(filename) or {"deletion_state": "deleting"}
             )
+        # Decided before the Turn is committed, and acted on below: whether
+        # this question gets a model call is settled the moment retrieval is.
+        abstention = abstention_for(sources)
         try:
             turn_id = conversations_repository.start_turn(conversation_id, query)
         except Exception:
@@ -345,6 +349,43 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
 
         def event(name, payload):
             return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
+
+        if abstention is not None:
+            # Nothing to answer from, and the app knows it before it spends
+            # anything. The Turn is committed first, so the abstention is on
+            # record exactly like an answer would be, and the browser reads it
+            # through the same stream as every other outcome.
+            log.info(
+                "/response abstained for %s: %s (%s retrieved, %s usable)",
+                filename,
+                abstention.reason,
+                abstention.retrieved,
+                abstention.usable,
+            )
+            try:
+                recorded = conversations_repository.abstain_turn(
+                    turn_id, abstention.message, abstention.reason
+                )
+            except Exception:
+                log.exception(
+                    "/response could not record the abstention for %s", filename
+                )
+                return jsonify({"error": "Internal server error"}), 500
+            if not recorded:
+                log.warning("/response turn %s already ended for %s", turn_id, filename)
+                return jsonify({"error": "Internal server error"}), 500
+
+            def abstain():
+                yield event("start", {"turn_id": turn_id})
+                yield event(
+                    "abstained", {**abstention.to_dict(), "retrieval": retrieval}
+                )
+
+            return Response(
+                stream_with_context(abstain()),
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         def done(answer_sources):
             """

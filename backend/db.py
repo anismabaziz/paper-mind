@@ -202,9 +202,17 @@ TURN_PENDING = "pending"
 TURN_ANSWERED = "answered"
 TURN_FAILED = "failed"
 TURN_CANCELLED = "cancelled"
+# The app answered without a model call because the Document had no evidence.
+TURN_ABSTAINED = "abstained"
 TURN_UNANSWERED = "unanswered"
 TERMINAL_TURN_STATES = frozenset(
-    {TURN_ANSWERED, TURN_FAILED, TURN_CANCELLED, TURN_UNANSWERED}
+    {
+        TURN_ANSWERED,
+        TURN_FAILED,
+        TURN_CANCELLED,
+        TURN_ABSTAINED,
+        TURN_UNANSWERED,
+    }
 )
 
 
@@ -234,6 +242,11 @@ class Turn(Base):
     status: Mapped[str] = mapped_column(String(16), default=TURN_PENDING)
     failure_reason: Mapped[str | None] = mapped_column(
         String(255), nullable=True, default=None
+    )
+    # Why the app answered without a model call, as a code the interface and
+    # the evaluation both read rather than a sentence to parse.
+    abstention_reason: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

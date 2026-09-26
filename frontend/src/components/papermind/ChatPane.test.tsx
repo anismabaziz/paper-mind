@@ -265,6 +265,88 @@ describe("ChatPane answer outcomes", () => {
     expect(screen.getByText(/hit its answer limit/)).toBeInTheDocument();
   });
 
+  it("says the paper has nothing to answer from, without blaming a failure", async () => {
+    await ask((h) =>
+      h.onAbstained?.({
+        message: "This paper has no passage that speaks to this question.",
+        reason: "no_evidence",
+      }),
+    );
+
+    expect(
+      screen.getByText("This paper has no passage that speaks to this question."),
+    ).toBeInTheDocument();
+    expect(outcomeOf("Synthesis · abstained")).toBe("no_evidence");
+    expect(screen.queryByText(/Reading passages/)).not.toBeInTheDocument();
+  });
+
+  it("offers a reindex when the matched passages could not be used", async () => {
+    await ask((h) =>
+      h.onAbstained?.({
+        message: "The passages this question matched could not be read or cited.",
+        reason: "evidence_unusable",
+      }),
+    );
+
+    expect(
+      screen.getByText("The passages this question matched could not be read or cited."),
+    ).toBeInTheDocument();
+    expect(outcomeOf("Synthesis · abstained")).toBe("evidence_unusable");
+
+    fireEvent.click(screen.getByRole("button", { name: /Reindex this paper/ }));
+
+    await waitFor(() => expect(reindexFile).toHaveBeenCalledWith("doc.pdf"));
+  });
+
+  it("offers no reindex when the paper simply has nothing to say", async () => {
+    await ask((h) =>
+      h.onAbstained?.({ message: "Nothing to answer from.", reason: "no_evidence" }),
+    );
+
+    expect(screen.queryByRole("button", { name: /Reindex/ })).not.toBeInTheDocument();
+  });
+
+  it("cites nothing for an abstention", async () => {
+    await ask((h) =>
+      h.onAbstained?.({ message: "Nothing to answer from.", reason: "no_evidence" }),
+    );
+
+    expect(screen.queryByText(/Grounded in/)).not.toBeInTheDocument();
+  });
+
+  it("replays a stored abstention from history as an abstention", async () => {
+    vi.mocked(getMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "t1-user",
+          text: "what?",
+          sender: "user",
+          sources: [],
+          created_at: "2026-09-26T10:00:00+00:00",
+          turn_id: "t1",
+          turn_sequence: 1,
+          turn_status: "abstained",
+          turn_abstention_reason: "no_evidence",
+        },
+        {
+          id: "t1-bot",
+          text: "This paper has no passage that speaks to this question.",
+          sender: "bot",
+          sources: [],
+          created_at: "2026-09-26T10:00:01+00:00",
+          turn_id: "t1",
+          turn_sequence: 1,
+          turn_status: "abstained",
+          turn_abstention_reason: "no_evidence",
+        },
+      ],
+    });
+    renderPane();
+
+    expect(await screen.findByText("Synthesis · abstained")).toBeInTheDocument();
+    expect(outcomeOf("Synthesis · abstained")).toBe("no_evidence");
+  });
+
   it("stops the loader when the stream ends with a protocol error", async () => {
     vi.mocked(chatStream).mockRejectedValue(
       new StreamProtocolError("The answer stream ended before it finished."),
