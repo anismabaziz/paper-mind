@@ -21,7 +21,8 @@ and stores one global set of provider settings.
   returned in plaintext
 - Human titles derived from the PDF itself (metadata Title → original filename
   → first heading) while the stable uuid filename stays on disk and in Qdrant
-- Retrieval evaluator with a committed ground-truth fixture
+- Evaluation that asks a committed labeled case set through the same answer
+  path the chat route uses
 - Postgres for persistence, local filesystem for uploaded files
 
 ## Quick start
@@ -79,7 +80,7 @@ except the chat LLM, which is configured once in Settings:
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
 | Chat LLM | Single-instance Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest via `APP_SECRET` |
 | Document title | Derived from PDF metadata Title → original filename (without extension) → first heading; stored alongside the uuid `filename` |
-| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no chat key); `--live` with the LLM-as-judge needs a key |
+| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant; keys come from `PAPERMIND_EVAL_GENERATOR_API_KEY` and `PAPERMIND_EVAL_JUDGE_API_KEY`, never from a command-line argument. The generator and the judge are configured separately |
 
 All free-path knobs live in `backend/.env.example`:
 `RERANK`/`RERANK_MODEL`/`RERANK_REVISION`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
@@ -126,7 +127,7 @@ provenance gets recorded.
 └──────────────┘             │                                       │
                              │  settings ── single global app_settings│
                              │  chat ── SSE stream, answers + sources│
-                             │  eval ── retrieval/answer evaluator   │
+                             │  eval ── labeled cases, same path     │
                              │                                       │
                               │  parser (pymupdf fast / Docling)      │
                               │  storage (LocalStorage impl)          │
@@ -232,13 +233,30 @@ Keys are encrypted at rest with Fernet and only ever returned masked. The app
 boots with no provider key present; a workspace with no saved settings gets
 a clear error pointing at Settings rather than a crash or an env default.
 
-**Retrieval evaluation.** `backend/evaluation/` measures the retrieval
-pipeline against a committed ground-truth fixture: ten questions over two
-sample documents, scored with hit-rate and recall@k, plus an optional
-LLM-as-judge faithfulness check on generated answers. The scoring logic runs
-in tests against deterministic fakes; a live run against real providers is
-opt-in because it costs API calls. This exists so changes to chunking or
-retrieval can be judged with numbers instead of vibes.
+**Evaluation runs the app.** `backend/evaluation/` asks a committed labeled
+case set (ten questions over two sample documents) the way a reader asks them.
+The fixture documents are stored and indexed by the same ingestion job and
+worker the upload route uses, and every question goes through the same answer
+path the chat route uses: same document context, retrieval, bounded prompt,
+citation validation, abstention, and persistence. There is no second retrieval
+or generation path to drift out of sync.
+
+Each case ends as whatever it actually was — an answer, an abstention, a
+provider failure, an unusable citation, a failed save, or a refusal — and only
+an answer the model wrote is handed to the grader. Retrieved text quoted back
+after a provider failure is a fallback, not an answer, so scoring it would
+credit the model with the retrieval. A run records the index manifest and
+generation, the retrieval method, the prompt version, the provider, the model,
+and the settings behind every number, and the retrieval contract is checked
+once up front: a store that cannot serve hybrid fails the run rather than
+quietly reporting dense numbers.
+
+The tests run the whole thing offline against deterministic embedding, vector
+store, and provider doubles. A live run needs local Qdrant and a provider key
+read from `PAPERMIND_EVAL_GENERATOR_API_KEY` (and
+`PAPERMIND_EVAL_JUDGE_API_KEY` for the judge), never from a command-line
+argument. Generator and judge are configured separately, so a run can generate
+with one account and grade with another.
 
 ## Testing
 
@@ -258,12 +276,12 @@ cd backend
 
 The full-stack run applies every migration to an empty database, uses deterministic local embedding, reranking, and chat providers, and removes its database, collection, and containers when it finishes. It needs Docker but no model API keys or paid services.
 
-The evaluator (`backend/evaluation/`) measures retrieval against
-`fixture.json` with `hit@5`/`recall@5` (k=5) + per-question breakdown and
-`ingest sec/PDF` (parse/embed/upsert wall time) via
-`evaluation/evaluator.py`; live runs are opt-in (`--live`). See
-[backend/README.md](backend/README.md) for free local live instructions
-(`http://localhost:6333` without any chat key).
+The evaluator (`backend/evaluation/`) scores `fixture.json` with `hit@5` and
+`recall@5` (k=5) plus a per-case outcome breakdown, through the production
+answer path. Live runs are opt-in (`--live`); `--compare-rerank` runs the case
+set twice, once with the reranker gate off and once with it on, and reports
+both. See [backend/README.md](backend/README.md) for free local live
+instructions (`http://localhost:6333` with `--no-judge` needs no chat key).
 
 ## Technologies
 

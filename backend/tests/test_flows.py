@@ -850,7 +850,7 @@ def test_chat_embed_failure_leaves_no_stranded_message(client, app, fake_embeddi
 
 def test_chat_query_too_long_rejected_before_embedding(client, app, fake_embeddings):
     """An oversized query is a 400 and never reaches the embedding model."""
-    from routes.chat import MAX_QUERY_CHARS
+    from services.answering import MAX_QUERY_CHARS
 
     filename = index_document(client, app)
     embedded_before = list(fake_embeddings.embedded)
