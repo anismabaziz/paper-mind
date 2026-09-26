@@ -599,7 +599,7 @@ def test_sources_panel_order_matches_llm_context_order(
 
     # The LLM received the same chunks, in the same order, as its context.
     _, context, _ = fake_chat.streamed[0]
-    assert context == "strong chunk\n\nweak chunk"
+    assert context == "[S1] strong chunk\n\n[S2] weak chunk"
 
     history = client.get(f"/messages?filename={filename}").get_json()["messages"]
     assert history[1]["sources"] == done_sources, (
@@ -906,6 +906,8 @@ def test_conversation_repository_round_trip():
             "chunk_index": 0,
             "score": 0.9,
             "page": 3,
+            "source_id": None,
+            "rank": None,
         }
     ]
     assert [
@@ -1015,7 +1017,7 @@ def test_fresh_database_reaches_current_schema_via_migrations(tmp_path):
     } <= tables
     assert {"messages", "users", "user_settings"}.isdisjoint(tables)
     assert connection.execute("select version_num from alembic_version").fetchone() == (
-        "b3a7c9e1f4d2",
+        "c7d4e91a5b02",
     )
     assert {
         "title",

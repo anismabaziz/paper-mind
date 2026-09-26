@@ -22,6 +22,7 @@ from typing import Any
 
 import tiktoken
 
+from services.citations import render_evidence
 from services.llm.base import LLMProvider
 from services.retrieval.query_expansion import QueryExpansion
 
@@ -182,7 +183,11 @@ def build_chat_context(
     kept_sources, dropped_sources = bounded_sources(sources, evidence_budget)
     return ChatContext(
         query=query,
-        context="\n\n".join(source.get("content") or "" for source in kept_sources),
+        # Each Passage is prefixed with the id the model is allowed to cite it
+        # by. Ids are assigned before the budget runs, so a Passage the budget
+        # dropped keeps its rank and the numbering is never renumbered under
+        # a claim the model already wrote.
+        context=render_evidence(kept_sources),
         prior_turns=prior_turns_text,
         sources=tuple(kept_sources),
         expansion=expansion,

@@ -1,5 +1,6 @@
 """Persistence for conversations, ordered turns, and citation sources."""
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -128,9 +129,18 @@ class ConversationRepository(BaseRepository):
         turn_id: str,
         answer: str,
         sources: list[dict[str, Any]] | None = None,
+        *,
+        claims: list[dict[str, Any]] | None = None,
     ) -> bool:
-        """Record an answer and its ordered citation sources on a pending turn."""
-        return self._finish_turn(turn_id, TURN_ANSWERED, answer, sources, None)
+        """
+        Record an answer, its ordered citation sources, and its claims.
+
+        The claims go with the answer rather than beside it: a claim whose
+        source ids do not resolve against the stored passages is a citation the
+        reader cannot follow, and keeping them together is what makes that
+        checkable.
+        """
+        return self._finish_turn(turn_id, TURN_ANSWERED, answer, sources, None, None, claims)
 
     def abstain_turn(self, turn_id: str, answer: str, reason: AbstentionReason) -> bool:
         """
@@ -157,6 +167,7 @@ class ConversationRepository(BaseRepository):
         sources: list[dict[str, Any]] | None,
         failure_reason: str | None,
         abstention_reason: str | None = None,
+        claims: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Close one pending turn, leaving a turn that already ended untouched."""
         with self._session_factory() as session, session.begin():
@@ -170,6 +181,7 @@ class ConversationRepository(BaseRepository):
             turn.answer = answer
             turn.failure_reason = failure_reason
             turn.abstention_reason = abstention_reason
+            turn.claims = json.dumps(claims) if claims else None
             turn.completed_at = datetime.now(timezone.utc)
             for source in sources or []:
                 session.add(
@@ -180,6 +192,8 @@ class ConversationRepository(BaseRepository):
                         chunk_index=source["chunk_index"],
                         score=source["score"],
                         page=source.get("page", source.get("page_no")),
+                        source_id=source.get("source_id"),
+                        rank=source.get("rank"),
                     )
                 )
             return True
@@ -201,6 +215,7 @@ class ConversationRepository(BaseRepository):
                     "status": turn.status,
                     "failure_reason": turn.failure_reason,
                     "abstention_reason": turn.abstention_reason,
+                    "claims": _load_claims(turn.claims),
                     "started_at": _isoformat(turn.created_at),
                     "completed_at": _isoformat(turn.completed_at),
                     "sources": [
@@ -283,6 +298,7 @@ class ConversationRepository(BaseRepository):
                         "turn_sequence": turn["sequence"],
                         "turn_status": turn["status"],
                         "turn_abstention_reason": turn["abstention_reason"],
+                        "claims": turn["claims"] if sender == "bot" else [],
                     }
                 )
         return messages
@@ -315,7 +331,26 @@ class ConversationRepository(BaseRepository):
             "chunk_index": source.chunk_index,
             "score": source.score,
             "page": source.page,
+            "source_id": source.source_id,
+            "rank": source.rank,
         }
+
+
+def _load_claims(stored: str | None) -> list[dict[str, Any]]:
+    """
+    Return stored claims in the order they were written, or none at all.
+
+    Claims that cannot be read are dropped rather than guessed at: a transcript
+    that rehydrates with fewer claims than were stored reads as an answer with
+    nothing behind it, which is the honest reading of unreadable data.
+    """
+    if not stored:
+        return []
+    try:
+        claims = json.loads(stored)
+    except json.JSONDecodeError:
+        return []
+    return claims if isinstance(claims, list) else []
 
 
 def _isoformat(value: datetime | None) -> str | None:

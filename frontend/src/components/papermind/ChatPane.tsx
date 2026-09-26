@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, RefreshCw, Settings, FileText } from "lucide-react";
-import { chatStream, type ChatAbstentionReason, type ChatFailureCategory, type IRetrievalResult, type ISource } from "@/services/files";
+import { chatStream, type ChatAbstentionReason, type ChatFailureCategory, type IClaim, type IRetrievalResult, type ISource } from "@/services/files";
 import { useFileStatus, useFileMessages, useReindex } from "@/hooks/useFiles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import usePdfStore from "@/store/pdf-state";
@@ -13,6 +13,9 @@ type ChatMessage = {
   text: string;
   sender: "user" | "bot";
   sources?: ISource[];
+  claims?: IClaim[];
+  /** At least one claim named a passage the app actually supplied. */
+  grounded?: boolean;
   retrieval?: IRetrievalResult;
   failed?: boolean;
   needsSettings?: boolean;
@@ -47,11 +50,21 @@ type Outcome = { outcome: string | undefined; label: string };
 
 const GROUNDED: Outcome = { outcome: undefined, label: "grounded" };
 
+/** Retrieval scores are a ranking, not a chance of being right, so only a claim that cites earns this. */
+const UNGROUNDED: Outcome = { outcome: "ungrounded", label: "ungrounded" };
+
+/** Nothing has been decided yet: no claim has been read, so nothing is claimed. */
+const ANSWERING: Outcome = { outcome: "answering", label: "answering" };
+
 function describe(m: ChatMessage): Outcome {
   if (m.failure) return { outcome: m.failure, label: "failed" };
   if (m.cancelled) return { outcome: "cancelled", label: "stopped" };
   if (m.abstained) return { outcome: m.abstentionReason, label: "abstained" };
   if (m.truncated) return { outcome: "truncated", label: "truncated" };
+  // The terminal event is what settles whether anything is cited, so an answer
+  // still arriving is not called grounded before it is.
+  if (m.sources === undefined) return ANSWERING;
+  if (m.grounded === false) return UNGROUNDED;
   return GROUNDED;
 }
 
@@ -117,23 +130,83 @@ function StaleIndexNotice({ index }: { index: DocumentIndex }) {
   );
 }
 
-function SourceList({ sources }: { sources: ISource[] }) {
+/** A claim's citation, which opens the page that supports it when it has one. */
+function ClaimCitation({ source }: { source: ISource }) {
+  const setCitationTarget = usePdfStore((s) => s.setCitationTarget);
+  const hasPage = source.page != null;
+  return (
+    <button
+      type="button"
+      disabled={!hasPage}
+      onClick={() => hasPage && setCitationTarget(source.page as number)}
+      title={hasPage ? `Open page ${source.page}` : "This passage has no page to open"}
+      aria-label={
+        hasPage
+          ? `Open page ${source.page} for citation ${source.source_id}`
+          : `Citation ${source.source_id}, no page to open`
+      }
+      className={cn(
+        "font-mono text-[0.62rem] tracking-wide",
+        hasPage ? "cursor-pointer text-marker hover:underline" : "text-ink-faint",
+      )}
+    >
+      {source.source_id}
+    </button>
+  );
+}
+
+function ClaimList({ claims, sources }: { claims: IClaim[]; sources: ISource[] }) {
+  const byId = new Map(sources.map((source) => [source.source_id, source]));
+  return (
+    <div className="mt-4 border-t border-rule pt-3">
+      <p className="label-meta">Claims this answer makes</p>
+      <ol className="mt-2.5 space-y-1.5">
+        {claims.map((claim, index) => (
+          <li key={index} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="font-serif text-[0.85rem] leading-snug text-ink-soft">{claim.claim}</span>
+            {claim.sources.length > 0 ? (
+              <span className="flex items-baseline gap-1">
+                {claim.sources.map((sourceId) => {
+                  const source = byId.get(sourceId);
+                  return source ? (
+                    <ClaimCitation key={sourceId} source={source} />
+                  ) : null;
+                })}
+              </span>
+            ) : (
+              <span className="font-mono text-[0.6rem] text-ink-faint">not supported</span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+const METHOD_LABELS: Record<IRetrievalResult["method"], string> = {
+  dense: "dense retrieval",
+  sparse: "sparse retrieval",
+  hybrid: "hybrid retrieval",
+};
+
+function SourceList({ sources, retrieval }: { sources: ISource[]; retrieval?: IRetrievalResult }) {
   const [open, setOpen] = useState(true);
   const setCitationTarget = usePdfStore((s) => s.setCitationTarget);
   return (
     <div className="mt-4 border-t border-rule pt-3">
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between text-ink-faint hover:text-ink">
-        <span className="label-meta">Grounded in {sources.length} passages</span>
+        <span className="label-meta">
+          {sources.length} passages{retrieval ? ` · ${METHOD_LABELS[retrieval.method]}` : ""}
+        </span>
         <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <ol className="mt-3 space-y-3">
           {sources.map((s, idx) => {
-            const conf = Math.round((s.score ?? 0) * 100);
             const hasPage = s.page != null;
             const citationButton = (
               <span className="font-mono text-[0.62rem] tracking-wide text-ink-faint">
-                <span className="text-marker">[{idx + 1}]</span> {s.document} · chunk {s.chunk_index}
+                <span className="text-marker">[{s.source_id}]</span> {s.document} · chunk {s.chunk_index}
                 {hasPage ? ` · p. ${s.page}` : ""}
               </span>
             );
@@ -153,15 +226,11 @@ function SourceList({ sources }: { sources: ISource[] }) {
                 >
                   <span className="flex items-baseline justify-between gap-2">
                     {citationButton}
-                    <span className="font-mono text-[0.6rem] text-ink-faint">{conf}%</span>
+                    <span className="font-mono text-[0.6rem] text-ink-faint">
+                      Rank {s.rank ?? idx + 1}
+                    </span>
                   </span>
                   <span className="mt-1 block font-serif text-[0.85rem] leading-snug text-ink-soft italic">“{s.content.slice(0, 220)}”</span>
-                  <span className="mt-1.5 flex items-center gap-2">
-                    <span className="h-px w-16 bg-rule">
-                      <span className="block h-px bg-marker" style={{ width: `${conf}%` }} />
-                    </span>
-                    <span className="font-mono text-[0.58rem] text-ink-faint">{conf}% match</span>
-                  </span>
                 </button>
               </li>
             );
@@ -241,6 +310,13 @@ export function ChatPane() {
           text: m.text,
           sender: m.sender,
           sources: m.sources,
+          claims: m.claims,
+          // An answer is only as grounded as the claims that cite something:
+          // a stored answer whose claims name no passage is not grounded.
+          grounded:
+            m.sender === "bot" && m.turn_status === "answered"
+              ? (m.claims ?? []).some((claim) => claim.sources.length > 0)
+              : undefined,
           // An abstention stored in history is still an abstention, not an
           // answer that came back empty.
           abstained: m.turn_status === "abstained",
@@ -332,9 +408,13 @@ export function ChatPane() {
               ),
             );
           },
-          onDone: ({ sources, retrieval, truncated }) => {
+          onDone: ({ sources, claims, grounded, retrieval, truncated }) => {
             if (isStale()) return;
-            setMessages((prev) => prev.map((msg) => (msg.id === botId ? { ...msg, sources, retrieval, truncated } : msg)));
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botId ? { ...msg, sources, claims, grounded, retrieval, truncated } : msg,
+              ),
+            );
           },
         },
         { signal: controller.signal },
@@ -512,7 +592,12 @@ export function ChatPane() {
                   </span>
                 )}
               </div>
-              {m.sources && m.sources.length > 0 && <SourceList sources={m.sources} />}
+              {m.sources && m.sources.length > 0 && (
+                <SourceList sources={m.sources} retrieval={m.retrieval} />
+              )}
+              {m.claims && m.claims.length > 0 && m.sources && (
+                <ClaimList claims={m.claims} sources={m.sources} />
+              )}
             </div>
           );
         })}

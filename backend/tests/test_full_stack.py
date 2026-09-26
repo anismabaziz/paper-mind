@@ -54,7 +54,7 @@ ADMIN_DATABASE_URL = os.getenv(
 )
 QDRANT_URL = os.getenv("FULL_STACK_QDRANT_URL", "http://127.0.0.1:56333")
 PRE_TURN_REVISION = "c3d7e1f4a9b2"
-CURRENT_REVISION = "b3a7c9e1f4d2"
+CURRENT_REVISION = "c7d4e91a5b02"
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,7 @@ from composition import Services
 from db import Base
 from repositories import FileRepository, build_repositories
 from services.accounts.secrets_service import encrypt_api_key
+from services.citations import assign_source_ids
 from services.chat_context import (
     bounded_sources,
     bounded_turns,
@@ -457,7 +458,9 @@ class TestBoundedContext:
     def test_assembly_reports_what_the_model_did_not_see(self):
         """Truncation is visible to a trace, not silent."""
         turns = [{"question": "q", "answer": "a"} for _ in range(5)]
-        sources = [{"content": "passage", "chunk_index": n} for n in range(4)]
+        sources = assign_source_ids(
+            [{"content": "passage", "chunk_index": n} for n in range(4)]
+        )
 
         chat_context = build_chat_context(
             "What about the second one?",
@@ -683,7 +686,9 @@ class TestChatFollowUp:
         done = ask(client, filename, "What is the first method?")
 
         assert done["sources"] != []
-        assert fake_chat.streamed[-1][1] == done["sources"][0]["content"]
+        # The model reads the Passage under the same id the answer cites it by.
+        assert fake_chat.streamed[-1][1] == f"[S1] {done['sources'][0]['content']}"
+        assert done["sources"][0]["source_id"] == "S1"
 
 
 class TestRecentTurns:

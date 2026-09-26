@@ -24,6 +24,17 @@ from services.accounts.secrets_service import (
 )
 from services.indexing.state import index_status
 from services.abstention import abstention_for
+from services.citations import (
+    UNRESOLVED_CITATIONS_REASON,
+    AnswerSplitter,
+    ValidatedCitations,
+    assign_source_ids,
+    parse_claims,
+    prune_conflicting_claims,
+    render_evidence,
+    repair_instruction,
+    validate_claims,
+)
 from services.llm.base import ChatCredentials, EmptyAnswerError, ProviderTimeoutError
 from services.chat_context import build_chat_context, build_model_rewriter
 from services.retrieval.base import (
@@ -47,6 +58,14 @@ class AnswerFailure:
 
     message: str
     reason: str
+
+
+@dataclass(frozen=True)
+class ResolvedAnswer:
+    """One generated answer: the prose to show, and the claims that survived."""
+
+    answer: str
+    citations: ValidatedCitations
 
 
 def _normalize_source(source: dict) -> dict:
@@ -283,7 +302,9 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 generation=file_record.get("index_generation"),
                 include_legacy=file_record.get("index_generation") is None,
             )
-            sources = [_normalize_source(source) for source in retrieval_result.sources]
+            sources = assign_source_ids(
+                [_normalize_source(source) for source in retrieval_result.sources]
+            )
             chat_context = build_chat_context(
                 query,
                 sources,
@@ -387,12 +408,13 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        def done(answer_sources):
+        def done(answer_sources, resolved):
             """
             Return the terminal event for a stream that stored an answer.
 
             Only ever sent after ``complete_turn`` committed, so a browser that
-            sees it knows the answer and its Citation Sources are in history.
+            sees it knows the answer, its claims, and its Citation Sources are
+            all in history.
             """
             reason = getattr(chat_provider, "last_finish_reason", None)
             # No finish reason at all means the provider never said the answer
@@ -405,6 +427,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 {
                     "done": True,
                     "sources": answer_sources,
+                    **resolved.citations.to_dict(),
                     "retrieval": retrieval,
                     "finish_reason": reason,
                     "truncated": truncated,
@@ -445,6 +468,11 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
             "The answer could not be saved. Please ask the question again.",
             "answer could not be saved",
         )
+        uncited = AnswerFailure(
+            "The answer cited a passage that was not supplied with the question, "
+            "so it could not be shown. Please ask the question again.",
+            UNRESOLVED_CITATIONS_REASON,
+        )
 
         def provider_error(failure, category):
             """Close the turn as failed and return the terminal event."""
@@ -468,15 +496,78 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
             )
             return event("persistence_error", {"error": failure.message})
 
+        def citation_error(failure):
+            """Close the turn as failed and return the terminal event."""
+            record_outcome(
+                conversations_repository.fail_turn,
+                turn_id,
+                failure.message,
+                failure.reason,
+            )
+            return event(
+                "citation_error", {"error": failure.message, "category": "citations"}
+            )
+
+        def check_citations(generated, evidence) -> ResolvedAnswer | None:
+            """
+            Read one generated answer's claims and check every citation in them.
+
+            Returns the answer prose beside its validated claims, or None when
+            a citation still names nothing supplied after the one repair the
+            app is willing to spend. A citation to a Passage the model was
+            never shown is false, and a false citation that reaches the reader
+            is worse than an answer that admits it could not be shown.
+            """
+            allowed = [source["source_id"] for source in evidence]
+            parsed = parse_claims(generated)
+            citations = validate_claims(
+                prune_conflicting_claims(parsed.answer, parsed.claims), allowed
+            )
+            if not citations.invalid_ids:
+                return ResolvedAnswer(parsed.answer, citations)
+            log.warning(
+                "/response cited passages not supplied for %s: %s of %s",
+                filename,
+                ",".join(citations.invalid_ids),
+                ",".join(allowed),
+            )
+            # One repair, and only the mapping: the reader has already read the
+            # answer, so a second version of the same sentences is a different
+            # answer. A repair that cannot be read is as false as the original.
+            repaired = parse_claims(
+                chat_provider.generate_response(
+                    repair_instruction(parsed.answer, parsed.claims, allowed),
+                    render_evidence(evidence),
+                )
+            )
+            repaired_claims = prune_conflicting_claims(parsed.answer, repaired.claims)
+            citations = validate_claims(repaired_claims, allowed)
+            if repaired_claims and not citations.invalid_ids:
+                return ResolvedAnswer(parsed.answer, citations)
+            log.warning(
+                "/response citations unresolved for %s: %s",
+                filename,
+                ",".join(citations.invalid_ids),
+            )
+            return None
+
         def generate():
             yield event("start", {"turn_id": turn_id})
             fragments = []
+            splitter = AnswerSplitter()
             try:
                 for token in chat_provider.stream_response(
                     query, context, prior_turns_text
                 ):
                     fragments.append(token)
-                    yield event("token", {"text": token})
+                    # The claims block is written in the model's own output but
+                    # belongs to the app, so it is collected and never shown.
+                    visible = splitter.feed(token)
+                    if visible:
+                        yield event("token", {"text": visible})
+                trailing = splitter.finish()
+                if trailing:
+                    yield event("token", {"text": trailing})
             except GeneratorExit:
                 # The client left mid-answer. The question stays on record as
                 # cancelled rather than pending, so it is never stranded, and
@@ -525,9 +616,16 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                     )
                 yield event("cancelled", {"reason": "document deleted"})
                 return
+            citations = check_citations(answer, sources)
+            if citations is None:
+                yield citation_error(uncited)
+                return
             try:
                 completed = conversations_repository.complete_turn(
-                    turn_id, answer, sources
+                    turn_id,
+                    citations.answer or answer,
+                    sources,
+                    claims=[claim.to_dict() for claim in citations.citations.claims],
                 )
             except Exception:
                 log.exception("failed to persist answer for %s", filename)
@@ -540,7 +638,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
                 log.warning("/response turn %s already ended for %s", turn_id, filename)
                 yield persistence_error(unsaved)
                 return
-            yield done(sources)
+            yield done(sources, citations)
 
         return Response(
             stream_with_context(generate()),

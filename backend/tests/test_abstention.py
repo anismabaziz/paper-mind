@@ -222,7 +222,7 @@ def test_an_abstention_is_not_carried_into_the_next_answer(client, app, fake_cha
     only_terminal(ask(client, filename, "and the third?"))
 
     _, context, prior_turns = fake_chat.streamed[0]
-    assert context == DEFAULT_MATCH["content"]
+    assert context == f"[S1] {DEFAULT_MATCH['content']}"
     assert prior_turns == ""
 
 

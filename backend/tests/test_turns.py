@@ -89,6 +89,8 @@ def test_a_completed_turn_keeps_its_answer_and_sources(conversation):
             "chunk_index": 0,
             "score": 0.9,
             "page": 1,
+            "source_id": None,
+            "rank": None,
         }
     ]
 
