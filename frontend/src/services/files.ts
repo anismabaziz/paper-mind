@@ -84,6 +84,10 @@ export interface ISource {
   chunk_index: number;
   score: number;
   page: number | null;
+  /** The id the model was shown this passage under, and the answer cites it by. */
+  source_id: string;
+  /** Where the passage landed in retrieval, counting from 1. */
+  rank: number | null;
 }
 
 export interface IRetrievalResult {
@@ -91,8 +95,23 @@ export interface IRetrievalResult {
   outcome: "success" | "empty";
 }
 
+/**
+ * One statement the answer made, and the passages said to support it.
+ *
+ * A claim with no sources is one the paper did not back, and it is kept so the
+ * reader can see that the model made it anyway.
+ */
+export interface IClaim {
+  claim: string;
+  sources: string[];
+}
+
 /** Why the model could not answer. Each one reads differently to the user. */
-export type ChatFailureCategory = "provider" | "timeout" | "empty_output";
+export type ChatFailureCategory =
+  | "provider"
+  | "timeout"
+  | "empty_output"
+  | "citations";
 
 /**
  * Why the app answered without asking a model.
@@ -110,6 +129,12 @@ export interface IChatAbstained {
 
 export interface IChatDone {
   sources: ISource[];
+  /** The claims the answer made, in the order the model made them. */
+  claims: IClaim[];
+  /** Whether a claim named a passage the app actually supplied. */
+  grounded: boolean;
+  /** Which instructions the model was asked under, for tracing a regression. */
+  promptVersion: string | null;
   retrieval?: IRetrievalResult;
   /** The answer was cut short — a token cap, not a finished sentence. */
   truncated: boolean;
@@ -139,7 +164,12 @@ export class StreamProtocolError extends Error {
   }
 }
 
-const FAILURE_CATEGORIES: ChatFailureCategory[] = ["provider", "timeout", "empty_output"];
+const FAILURE_CATEGORIES: ChatFailureCategory[] = [
+  "provider",
+  "timeout",
+  "empty_output",
+  "citations",
+];
 
 const ABSTENTION_REASONS: ChatAbstentionReason[] = ["no_evidence", "evidence_unusable"];
 
@@ -177,10 +207,11 @@ function dispatch(
     case "token":
       handlers.onToken(readString(data, "text", name));
       return false;
-    case "provider_error": {
+    case "provider_error":
+    case "citation_error": {
       const category = data.category;
       if (!FAILURE_CATEGORIES.includes(category as ChatFailureCategory)) {
-        throw new StreamProtocolError("The provider_error event has no category.");
+        throw new StreamProtocolError(`The ${name} event has no category.`);
       }
       handlers.onProviderError?.(
         readString(data, "error", name),
@@ -207,9 +238,20 @@ function dispatch(
       return true;
     }
     case "done": {
-      const { sources, retrieval, truncated, finish_reason: finishReason } = data;
+      const {
+        sources,
+        claims,
+        grounded,
+        prompt_version: promptVersion,
+        retrieval,
+        truncated,
+        finish_reason: finishReason,
+      } = data;
       handlers.onDone({
         sources: Array.isArray(sources) ? (sources as ISource[]) : [],
+        claims: Array.isArray(claims) ? (claims as IClaim[]) : [],
+        grounded: grounded === true,
+        promptVersion: typeof promptVersion === "string" ? promptVersion : null,
         retrieval: retrieval as IRetrievalResult | undefined,
         truncated: truncated === true,
         finishReason: typeof finishReason === "string" ? finishReason : null,
@@ -309,6 +351,8 @@ export interface IMessage {
   turn_status: 'pending' | 'answered' | 'failed' | 'cancelled' | 'abstained' | 'unanswered';
   /** Set when the app answered without a model call. */
   turn_abstention_reason?: ChatAbstentionReason | null;
+  /** The claims the stored answer made, so a reload cites the same passages. */
+  claims?: IClaim[];
 }
 
 interface IGetMessages {

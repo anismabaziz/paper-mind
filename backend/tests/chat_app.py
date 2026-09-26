@@ -177,8 +177,11 @@ class _ChatProvider(LLMProvider):
         raise NotImplementedError
 
     def _generate_response(self, query, context, prior_turns="") -> str:
-        """One-shot generation is not exercised over the chat boundary."""
-        raise NotImplementedError
+        """Answer a one-shot call, such as a citation repair, from the script."""
+        self._factory.completed.append((query, context, prior_turns))
+        index = min(self._factory.completions_used, len(self._factory.completions) - 1)
+        self._factory.completions_used += 1
+        return self._factory.completions[index]
 
     def _stream_response(self, query, context, prior_turns="") -> Iterator[str]:
         """Yield the planned fragments, raising the planned error where asked."""
@@ -199,9 +202,12 @@ class _ChatFactory:
     def __init__(self):
         """Start with a plan that answers normally."""
         self.streamed: list[tuple[str, str, str]] = []
+        self.completed: list[tuple[str, str, str]] = []
         self.plans: list[StreamPlan] = [StreamPlan()]
         self.attempts = 0
         self.credentials: ChatCredentials | None = None
+        self.completions: list[str] = [""]
+        self.completions_used = 0
 
     def __call__(self, credentials):
         """Build a streaming provider under the credentials the route resolved."""
@@ -231,6 +237,16 @@ class _ChatFactory:
         fails" describes a transient failure followed by a working provider.
         """
         self.plans = list(plans)
+
+    def complete_with(self, *replies: str) -> None:
+        """
+        Script what one-shot calls answer, such as a citation repair.
+
+        The last reply repeats, so a script that gives one repair covers both
+        "the first repair fixes it" and "every repair fails".
+        """
+        self.completions = list(replies)
+        self.completions_used = 0
 
 
 @pytest.fixture

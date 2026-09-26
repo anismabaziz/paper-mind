@@ -78,12 +78,23 @@ describe("chatStream", () => {
 
   it("carries the sources and truncation flag on a stored answer", async () => {
     const sources = [
-      { content: "chunk", document: "doc.pdf", chunk_index: 0, score: 0.9, page: 3 },
+      {
+        content: "chunk",
+        document: "doc.pdf",
+        chunk_index: 0,
+        score: 0.9,
+        page: 3,
+        source_id: "S1",
+        rank: 1,
+      },
     ];
     serve([
       `event: done\ndata: ${JSON.stringify({
         done: true,
         sources,
+        claims: [],
+        grounded: false,
+        prompt_version: "grounded-claims-v1",
         truncated: true,
         finish_reason: "length",
       })}`,
@@ -94,10 +105,66 @@ describe("chatStream", () => {
 
     expect(onDone).toHaveBeenCalledWith({
       sources,
+      claims: [],
+      grounded: false,
+      promptVersion: "grounded-claims-v1",
       retrieval: undefined,
       truncated: true,
       finishReason: "length",
     });
+  });
+
+  it("carries the claims and whether the answer is grounded on it", async () => {
+    serve([
+      `event: done\ndata: ${JSON.stringify({
+        done: true,
+        sources: [],
+        claims: [{ claim: "It is 42.", sources: ["S1"] }],
+        grounded: true,
+        prompt_version: "grounded-claims-v1",
+        truncated: false,
+        finish_reason: "stop",
+      })}`,
+    ]);
+    const onDone = vi.fn();
+
+    await chatStream("q", "doc.pdf", { onToken: vi.fn(), onDone });
+
+    expect(onDone).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claims: [{ claim: "It is 42.", sources: ["S1"] }],
+        grounded: true,
+      }),
+    );
+  });
+
+  it("reports citations that could not be resolved as their own outcome", async () => {
+    serve([
+      `event: citation_error\ndata: ${JSON.stringify({
+        error: "The answer cited a passage that was not supplied.",
+        category: "citations",
+      })}`,
+    ]);
+    const { seen, handlers } = collect();
+
+    await chatStream("q", "doc.pdf", handlers);
+
+    expect(seen).toEqual([
+      "provider_error:citations:The answer cited a passage that was not supplied.",
+    ]);
+  });
+
+  it("reports a claim list that is not a list as no claims", async () => {
+    serve([
+      'event: done\ndata: {"done":true,"sources":[],"claims":"nope","grounded":"yes","truncated":false}',
+    ]);
+    const onDone = vi.fn();
+
+    await chatStream("q", "doc.pdf", { onToken: vi.fn(), onDone });
+
+    expect(onDone).toHaveBeenCalledWith(
+      expect.objectContaining({ claims: [], grounded: false, promptVersion: null }),
+    );
   });
 
   it.each([

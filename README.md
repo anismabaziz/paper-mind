@@ -1,8 +1,9 @@
 # PaperMind
 
 Chat with your research papers. Upload a PDF, wait for it to index, then ask
-questions and get answers streamed in from an LLM, each grounded in the
-retrieved chunks of your document with the sources shown inline.
+questions and get answers streamed in from an LLM. Every claim in an answer
+names the passages of your document that support it, and clicking a citation
+opens the page it came from.
 
 This is a portfolio project built to run locally. It is PDF-only by design:
 the parser currently registers exactly one parser, for `.pdf`. There is
@@ -182,14 +183,28 @@ a single BYO key, a silent switch would hide the billing owner's error
 
 **One terminal event per answer.** The stream opens with `start` (the recorded
 Turn), carries `token` events, and ends with exactly one of `done`,
-`abstained`, `provider_error`, `persistence_error`, or `cancelled`. `done` is
-sent only after the Turn and its Citation Sources are committed, so a stored
-answer on screen is an answer in history. The browser rejects an event the
-protocol does not define, and treats a stream that ends without a terminal
-event as a failure — an indefinite loader would be indistinguishable from a
-slow answer. Each way an answer can end reads differently: a timeout, an empty
-answer, a provider failure, a save failure, and a stop are five separate
-messages, not one generic error.
+`abstained`, `provider_error`, `citation_error`, `persistence_error`, or
+`cancelled`. `done` is sent only after the Turn and its Citation Sources are
+committed, so a stored answer on screen is an answer in history. The browser
+rejects an event the protocol does not define, and treats a stream that ends
+without a terminal event as a failure — an indefinite loader would be
+indistinguishable from a slow answer. Each way an answer can end reads
+differently: a timeout, an empty answer, a provider failure, an unresolvable
+citation, a save failure, and a stop are six separate messages, not one generic
+error.
+
+**Citations that name something real.** Every retrieved Passage gets a stable
+id (`S1`, `S2`, …) and its retrieval rank before the model is called, and the
+model is asked to list the ids behind each claim it makes. A `done` event
+carries those claims, whether the answer is grounded in them, and the
+`prompt_version` the answer was produced under; the claims and ids are stored
+with the answer, so a reloaded transcript cites the same passages in the same
+order. An id that was never supplied is not a citation to a thin claim — the
+app asks the model to correct the mapping once, and if it still names a
+passage that does not exist, the turn ends as `citation_error` rather than
+showing a citation the reader cannot open. Retrieval scores stay internal:
+the interface shows rank and retrieval method, never a score dressed up as a
+confidence percentage.
 
 **Abstaining before it costs anything.** When retrieval leaves nothing usable
 — no passage for the question at all, or matches that cannot be read or cited —

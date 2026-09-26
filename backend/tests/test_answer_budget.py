@@ -452,10 +452,13 @@ def test_the_google_stream_reports_a_normalized_finish_reason():
 
 def test_the_prompt_is_trimmed_to_fit_the_models_input_budget():
     """A model that reads less than the app's own budgets still gets a fit prompt."""
+    from services.citations import assign_source_ids
     from services.chat_context import build_chat_context, token_count
     from services.retrieval.query_expansion import expand_query
 
-    sources = [{"content": "word " * 400, "chunk_index": n} for n in range(20)]
+    sources = assign_source_ids(
+        [{"content": "word " * 400, "chunk_index": n} for n in range(20)]
+    )
     query = "What does the paper say about retrieval?"
 
     chat_context = build_chat_context(
@@ -475,10 +478,11 @@ def test_the_prompt_is_trimmed_to_fit_the_models_input_budget():
 
 def test_an_input_budget_no_smaller_than_the_prompt_leaves_it_alone():
     """A generous input budget does not shrink a prompt that already fits."""
+    from services.citations import assign_source_ids
     from services.chat_context import build_chat_context
     from services.retrieval.query_expansion import expand_query
 
-    sources = [{"content": "short passage", "chunk_index": 0}]
+    sources = assign_source_ids([{"content": "short passage", "chunk_index": 0}])
     query = "What does the paper say?"
 
     chat_context = build_chat_context(

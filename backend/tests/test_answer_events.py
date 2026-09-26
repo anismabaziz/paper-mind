@@ -85,7 +85,7 @@ def test_a_stored_answer_ends_the_stream_with_success(client, app, fake_chat):
 
     events = ask(client, filename)
 
-    assert names(events) == ["start", "token", "token", "done"]
+    assert names(events) == ["start", "token", "token", "token", "done"]
     assert only(events, "done")["sources"][0]["content"] == "chunk about topic"
     assert only(events, "done")["retrieval"]["method"] == "hybrid"
 
@@ -98,9 +98,9 @@ def test_a_success_event_follows_the_committed_turn_and_its_sources(
     seen: list[list[dict]] = []
     original = repositories.conversations.complete_turn
 
-    def _watch(turn_id, answer, sources):
+    def _watch(turn_id, answer, sources, *, claims=None):
         """Record the stored turn, then let the real write happen."""
-        result = original(turn_id, answer, sources)
+        result = original(turn_id, answer, sources, claims=claims)
         seen.append(turns_of(repositories, filename))
         return result
 
@@ -126,7 +126,7 @@ def test_a_turn_closed_before_the_answer_saves_is_not_reported_as_stored(
 
     events = ask(client, filename)
 
-    assert names(events) == ["start", "token", "token", "persistence_error"]
+    assert names(events) == ["start", "token", "token", "token", "persistence_error"]
     assert "saved" in only(events, "persistence_error")["error"]
 
 
@@ -187,7 +187,7 @@ def test_a_transient_failure_before_visible_output_is_retried(
     events = ask(client, filename)
 
     assert fake_chat.attempts == 2
-    assert names(events) == ["start", "token", "done"]
+    assert names(events) == ["start", "token", "token", "done"]
     assert turns_of(repositories, filename)[0]["status"] == "answered"
 
 
@@ -236,7 +236,7 @@ def test_an_answer_that_cannot_be_saved_is_reported_as_a_persistence_error(
 
     events = ask(client, filename)
 
-    assert names(events) == ["start", "token", "token", "persistence_error"]
+    assert names(events) == ["start", "token", "token", "token", "persistence_error"]
     turn = turns_of(repositories, filename)[0]
     assert turn["status"] == "failed"
     assert turn["failure_reason"] == "answer could not be saved"

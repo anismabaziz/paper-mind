@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPane } from "./ChatPane";
 import { chatStream, reindexFile, StreamProtocolError, type IStreamHandlers } from "@/services/files";
-import { checkIsProcessed, getMessages } from "@/services/files";
+import { checkIsProcessed, getMessages, type IChatDone, type ISource } from "@/services/files";
 import usePdfStore from "@/store/pdf-state";
 import type { DocumentIndex, File } from "@/types/db";
 
@@ -202,7 +202,7 @@ describe("ChatPane answer outcomes", () => {
 
   it("sends the question for the open document", async () => {
     const [query, filename, handlers] = await ask((h) =>
-      h.onDone?.({ sources: [], truncated: false, finishReason: "stop" }),
+      h.onDone?.({ sources: [], claims: [], grounded: false, promptVersion: "grounded-claims-v1", truncated: false, finishReason: "stop" }),
     );
 
     expect(query).toBe("what?");
@@ -258,7 +258,7 @@ describe("ChatPane answer outcomes", () => {
 
   it("flags an answer the model cut short", async () => {
     await ask((h) =>
-      h.onDone?.({ sources: [], truncated: true, finishReason: "length" }),
+      h.onDone?.({ sources: [], claims: [], grounded: false, promptVersion: "grounded-claims-v1", truncated: true, finishReason: "length" }),
     );
 
     expect(outcomeOf("Synthesis · truncated")).toBe("truncated");
@@ -383,5 +383,195 @@ describe("ChatPane answer outcomes", () => {
     act(() => late?.("A token from the old document."));
 
     expect(screen.queryByText("A token from the old document.")).not.toBeInTheDocument();
+  });
+});
+
+const passage = (overrides: Partial<ISource> = {}): ISource => ({
+  content: "Gradient accumulation lets a small batch behave like a large one.",
+  document: "doc.pdf",
+  chunk_index: 0,
+  score: 0.9,
+  page: 4,
+  source_id: "S1",
+  rank: 1,
+  ...overrides,
+});
+
+function completes(overrides: Partial<IChatDone> = {}): IChatDone {
+  return {
+    sources: [],
+    claims: [],
+    grounded: false,
+    promptVersion: "grounded-claims-v1",
+    truncated: false,
+    finishReason: "stop",
+    ...overrides,
+  };
+}
+
+describe("ChatPane claim citations", () => {
+  beforeEach(() => {
+    vi.mocked(checkIsProcessed).mockResolvedValue({
+      is_processed: true,
+      ingestion: null,
+      index: { state: "ready", manifest, runtime_manifest: manifest, changes: [], change_details: [] },
+    });
+  });
+
+  it("lists each claim with the passages that support it", async () => {
+    await ask((h) => {
+      h.onToken?.("It accumulates gradients over a small batch.");
+      h.onDone?.(
+        completes({
+          sources: [passage()],
+          claims: [{ claim: "It is 42.", sources: ["S1"] }],
+          grounded: true,
+        }),
+      );
+    });
+
+    expect(await screen.findByText("It is 42.")).toBeInTheDocument();
+    expect(outcomeOf(/Synthesis/)).toBeUndefined();
+  });
+
+  it("opens the supporting page when a claim's citation is clicked", async () => {
+    await ask((h) =>
+      h.onDone?.(
+        completes({
+          sources: [passage({ page: 12 })],
+          claims: [{ claim: "It is 42.", sources: ["S1"] }],
+          grounded: true,
+        }),
+      ),
+    );
+
+    const citation = await screen.findByRole("button", { name: /Open page 12 for citation S1/ });
+    fireEvent.click(citation);
+
+    expect(usePdfStore.getState().citationTarget?.page).toBe(12);
+  });
+
+  it("offers no page to open when the supporting passage has none", async () => {
+    await ask((h) =>
+      h.onDone?.(
+        completes({
+          sources: [passage({ page: null })],
+          claims: [{ claim: "It is 42.", sources: ["S1"] }],
+          grounded: true,
+        }),
+      ),
+    );
+
+    const citation = await screen.findByRole("button", { name: /Citation S1, no page to open/ });
+
+    expect(citation).toBeDisabled();
+  });
+
+  it("does not call an answer grounded when no claim names a passage", async () => {
+    await ask((h) => {
+      h.onToken?.("Something the paper never said.");
+      h.onDone?.(
+        completes({
+          sources: [passage()],
+          claims: [{ claim: "Something the paper never said.", sources: [] }],
+          grounded: false,
+        }),
+      );
+    });
+
+    expect(await screen.findByText("Synthesis · ungrounded")).toBeInTheDocument();
+  });
+
+  it("shows the retrieval rank and method, not a confidence percentage", async () => {
+    await ask((h) =>
+      h.onDone?.(
+        completes({
+          sources: [passage({ score: 0.87 })],
+          claims: [{ claim: "It is 42.", sources: ["S1"] }],
+          grounded: true,
+          retrieval: { method: "hybrid", outcome: "success" },
+        }),
+      ),
+    );
+
+    expect(await screen.findByText(/hybrid retrieval/)).toBeInTheDocument();
+    expect(screen.getByText(/Rank 1/)).toBeInTheDocument();
+    expect(screen.queryByText(/87%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/match/)).not.toBeInTheDocument();
+  });
+
+  it("calls an answer nothing while it is still arriving", async () => {
+    await ask((h) => h.onToken?.("Streaming in."));
+
+    expect(outcomeOf("Synthesis · answering")).toBe("answering");
+  });
+
+  it("calls a completed answer grounded only once a claim has cited something", async () => {
+    await ask((h) =>
+      h.onDone?.(
+        completes({
+          sources: [passage()],
+          claims: [{ claim: "Streaming in.", sources: ["S1"] }],
+          grounded: true,
+        }),
+      ),
+    );
+
+    expect(outcomeOf("Synthesis · grounded")).toBeUndefined();
+  });
+
+  it("marks a claim the paper did not back as unsupported", async () => {
+    await ask((h) =>
+      h.onDone?.(
+        completes({
+          sources: [passage()],
+          claims: [{ claim: "The paper never said this.", sources: [] }],
+          grounded: false,
+        }),
+      ),
+    );
+
+    expect(await screen.findByText("The paper never said this.")).toBeInTheDocument();
+    expect(screen.getByText("not supported")).toBeInTheDocument();
+    expect(outcomeOf("Synthesis · ungrounded")).toBe("ungrounded");
+  });
+
+  it("shows citations that could not be resolved as their own outcome", async () => {
+    await ask((h) => h.onProviderError?.("The answer cited a passage that was not supplied.", "citations"));
+
+    expect(outcomeOf("Synthesis · failed")).toBe("citations");
+  });
+
+  it("replays a stored answer with its claims from history", async () => {
+    vi.mocked(getMessages).mockResolvedValue({
+      messages: [
+        {
+          id: "t1-user",
+          text: "what?",
+          sender: "user",
+          sources: [],
+          created_at: "2026-09-26T10:00:00+00:00",
+          turn_id: "t1",
+          turn_sequence: 1,
+          turn_status: "answered",
+        },
+        {
+          id: "t1-bot",
+          text: "It accumulates gradients.",
+          sender: "bot",
+          sources: [passage({ page: 9 })],
+          claims: [{ claim: "It accumulates gradients.", sources: ["S1"] }],
+          created_at: "2026-09-26T10:00:01+00:00",
+          turn_id: "t1",
+          turn_sequence: 1,
+          turn_status: "answered",
+        },
+      ],
+    });
+    renderPane();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Open page 9 for citation S1/ }));
+
+    expect(usePdfStore.getState().citationTarget?.page).toBe(9);
   });
 });
