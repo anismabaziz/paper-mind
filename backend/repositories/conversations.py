@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db import (
+    TURN_ABSTAINED,
     TURN_ANSWERED,
     TURN_CANCELLED,
     TURN_FAILED,
@@ -17,6 +18,7 @@ from db import (
     Source,
     Turn,
 )
+from services.abstention import AbstentionReason
 from repositories.base import BaseRepository
 
 # Two callers can pick the same next sequence when they read the maximum at
@@ -130,6 +132,15 @@ class ConversationRepository(BaseRepository):
         """Record an answer and its ordered citation sources on a pending turn."""
         return self._finish_turn(turn_id, TURN_ANSWERED, answer, sources, None)
 
+    def abstain_turn(self, turn_id: str, answer: str, reason: AbstentionReason) -> bool:
+        """
+        Record that the app answered without a model call.
+
+        No citation sources come with it: there was no evidence to cite, and a
+        Passage that was never read is not a source.
+        """
+        return self._finish_turn(turn_id, TURN_ABSTAINED, answer, None, None, reason)
+
     def fail_turn(self, turn_id: str, message: str, reason: str) -> bool:
         """Record a terminal failure with the reply the user was shown."""
         return self._finish_turn(turn_id, TURN_FAILED, message, None, reason)
@@ -145,6 +156,7 @@ class ConversationRepository(BaseRepository):
         answer: str | None,
         sources: list[dict[str, Any]] | None,
         failure_reason: str | None,
+        abstention_reason: str | None = None,
     ) -> bool:
         """Close one pending turn, leaving a turn that already ended untouched."""
         with self._session_factory() as session, session.begin():
@@ -157,6 +169,7 @@ class ConversationRepository(BaseRepository):
             turn.status = status
             turn.answer = answer
             turn.failure_reason = failure_reason
+            turn.abstention_reason = abstention_reason
             turn.completed_at = datetime.now(timezone.utc)
             for source in sources or []:
                 session.add(
@@ -187,6 +200,7 @@ class ConversationRepository(BaseRepository):
                     "answer": turn.answer,
                     "status": turn.status,
                     "failure_reason": turn.failure_reason,
+                    "abstention_reason": turn.abstention_reason,
                     "started_at": _isoformat(turn.created_at),
                     "completed_at": _isoformat(turn.completed_at),
                     "sources": [
@@ -268,6 +282,7 @@ class ConversationRepository(BaseRepository):
                         "turn_id": turn["id"],
                         "turn_sequence": turn["sequence"],
                         "turn_status": turn["status"],
+                        "turn_abstention_reason": turn["abstention_reason"],
                     }
                 )
         return messages

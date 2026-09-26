@@ -37,6 +37,9 @@ function collect() {
       seen.push(`persistence_error:${message}`),
     ),
     onCancelled: vi.fn((reason: string) => seen.push(`cancelled:${reason}`)),
+    onAbstained: vi.fn(({ message, reason }: { message: string; reason: string }) =>
+      seen.push(`abstained:${reason}:${message}`),
+    ),
     onDone: vi.fn(() => seen.push("done")),
   };
   return { seen, handlers };
@@ -126,6 +129,49 @@ describe("chatStream", () => {
     await chatStream("q", "doc.pdf", handlers);
 
     expect(seen).toEqual(["cancelled:document deleted"]);
+  });
+
+  it("reports an abstention and why, without a failure", async () => {
+    serve([
+      'event: start\ndata: {"turn_id":"abc"}',
+      `event: abstained\ndata: ${JSON.stringify({
+        abstained: true,
+        message: "This paper has no passage that speaks to this question.",
+        reason: "no_evidence",
+        retrieved: 0,
+        retrieval: { method: "hybrid", outcome: "empty" },
+      })}`,
+    ]);
+    const { seen, handlers } = collect();
+
+    await chatStream("q", "doc.pdf", handlers);
+
+    expect(seen).toEqual([
+      "start",
+      "abstained:no_evidence:This paper has no passage that speaks to this question.",
+    ]);
+    expect(handlers.onProviderError).not.toHaveBeenCalled();
+    expect(handlers.onDone).not.toHaveBeenCalled();
+  });
+
+  it("rejects an abstention with a reason it does not know", async () => {
+    serve([
+      'event: abstained\ndata: {"abstained":true,"message":"x","reason":"vibes"}',
+    ]);
+    const { handlers } = collect();
+
+    await expect(chatStream("q", "doc.pdf", handlers)).rejects.toThrow(
+      StreamProtocolError,
+    );
+  });
+
+  it("rejects an abstention with no message", async () => {
+    serve(['event: abstained\ndata: {"abstained":true,"reason":"no_evidence"}']);
+    const { handlers } = collect();
+
+    await expect(chatStream("q", "doc.pdf", handlers)).rejects.toThrow(
+      StreamProtocolError,
+    );
   });
 
   it("rejects a stream that ends without a terminal event", async () => {

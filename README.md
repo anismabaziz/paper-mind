@@ -182,14 +182,23 @@ a single BYO key, a silent switch would hide the billing owner's error
 
 **One terminal event per answer.** The stream opens with `start` (the recorded
 Turn), carries `token` events, and ends with exactly one of `done`,
-`provider_error`, `persistence_error`, or `cancelled`. `done` is sent only
-after the Turn and its Citation Sources are committed, so a stored answer on
-screen is an answer in history. The browser rejects an event the protocol does
-not define, and treats a stream that ends without a terminal event as a
-failure — an indefinite loader would be indistinguishable from a slow answer.
-Each way an answer can end reads differently: a timeout, an empty answer, a
-provider failure, a save failure, and a stop are five separate messages, not
-one generic error.
+`abstained`, `provider_error`, `persistence_error`, or `cancelled`. `done` is
+sent only after the Turn and its Citation Sources are committed, so a stored
+answer on screen is an answer in history. The browser rejects an event the
+protocol does not define, and treats a stream that ends without a terminal
+event as a failure — an indefinite loader would be indistinguishable from a
+slow answer. Each way an answer can end reads differently: a timeout, an empty
+answer, a provider failure, a save failure, and a stop are five separate
+messages, not one generic error.
+
+**Abstaining before it costs anything.** When retrieval leaves nothing usable
+— no passage for the question at all, or matches that cannot be read or cited —
+the app says so itself and never calls the provider. The exchange is stored as
+a completed Turn carrying a machine-readable reason, with no Citation Sources
+invented for it, and the reason travels into history so a reload still shows an
+abstention rather than a blank answer. An unreachable vector store is not an
+abstention: that stays an error the user can retry, so an outage is never
+replayed as a considered refusal.
 
 **Bounded by the model's own budget.** Every catalogued model declares an
 input budget, an answer budget, a generation timeout, and the finish reasons

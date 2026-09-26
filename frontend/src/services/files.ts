@@ -94,6 +94,20 @@ export interface IRetrievalResult {
 /** Why the model could not answer. Each one reads differently to the user. */
 export type ChatFailureCategory = "provider" | "timeout" | "empty_output";
 
+/**
+ * Why the app answered without asking a model.
+ *
+ * An empty index and a result that cannot be cited are different problems, and
+ * the user reads them differently, so they are not one reason.
+ */
+export type ChatAbstentionReason = "no_evidence" | "evidence_unusable";
+
+export interface IChatAbstained {
+  message: string;
+  reason: ChatAbstentionReason;
+  retrieval?: IRetrievalResult;
+}
+
 export interface IChatDone {
   sources: ISource[];
   retrieval?: IRetrievalResult;
@@ -108,6 +122,7 @@ export interface IStreamHandlers {
   onProviderError?: (message: string, category: ChatFailureCategory) => void;
   onPersistenceError?: (message: string) => void;
   onCancelled?: (reason: string) => void;
+  onAbstained?: (result: IChatAbstained) => void;
   onDone: (result: IChatDone) => void;
 }
 
@@ -125,6 +140,8 @@ export class StreamProtocolError extends Error {
 }
 
 const FAILURE_CATEGORIES: ChatFailureCategory[] = ["provider", "timeout", "empty_output"];
+
+const ABSTENTION_REASONS: ChatAbstentionReason[] = ["no_evidence", "evidence_unusable"];
 
 const ENDED_WITHOUT_ANSWER =
   "The answer stream ended before it finished. Please ask the question again.";
@@ -177,6 +194,18 @@ function dispatch(
     case "cancelled":
       handlers.onCancelled?.(readString(data, "reason", name));
       return true;
+    case "abstained": {
+      const reason = data.reason;
+      if (!ABSTENTION_REASONS.includes(reason as ChatAbstentionReason)) {
+        throw new StreamProtocolError("The abstained event has no reason.");
+      }
+      handlers.onAbstained?.({
+        message: readString(data, "message", name),
+        reason: reason as ChatAbstentionReason,
+        retrieval: data.retrieval as IRetrievalResult | undefined,
+      });
+      return true;
+    }
     case "done": {
       const { sources, retrieval, truncated, finish_reason: finishReason } = data;
       handlers.onDone({
@@ -277,7 +306,9 @@ export interface IMessage {
   created_at: string;
   turn_id: string;
   turn_sequence: number;
-  turn_status: 'pending' | 'answered' | 'failed' | 'cancelled' | 'unanswered';
+  turn_status: 'pending' | 'answered' | 'failed' | 'cancelled' | 'abstained' | 'unanswered';
+  /** Set when the app answered without a model call. */
+  turn_abstention_reason?: ChatAbstentionReason | null;
 }
 
 interface IGetMessages {

@@ -54,7 +54,7 @@ ADMIN_DATABASE_URL = os.getenv(
 )
 QDRANT_URL = os.getenv("FULL_STACK_QDRANT_URL", "http://127.0.0.1:56333")
 PRE_TURN_REVISION = "c3d7e1f4a9b2"
-CURRENT_REVISION = "e5b7d2c4a918"
+CURRENT_REVISION = "b3a7c9e1f4d2"
 
 
 @dataclass(frozen=True)
@@ -1240,6 +1240,41 @@ def test_an_answer_that_postgres_cannot_save_closes_the_turn_as_failed(full_stac
     assert turn["completed_at"]
     history = harness.client.get(f"/messages?filename={filename}").json()["messages"]
     assert [message["turn_status"] for message in history] == ["failed", "failed"]
+
+
+@pytest.mark.full_stack
+def test_an_index_with_no_passage_abstains_without_calling_the_model(full_stack_app):
+    """Real Qdrant, real Postgres: an empty result is answered by the app."""
+    harness = full_stack_app
+    _configure_chat(harness)
+    filename = _upload_sample(harness)
+    _process(harness, filename)
+    # The document stays indexed and its manifest stays current, but the points
+    # are gone: retrieval finds nothing for any question, and the index cannot
+    # say why. That is an abstention, not an outage.
+    harness.vector_store.delete(filter={"pdf_name": filename})
+
+    response = harness.client.post(
+        "/response", json={"query": "What is a RAG pipeline?", "filename": filename}
+    )
+
+    assert response.status_code == 200, response.text
+    events = parse_sse(response.text)
+    assert [name for name, _ in events] == ["start", "abstained"]
+    abstained = events[-1][1]
+    assert abstained["abstained"] is True
+    assert abstained["reason"] == "no_evidence"
+    assert abstained["retrieval"]["outcome"] == "empty"
+    assert harness.chat.streamed == []
+    turn = _turns(harness, filename)[-1]
+    assert turn["status"] == "abstained"
+    assert turn["abstention_reason"] == "no_evidence"
+    assert turn["sources"] == []
+    history = harness.client.get(f"/messages?filename={filename}").json()["messages"]
+    assert [message["turn_status"] for message in history] == [
+        "abstained",
+        "abstained",
+    ]
 
 
 @pytest.mark.full_stack

@@ -28,6 +28,13 @@ from services.retrieval.vector_service import FETCH_K
 from tests.ingestion_helpers import build_test_worker
 
 CHUNK = Chunk(text="chunk about topic", page_no=1, chunk_index=0, content_hash="hash-0")
+DEFAULT_MATCH = {
+    "content": "chunk about topic",
+    "document": "doc.pdf",
+    "chunk_index": 0,
+    "score": 0.9,
+    "page": 1,
+}
 
 
 def in_memory_session_factory():
@@ -77,7 +84,20 @@ class _Storage:
 
 
 class _Vectors:
-    """Fixed-match stand-in for the vector service."""
+    """Scripted-match stand-in for the vector service."""
+
+    def __init__(self):
+        """Start with one grounded match, or whatever a test scripts in."""
+        self.matches: list[dict[str, Any]] = [DEFAULT_MATCH]
+        self.raise_with: BaseException | None = None
+
+    def script(self, *matches: dict[str, Any]) -> None:
+        """Return exactly these matches for the next questions."""
+        self.matches = list(matches)
+
+    def fail_with(self, error: BaseException) -> None:
+        """Make the next retrieval raise, as an unreachable store would."""
+        self.raise_with = error
 
     def upsert_chunks(self, embeddings, chunks, filename, **kwargs):
         """Accept an upsert without storing anything."""
@@ -85,19 +105,13 @@ class _Vectors:
     def query_vectors(
         self, embedding, filename, top_k=FETCH_K, query_text=None, **kwargs
     ):
-        """Return one grounded source."""
+        """Return the scripted matches, or raise what the test scripted."""
+        if self.raise_with is not None:
+            raise self.raise_with
         return RetrievalResult(
-            sources=[
-                {
-                    "content": "chunk about topic",
-                    "document": "doc.pdf",
-                    "chunk_index": 0,
-                    "score": 0.9,
-                    "page": 1,
-                }
-            ],
+            sources=[dict(match) for match in self.matches],
             method="hybrid",
-            outcome="success",
+            outcome="success" if self.matches else "empty",
         )
 
     def delete_by_filename(self, filename):
