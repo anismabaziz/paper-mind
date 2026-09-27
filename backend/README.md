@@ -238,3 +238,44 @@ uv run python -m evaluation.cli --live \
 A live run stores the sample documents under an `eval-` prefix and deletes
 them afterwards. The index lives at `http://localhost:6333` (compose exposes
 6333→6333 and 6334→6334).
+
+### Reports and ablations
+
+A number on its own is a claim, so `--report` writes what a reviewer can check
+beside it. The directory holds a `manifest.json` — the revision, the case set
+version and split, every document's content hash, every document's index
+manifest and generation, the prompt version, the models and their revisions,
+the settings, and the environment, including the retrieval implementation's own
+versions — one `results/<experiment>.json` per experiment, and a `README.md`
+summary with the table, the questions that moved, and what the run did not
+measure.
+
+The experiments themselves are declared in `evaluation/experiments.py`, one
+question each: dense only, sparse only, hybrid only, reranking on, candidate
+depth 10 and 100, query expansion off and on, and two chunking policies. Every
+value was chosen on the tuning split, and the loader refuses an experiment that
+claims to have been chosen on the split the result is quoted from. A retrieval
+variant is measured against the index that already exists; a chunking variant
+indexes the documents again, because different chunks are different vectors.
+
+```bash
+uv run python -m evaluation.cli --live --ablate --report evaluation/reports/<name>
+```
+
+`--ablate` measures retrieval only, so it needs no key and reports no answer,
+citation, abstention, token, or dollar figure — the manifest says so rather than
+leaving those cells looking empty. The published report in
+`evaluation/reports/2026-09-retrieval-baseline-v1/` is one of these: real
+documents, real BGE-M3 embeddings, real Qdrant, retrieval only.
+
+Re-running says whether the run reproduced the published one:
+
+```bash
+uv run python -m evaluation.cli --live --ablate \
+  --report /tmp/rerun --compare-report evaluation/reports/2026-09-retrieval-baseline-v1
+```
+
+Timing and dollars are deliberately outside the manifest's digest, because they
+move on every run; what a reproduction is judged on is the retrieval numbers,
+the outcomes, the verdicts, and a changed model revision, which is reported on
+its own since a checkout cannot pin that.

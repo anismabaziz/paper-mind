@@ -22,11 +22,20 @@ Cost is reported per answered case from the tokens the run measured.
 Free local (no keys, default):
     docker compose up qdrant                          # http://localhost:6333
     uv run python -m evaluation.cli --live --no-judge  # retrieval only, no LLM
+    uv run python -m evaluation.cli --live --ablate --report evaluation/reports/base
 
 With generation and a model judge:
     export PAPERMIND_EVAL_GENERATOR_API_KEY=...
     export PAPERMIND_EVAL_JUDGE_API_KEY=...
     uv run python -m evaluation.cli --live
+
+``--report`` writes what a reviewer reads without running anything: a manifest
+holding the revision, the case set, the document hashes, the index manifests,
+the prompts, the models, the settings, and the environment, plus one file per
+experiment and a summary. ``--ablate`` measures the declared retrieval
+experiments against the same labeled cases instead of asking a model, so it
+needs no key; ``--compare-report`` says whether this run reproduces a
+published one and names the field that moved.
 
 Qdrant local URL is ``http://localhost:6333`` on the host
 (``http://qdrant:6333`` inside compose, via ``QDRANT_URL``).
@@ -38,6 +47,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 
 import settings as settings_module
@@ -54,6 +64,7 @@ from services.llm.factory import build_chat_provider
 from settings import Settings
 from storage import get_storage
 
+from evaluation import ablations, experiments, report
 from evaluation.dataset import REPORTED, SPLITS, load_dataset
 from evaluation.evaluator import DEFAULT_K, evaluate
 from evaluation.harness import build_environment, remove_documents
@@ -158,6 +169,47 @@ def with_rerank(base: Settings, enabled: bool) -> Settings:
     )
 
 
+def _environment(
+    dataset,
+    app_settings: Settings,
+    documents_prefix: str,
+    rerank_enabled: bool | None = None,
+):
+    """
+    Build the application a run measures: real documents, real retrieval.
+
+    The reranker follows the settings' gate, because that gate is what a reader
+    runs with. An ablation passes ``rerank_enabled=True`` to load the reranker
+    even when the gate is off, so that a variant can turn it on for one call
+    over an index the other variants share.
+    """
+    from services.embeddings.local_embeddings import LocalEmbeddingService
+    from services.retrieval.reranker import RerankerService
+    from services.retrieval.vector_service import VectorService
+
+    settings_module.set_settings(app_settings)
+    return build_environment(
+        dataset,
+        settings=app_settings,
+        session_factory=None,
+        storage=get_storage(),
+        embedding_service=LocalEmbeddingService(app_settings.embedding.embedding_model),
+        vector_service=VectorService(
+            get_vector_index(),
+            RerankerService(
+                app_settings.rerank.rerank_model,
+                enabled=(
+                    app_settings.rerank.enabled
+                    if rerank_enabled is None
+                    else rerank_enabled
+                ),
+            ),
+        ),
+        chat_provider_factory=generator_factory(),
+        documents_prefix=documents_prefix,
+    )
+
+
 def _run_once(
     dataset,
     app_settings: Settings,
@@ -169,28 +221,10 @@ def _run_once(
     k: int = DEFAULT_K,
     calibrate: bool = True,
     split: str = REPORTED,
+    include_faults: bool = False,
 ) -> dict:
     """Index the documents, run one split of the set, and clean up after itself."""
-    from services.embeddings.local_embeddings import LocalEmbeddingService
-    from services.retrieval.reranker import RerankerService
-    from services.retrieval.vector_service import VectorService
-
-    settings_module.set_settings(app_settings)
-    environment = build_environment(
-        dataset,
-        settings=app_settings,
-        session_factory=None,
-        storage=get_storage(),
-        embedding_service=LocalEmbeddingService(app_settings.embedding.embedding_model),
-        vector_service=VectorService(
-            get_vector_index(),
-            RerankerService(
-                app_settings.rerank.rerank_model, enabled=app_settings.rerank.enabled
-            ),
-        ),
-        chat_provider_factory=generator_factory(),
-        documents_prefix=EVAL_PREFIX,
-    )
+    environment = _environment(dataset, app_settings, EVAL_PREFIX)
     try:
         started = time.monotonic()
         report = evaluate(
@@ -223,6 +257,7 @@ def run(
     compare_rerank: bool = False,
     calibrate: bool = True,
     split: str = REPORTED,
+    include_faults: bool = False,
 ) -> dict:
     """
     Run the labeled case set through the production answer path.
@@ -265,6 +300,7 @@ def run(
                     k=k,
                     calibrate=calibrate,
                     split=split,
+                    include_faults=include_faults,
                 )
                 for label, enabled in (("off", False), ("on", True))
             }
@@ -279,7 +315,112 @@ def run(
         k=k,
         calibrate=calibrate,
         split=split,
+        include_faults=include_faults,
     )
+
+
+def run_ablations(
+    dataset,
+    live: bool,
+    k: int = DEFAULT_K,
+    split: str = REPORTED,
+) -> list[dict]:
+    """
+    Measure the declared experiments against the same labeled cases.
+
+    Retrieval only, so this measures nothing a model wrote and says so: the
+    report it produces carries no answer, citation, abstention, token, or dollar
+    figure. What it does carry is a column per experiment, a per-question row
+    for every number, and a comparison against the baseline that names the
+    questions that moved.
+    """
+    if not live:
+        sys.exit(
+            "Refusing to run a live evaluation by default. Add --live to index "
+            "the documents and retrieve the questions for real."
+        )
+    settings_module.validate()
+    base_settings = settings_module.get_settings()
+    cases = dataset.cases_for(split)
+    measured = ablations.run(
+        experiments.REGISTRY,
+        cases,
+        lambda experiment: _environment(
+            dataset,
+            experiment.settings(base_settings),
+            f"{EVAL_PREFIX}{experiment.id}-",
+            rerank_enabled=True,
+        ),
+        dataset=dataset,
+        k=k,
+        close=_release,
+    )
+    results = []
+    for baseline, variant in zip(measured, measured[1:]):
+        results.append(
+            {
+                **variant.as_dict(),
+                "comparison": ablations.compare(baseline, variant).as_dict(),
+            }
+        )
+    # The baseline is compared with itself: nothing moved, and saying so is
+    # what makes the other columns' differences readable as differences.
+    results.insert(
+        0,
+        {
+            **measured[0].as_dict(),
+            "comparison": ablations.compare(measured[0], measured[0]).as_dict(),
+        },
+    )
+    return results
+
+
+def _release(environment) -> None:
+    """Delete an environment's Documents and their vectors, restoring the app."""
+    remove_documents(environment)
+    settings_module.set_settings(None)
+
+
+def result_of_run(run_record: dict) -> dict:
+    """
+    Return one answer-path run in the shape a report stores results in.
+
+    The evidence section is what a reader goes to first: it says which of the
+    numbers in the result a model decided, which a deterministic grader decided,
+    and which the run could not measure at all.
+    """
+    return {
+        "experiment": experiments.BASELINE.id,
+        "family": experiments.BASELINE.family,
+        "dataset": run_record["run"]["dataset"],
+        "split": run_record["run"]["split"],
+        "index": run_record["run"]["documents"],
+        "retrieval": run_record["retrieval"],
+        "answers": run_record["answers"],
+        "latency": run_record["latency"],
+        "cost": run_record["cost"],
+        "calibration": run_record.get("calibration"),
+        "cases": run_record["cases"],
+        "evidence": report.evidence_from_run(run_record),
+    }
+
+
+def publish(
+    dataset,
+    results: list[dict],
+    directory,
+    run_records: list[dict] | None = None,
+) -> Path:
+    """Write a report directory a reviewer can read without running anything."""
+    settings = settings_module.get_settings()
+    manifest = report.build_manifest(
+        dataset=dataset,
+        settings=settings,
+        results=results,
+        run_records=run_records or [],
+        revision=report.git_revision(),
+    )
+    return report.write_report(Path(directory), manifest, results)
 
 
 def _seconds(summary: dict) -> str:
@@ -301,15 +442,15 @@ def _mean(metric: dict) -> str:
     )
 
 
-def _print(report: dict) -> None:
+def _print(run_report: dict) -> None:
     """Print a run as a short operator-facing summary."""
-    if "rerank" in report:
-        for label, run_record in report["rerank"].items():
+    if "rerank" in run_report:
+        for label, run_record in run_report["rerank"].items():
             print(f"--- rerank {label} ---")
             _print(run_record)
         return
-    run_record = report["run"]
-    retrieval = report["retrieval"]
+    run_record = run_report["run"]
+    retrieval = run_report["retrieval"]
     judged_by = run_record.get("judge")
     held_back = run_record["held_back"]
     print(
@@ -336,10 +477,10 @@ def _print(report: dict) -> None:
         f"recall {retrieval['recall']:.2f}  mrr {retrieval['mrr']:.2f}  "
         f"ndcg {retrieval['ndcg']:.2f}  ({retrieval['questions']} questions)"
     )
-    outcomes = {name: count for name, count in report["outcomes"].items() if count}
+    outcomes = {name: count for name, count in run_report["outcomes"].items() if count}
     if outcomes:
         print("Outcomes: " + ", ".join(f"{k}={v}" for k, v in outcomes.items()))
-    answers = report["answers"]
+    answers = run_report["answers"]
     print(
         f"Answers: {answers['generated']} generated, {answers['truncated']} truncated, "
         "finish reasons "
@@ -360,20 +501,20 @@ def _print(report: dict) -> None:
         ("Latency (steady state)", "steady_state"),
         ("  cold start", "cold_start"),
     ):
-        measured = report["latency"][phase]
+        measured = run_report["latency"][phase]
         print(
             f"{label}: retrieval {_seconds(measured['retrieval_seconds'])}, first "
             f"token {_seconds(measured['first_token_seconds'])}, total "
             f"{_seconds(measured['total_seconds'])}"
         )
-    cost = report["cost"]
+    cost = run_report["cost"]
     print(
         f"Cost: ${cost['usd']:.4f} over {cost['priced_cases']} answered cases "
         f"({cost['input_tokens']} in, {cost['output_tokens']} out) at "
         f"{cost['model']} ${cost['input_cost_per_million_usd']}/"
         f"${cost['output_cost_per_million_usd']} per million"
     )
-    calibration = report.get("calibration")
+    calibration = run_report.get("calibration")
     if calibration:
         agreement = calibration["agreement"]
         print(
@@ -385,7 +526,7 @@ def _print(report: dict) -> None:
                 else f"the judge decided none of {calibration['cases']} labelled cases"
             )
         )
-    for case in report["cases"]:
+    for case in run_report["cases"]:
         line = f"  {case['id']}: {case['outcome']}"
         if case["hit_at_k"] is not None:
             line += (
@@ -459,6 +600,32 @@ def main(argv=None):
         action="store_true",
         help="run with and without reranking and report both",
     )
+    parser.add_argument(
+        "--include-faults",
+        action="store_true",
+        help=(
+            "ask the cases that need a fault injected too, which only reach "
+            "their expected outcome in a run that injects it"
+        ),
+    )
+    parser.add_argument(
+        "--ablate",
+        action="store_true",
+        help=(
+            "measure the declared retrieval experiments against the same cases "
+            "instead of asking a model (no provider key needed)"
+        ),
+    )
+    parser.add_argument(
+        "--report",
+        metavar="DIRECTORY",
+        help="write a report — manifest, one file per experiment, and a summary",
+    )
+    parser.add_argument(
+        "--compare-report",
+        metavar="DIRECTORY",
+        help="say whether this run reproduces the report in DIRECTORY, and what moved",
+    )
     args = parser.parse_args(argv)
     for provider, model in (
         (args.provider, args.model),
@@ -476,7 +643,9 @@ def main(argv=None):
     elif args.rerank_off:
         rerank = False
 
-    report = run(
+    if args.ablate:
+        return _ablation_main(args)
+    run_report = run(
         live=args.live,
         use_judge=not args.no_judge,
         k=args.k,
@@ -488,11 +657,66 @@ def main(argv=None):
         compare_rerank=args.compare_rerank,
         calibrate=not args.no_calibration,
         split=args.split,
+        include_faults=args.include_faults,
     )
+    if args.report:
+        _publish_report([result_of_run(run_report)], [run_report["run"]], args)
     if args.as_json:
-        print(json.dumps(report, indent=2))
+        print(json.dumps(run_report, indent=2))
         return
-    _print(report)
+    _print(run_report)
+
+
+def _ablation_main(args) -> None:
+    """Measure the declared experiments, print them, and publish a report."""
+    dataset = load_dataset()
+    results = run_ablations(dataset, args.live, k=args.k, split=args.split)
+    if args.report:
+        _publish_report(results, [], args)
+    if args.as_json:
+        print(json.dumps(results, indent=2))
+        return
+    _print_ablations(results)
+
+
+def _publish_report(results, run_records, args) -> None:
+    """Write the report, then say whether it reproduces a published one."""
+    directory = publish(load_dataset(), results, args.report, run_records)
+    print(f"Report written to {directory}")
+    if args.compare_report:
+        outcome = report.reproduction(directory, Path(args.compare_report))
+        if outcome["reproduced"]:
+            print(f"Reproduces {args.compare_report}: every field matches")
+        else:
+            print(f"Does not reproduce {args.compare_report}:")
+            for change in outcome["changes"]:
+                print(f"  {change['field']}: {change['before']} -> {change['after']}")
+        for change in outcome["model_revisions_changed"]:
+            print(
+                f"  model revision moved: {change['field']} "
+                f"{change['before'] or '(unpinned)'} -> {change['after'] or '(unpinned)'}"
+            )
+
+
+def _print_ablations(results: list[dict]) -> None:
+    """Print the comparison of experiments as a table, from the report's columns."""
+    print(
+        f"{'experiment':<24} {'hit':>6} {'recall':>7} {'mrr':>6} {'ndcg':>6} "
+        f"{'p50 (s)':>9} {'p95 (s)':>9}"
+    )
+    for column in report.columns(results):
+        print(
+            f"{column.id:<24} {column.hit_rate:>6.2f} {column.recall:>7.2f} "
+            f"{column.mrr:>6.2f} {column.ndcg:>6.2f} {column.p50:>9.4f} "
+            f"{column.p95:>9.4f}"
+        )
+    for result in results:
+        for direction in ("regressions", "improvements"):
+            for row in result["comparison"][direction]:
+                print(
+                    f"  {result['experiment']} {direction[:-1]}: {row['id']} "
+                    f"ndcg {row['delta']['ndcg_at_k']:+.2f}"
+                )
 
 
 if __name__ == "__main__":

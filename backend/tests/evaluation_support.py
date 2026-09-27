@@ -335,3 +335,50 @@ class ScriptedChatFactory:
 def timeout_error() -> ProviderTimeoutError:
     """Return the failure a stalled provider raises."""
     return ProviderTimeoutError("scripted timeout")
+
+
+def in_memory_sessions():
+    """Return a session factory over a fresh in-memory database."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from db import Base
+
+    engine = create_engine(
+        "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)
+
+
+def build_environment_for(
+    dataset,
+    settings_obj,
+    storage_root,
+    *,
+    store=None,
+    prefix: str = "",
+    chat_factory=None,
+):
+    """
+    Index the case set's documents into a working application.
+
+    The evaluation tests all need the same thing: the real repositories, the
+    real ingestion worker, and the real retrieval service over a store that
+    keeps both vector representations, with only the embedding weights, the
+    vector database, and the provider substituted.
+    """
+    from evaluation.harness import build_environment
+    from services.retrieval.vector_service import VectorService
+
+    return build_environment(
+        dataset,
+        settings=settings_obj,
+        session_factory=in_memory_sessions(),
+        storage=InMemoryStorage(storage_root),
+        embedding_service=HashingEmbeddingService(),
+        vector_service=VectorService(store or InMemoryVectorStore()),
+        chat_provider_factory=chat_factory or ScriptedChatFactory(),
+        documents_prefix=prefix,
+    )

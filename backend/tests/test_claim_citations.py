@@ -28,9 +28,7 @@ def answer_with(*claims: dict) -> str:
 
 def ask(client, filename, query="What is the answer?"):
     """Ask one question and return the events the browser would receive."""
-    response = client.post(
-        "/response", json={"query": query, "filename": filename}
-    )
+    response = client.post("/response", json={"query": query, "filename": filename})
     return parse_sse(response.get_data(as_text=True))
 
 
@@ -84,9 +82,7 @@ def test_the_claims_block_never_reaches_the_reader_as_text(client, fake_chat, do
 
     events = ask(client, document)
 
-    streamed = "".join(
-        payload["text"] for name, payload in events if name == "token"
-    )
+    streamed = "".join(payload["text"] for name, payload in events if name == "token")
     assert "<claims>" not in streamed
     assert '{"claim"' not in streamed
 
@@ -96,13 +92,17 @@ def test_an_invented_source_id_is_repaired_once_and_the_answer_completes(
 ):
     """Do test an invented source id is repaired once and the answer completes."""
     fake_chat.stream(answer_with({"claim": "The answer is 42.", "sources": ["S7"]}))
-    fake_chat.complete_with(claims_block([{"claim": "The answer is 42.", "sources": ["S1"]}]))
+    fake_chat.complete_with(
+        claims_block([{"claim": "The answer is 42.", "sources": ["S1"]}])
+    )
 
     events = ask(client, document)
 
     assert names_of(events)[0] == "start"
     assert names_of(events)[-1] == "done"
-    assert done_of(events)["claims"] == [{"claim": "The answer is 42.", "sources": ["S1"]}]
+    assert done_of(events)["claims"] == [
+        {"claim": "The answer is 42.", "sources": ["S1"]}
+    ]
     assert done_of(events)["grounded"] is True
     # The repair is asked to re-map citations against the passages themselves,
     # and never to write the answer again.
@@ -116,7 +116,9 @@ def test_a_citation_that_survives_the_repair_fails_the_turn_visibly(
 ):
     """Do test a citation that survives the repair fails the turn visibly."""
     fake_chat.stream(answer_with({"claim": "The answer is 42.", "sources": ["S7"]}))
-    fake_chat.complete_with(claims_block([{"claim": "The answer is 42.", "sources": ["S8"]}]))
+    fake_chat.complete_with(
+        claims_block([{"claim": "The answer is 42.", "sources": ["S8"]}])
+    )
 
     events = ask(client, document)
 
