@@ -93,7 +93,22 @@ def a_result(id="baseline", **changes):
             "retrieval_seconds": {"samples": 2, "p50": 0.01, "p95": 0.02},
         },
         "evidence": report.evidence_for_retrieval(2),
-        "cases": [],
+        "cases": [
+            {
+                "id": "primer-stages",
+                "category": "exact_lookup",
+                "method": "hybrid",
+                "hit_at_k": True,
+                "ndcg_at_k": 1.0,
+            },
+            {
+                "id": "primer-hit-rate",
+                "category": "exact_lookup",
+                "method": "hybrid",
+                "hit_at_k": False,
+                "ndcg_at_k": 0.0,
+            },
+        ],
         **changes,
     }
 
@@ -122,6 +137,7 @@ class TestWhatTheManifestRecords:
         assert manifest["dataset"]["version"] == dataset.version
         assert manifest["dataset"]["split"] == TUNING
         assert manifest["dataset"]["cases"] == 2
+        assert manifest["dataset"]["held_back"] == []
 
     def test_the_manifest_pins_every_document_by_hash(self, dataset, settings_obj):
         """A regenerated document under the same name is a different document."""
@@ -281,6 +297,20 @@ class TestWritingAReport:
         assert "dense-only" in summary
         assert "primer-hit-rate" in summary
         assert manifest["dataset"]["version"] in summary
+
+    def test_the_summary_names_the_cases_a_reported_run_holds_back(
+        self, dataset, settings_obj
+    ):
+        """A report that leaves cases out says which, rather than how many."""
+        results = [
+            a_result(held_back=["eval-failure-citation", "notes-failure-provider"])
+        ]
+
+        summary = report.render(a_manifest(dataset, settings_obj, results), results)
+
+        assert "held back" in summary
+        assert "eval-failure-citation" in summary
+        assert "notes-failure-provider" in summary
 
     def test_the_summary_says_what_the_run_did_not_measure(self, dataset, settings_obj):
         """An empty cell would read as a measurement that found nothing."""
