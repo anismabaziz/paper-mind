@@ -136,6 +136,7 @@ class TestWhatTheManifestRecords:
         assert manifest["revision"] == REVISION
         assert manifest["dataset"]["version"] == dataset.version
         assert manifest["dataset"]["split"] == TUNING
+        assert manifest["dataset"]["held_back"] == []
         assert manifest["dataset"]["cases"] == 2
         assert manifest["dataset"]["held_back"] == []
 
@@ -311,6 +312,17 @@ class TestWritingAReport:
         assert "held back" in summary
         assert "eval-failure-citation" in summary
         assert "notes-failure-provider" in summary
+
+    def test_the_summary_of_the_tuning_run_says_it_is_where_values_were_chosen(
+        self, dataset, settings_obj
+    ):
+        """A number from the tuning half is a decision, and says so."""
+        results = [a_result()]
+
+        summary = report.render(a_manifest(dataset, settings_obj, results), results)
+
+        assert "chosen on" in summary
+        assert "tuning half" in summary
 
     def test_the_summary_says_what_the_run_did_not_measure(self, dataset, settings_obj):
         """An empty cell would read as a measurement that found nothing."""
