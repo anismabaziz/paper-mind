@@ -24,6 +24,7 @@ from evaluation.calibration import (
     run_calibration,
 )
 from evaluation.judge import (
+    CORRECTNESS_PROMPT,
     UNKNOWN,
     JudgeSettings,
     RUBRIC_VERSION,
@@ -128,6 +129,49 @@ class TestRubric:
         assert "39 of 41" in captured["prompt"]
         assert "A" in captured["prompt"]
         assert "CTX" in captured["prompt"]
+
+    def test_a_case_rubric_reaches_the_correctness_prompt(self):
+        """A reference answer is one wording of correct, and the rubric says so."""
+        captured = {}
+
+        def spy(prompt):
+            """Do spy."""
+            captured["prompt"] = prompt
+            return "correct"
+
+        judge_correctness(
+            "Q",
+            "I don't know based on the given context.",
+            "The document does not cover this.",
+            "CTX",
+            spy,
+            "A correct answer says the document does not cover this.",
+        )
+
+        prompt = captured["prompt"]
+        assert "A correct answer says the document does not cover this." in prompt
+        # The rubric is read before the instruction to answer, so it is part of
+        # what the judge is asked rather than an aside after it.
+        assert prompt.index("does not cover this") < prompt.index("Reply with exactly")
+
+    def test_a_case_without_a_rubric_asks_the_original_question(self):
+        """A run against a set that carries no rubric sends the prompt it always did."""
+        captured = {}
+
+        def spy(prompt):
+            """Do spy."""
+            captured["prompt"] = prompt
+            return "correct"
+
+        judge_correctness("Q", "E", "A", "CTX", spy)
+
+        assert captured["prompt"] == CORRECTNESS_PROMPT.format(
+            question="Q",
+            context="CTX",
+            answer="A",
+            expected_answer="E",
+            rubric_block="",
+        )
 
     def test_an_unreadable_correctness_verdict_is_unknown(self):
         """Correctness reports the same three outcomes faithfulness does."""

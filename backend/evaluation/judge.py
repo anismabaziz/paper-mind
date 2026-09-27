@@ -77,6 +77,10 @@ FAITHFUL_PROMPT = (
     "Is every claim in the answer supported by the context? " + _VERDICT_NAMES
 )
 
+#: The question the correctness rubric asks, kept apart so a case's own rubric
+#: can be read before it rather than after the instruction to answer.
+_CORRECTNESS_QUESTION = "Does the graded answer say what the expected answer says? "
+
 CORRECTNESS_PROMPT = (
     f"You are grading an answer against the expected answer. Rubric "
     f"{RUBRIC_VERSION}.\n\n"
@@ -84,7 +88,17 @@ CORRECTNESS_PROMPT = (
     "Context the answer was generated from:\n{context}\n\n"
     "Answer to grade: {answer}\n\n"
     f"Expected answer: {{expected_answer}}\n\n"
-    "Does the graded answer say what the expected answer says? " + _CORRECTNESS_NAMES
+    "{rubric_block}" + _CORRECTNESS_QUESTION + _CORRECTNESS_NAMES
+)
+
+#: What a correct answer has to contain, in the reviewer's words. A reference
+#: answer is one wording of the expectation, and a case whose rubric is prose
+#: admits an answer that says the same thing differently.
+RUBRIC_PROMPT = (
+    "What a correct answer has to contain, written by the reviewer of this case: "
+    "{rubric}\n\n"
+    "Wording that differs from the expected answer is still correct when it "
+    "meets this."
 )
 
 
@@ -189,8 +203,17 @@ def judge_correctness(
     answer: str,
     context: str,
     judge: Callable[[str], str],
+    rubric: str = "",
 ) -> tuple[str, float | None]:
-    """Grade one answer against what the case set expected it to say."""
+    """
+    Grade one answer against what the case set expected it to say.
+
+    A case's rubric joins the prompt when it has one, so a reference answer
+    that admits only its own wording is not the whole expectation: a decline
+    that says the document does not cover the question is the same answer as
+    the reference decline, and the rubric is what says so.
+    """
+    block = f"{RUBRIC_PROMPT.format(rubric=rubric)}\n\n" if rubric else ""
     return parse_correctness(
         judge(
             CORRECTNESS_PROMPT.format(
@@ -198,6 +221,7 @@ def judge_correctness(
                 context=context,
                 answer=answer,
                 expected_answer=expected_answer,
+                rubric_block=block,
             )
         )
     )
