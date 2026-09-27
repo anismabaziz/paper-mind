@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from evaluation import experiments
+from evaluation.dataset import TUNING
 from evaluation.experiments import describe
 from services.answering import AnswerSettings
 from services.citations import PROMPT_VERSION
@@ -593,9 +594,9 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         f"Measured on revision `{revision['revision'][:12] or 'unknown'}` "
         f"({revision.get('subject', '')})"
         + (", with uncommitted changes" if revision.get("dirty") else ""),
-        f"Case set {dataset['version']} (reviewed {dataset['reviewed_on']}), "
-        f"split `{dataset['split']}: {dataset['cases']} questions asked of each of "
-        f"the {len(results)} experiments, "
+        f"Case set {dataset['version']} (reviewed {dataset['reviewed_on']}), split "
+        f"`{dataset['split']}`: {dataset['cases']} questions asked of each of the "
+        f"{len(results)} experiments, "
         + (
             f"{len(dataset['held_back'])} of the split's cases held back "
             f"({', '.join(f'`{name}`' for name in dataset['held_back'])})."
@@ -638,8 +639,15 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         "",
         "## Experiments",
         "",
-        "Each variant's value was chosen on the `tuning` split, never on the "
-        "split reported here.",
+        (
+            "This is the tuning half: the split every variant's value was "
+            "chosen on. A number here is a decision, not a result — the "
+            "reported half is a separate run, and no variant's value was "
+            "changed after reading it."
+            if dataset["split"] == TUNING
+            else "Each variant's value was chosen on the `tuning` split, never "
+            "on the split reported here."
+        ),
         "",
         "| Experiment | Family | Changes | Hit@k | Recall | MRR | nDCG | Retrieval p50 (s) | Retrieval p95 (s) |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
