@@ -389,8 +389,16 @@ def build_manifest(
             "version": dataset.version,
             "reviewed_on": dataset.reviewed_on,
             "split": _split_of(results),
-            "cases": sum(
-                result.get("retrieval", {}).get("questions", 0) for result in results
+            # The questions asked, not the sum over the columns: the same
+            # questions are asked of every experiment, and adding them up would
+            # read as a set eleven times larger than the one that was reviewed.
+            "cases": len(
+                {case["id"] for result in results for case in result.get("cases", [])}
+            ),
+            # The cases of this split a reported run leaves out, named here
+            # rather than dropped quietly.
+            "held_back": sorted(
+                {name for result in results for name in result.get("held_back", [])}
             ),
         },
         "documents": [document.to_dict() for document in dataset.documents],
@@ -586,8 +594,14 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         f"({revision.get('subject', '')})"
         + (", with uncommitted changes" if revision.get("dirty") else ""),
         f"Case set {dataset['version']} (reviewed {dataset['reviewed_on']}), "
-        f"split `{dataset['split']}`, {dataset['cases']} cases asked across "
-        f"{len(results)} experiments.",
+        f"split `{dataset['split']}: {dataset['cases']} questions asked of each of "
+        f"the {len(results)} experiments, "
+        + (
+            f"{len(dataset['held_back'])} of the split's cases held back "
+            f"({', '.join(f'`{name}`' for name in dataset['held_back'])})."
+            if dataset["held_back"]
+            else "no cases held back."
+        ),
         f"Embedding `{models['embedding']['id']}`"
         + (
             f" at `{models['embedding']['revision']}`"
@@ -659,17 +673,18 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         "## Reproducing this report",
         "",
         "```",
-        "docker compose up qdrant postgres",
+        "docker compose up db qdrant",
         "uv run python -m evaluation.cli --live --report <directory> --ablate",
         "uv run python -m evaluation.cli --live --report <directory> --compare-report "
         "<published directory>",
         "```",
         "",
         "The manifest holds the revision, the case set, the document hashes, the "
-        "index manifests, the prompts, the models, the settings, and the "
-        "environment. A run that measured the same things reproduces it; a run "
-        "that did not names the field that moved, and a changed model revision "
-        "is reported on its own.",
+        "prompts, the models, the settings, and the environment; each result "
+        "beside it holds the index manifest and generation of every document, "
+        "with the per-question rows the numbers came from. A run that measured "
+        "the same things reproduces the manifest; a run that did not names the "
+        "field that moved, and a changed model revision is reported on its own.",
         "",
     ]
     return "\n".join(lines)
