@@ -234,7 +234,7 @@ boots with no provider key present; a workspace with no saved settings gets
 a clear error pointing at Settings rather than a crash or an env default.
 
 **Evaluation runs the app.** `backend/evaluation/` asks a committed labeled
-case set (ten questions over two sample documents) the way a reader asks them.
+case set (57 questions over four sample documents) the way a reader asks them.
 The fixture documents are stored and indexed by the same ingestion job and
 worker the upload route uses, and every question goes through the same answer
 path the chat route uses: same document context, retrieval, bounded prompt,
@@ -310,6 +310,22 @@ Live runs are opt-in (`--live`); `--split tuning` runs the other half, and
 `--compare-rerank` runs the case set twice, once with the reranker gate off and
 once with it on, and reports both. See [backend/README.md](backend/README.md) for free local live
 instructions (`http://localhost:6333` with `--no-judge` needs no chat key).
+
+**A published report backs the retrieval claims.**
+[`backend/evaluation/reports/2026-09-retrieval-baseline-v1/`](backend/evaluation/reports/2026-09-retrieval-baseline-v1/)
+is a checked-in run of the reported half of the case set against real
+documents, real local embeddings, and real Qdrant. It compares the shipped
+configuration with dense-only, sparse-only, hybrid-only, reranked, two
+candidate depths, two query-expansion policies, and two chunking policies, all
+chosen on the tuning half, and reports retrieval quality, retrieval latency, and
+the per-question rows behind every difference. It is retrieval only: no model
+was called, so the report carries no answer, citation, abstention, token, or
+dollar figure, and says so. The manifest beside the numbers names the revision,
+the case set, every document's hash and index manifest, the prompts, the
+models, and the environment, and `--compare-report` says whether a re-run
+reproduced it. A run with generation and judging writes a report of the same
+shape with those sections filled in, and is what the answer-quality claims
+should be quoted from.
 
 ## Technologies
 

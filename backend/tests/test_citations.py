@@ -135,7 +135,9 @@ def test_citations_are_matched_case_insensitively():
 
 def test_a_claim_survives_with_the_citations_that_are_real():
     """Do test a claim survives with the citations that are real."""
-    parsed = parse_claims(claims_block([{"claim": "half right", "sources": ["S1", "S7"]}]))
+    parsed = parse_claims(
+        claims_block([{"claim": "half right", "sources": ["S1", "S7"]}])
+    )
 
     validated = validate_claims(parsed.claims, {"S1", "S2"})
 
@@ -175,7 +177,9 @@ def test_a_claim_without_any_citation_is_not_grounded():
 
 def test_claims_that_contradict_an_abstaining_answer_are_dropped():
     """Do test claims that contradict an abstaining answer are dropped."""
-    claims = parse_claims(claims_block([{"claim": "but this", "sources": ["S1"]}])).claims
+    claims = parse_claims(
+        claims_block([{"claim": "but this", "sources": ["S1"]}])
+    ).claims
 
     assert prune_conflicting_claims(LLMProvider.FALLBACK_ANSWER, claims) == ()
     assert parse_claims(LLMProvider.FALLBACK_ANSWER).claims == ()
@@ -183,14 +187,18 @@ def test_claims_that_contradict_an_abstaining_answer_are_dropped():
 
 def test_claims_are_kept_when_the_answer_actually_answers():
     """Do test claims are kept when the answer actually answers."""
-    claims = parse_claims(claims_block([{"claim": "it is 42", "sources": ["S1"]}])).claims
+    claims = parse_claims(
+        claims_block([{"claim": "it is 42", "sources": ["S1"]}])
+    ).claims
 
     assert prune_conflicting_claims("It is 42.", claims) == claims
 
 
 def test_the_repair_instruction_names_the_claims_and_the_allowed_sources():
     """Do test the repair instruction names the claims and the allowed sources."""
-    claims = parse_claims(claims_block([{"claim": "wrong page", "sources": ["S9"]}])).claims
+    claims = parse_claims(
+        claims_block([{"claim": "wrong page", "sources": ["S9"]}])
+    ).claims
 
     instruction = repair_instruction("It is 42.", claims, ("S1", "S2"))
 
@@ -263,7 +271,11 @@ def test_text_that_only_looks_like_the_marker_is_still_shown():
     """Do test text that only looks like the marker is still shown."""
     splitter = AnswerSplitter()
 
-    shown = splitter.feed("The angle <cla") + splitter.feed("ss> is small.") + splitter.finish()
+    shown = (
+        splitter.feed("The angle <cla")
+        + splitter.feed("ss> is small.")
+        + splitter.finish()
+    )
 
     assert shown == "The angle <class> is small."
 
@@ -272,6 +284,9 @@ def test_a_claims_block_with_no_prose_shows_nothing():
     """Do test a claims block with no prose shows nothing."""
     splitter = AnswerSplitter()
 
-    shown = splitter.feed(claims_block([{"claim": "42", "sources": []}])) + splitter.finish()
+    shown = (
+        splitter.feed(claims_block([{"claim": "42", "sources": []}]))
+        + splitter.finish()
+    )
 
     assert shown == ""
