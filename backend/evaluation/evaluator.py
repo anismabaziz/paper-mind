@@ -24,14 +24,13 @@ for the cases that reached a model, and from the token counts the run measured.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
-from pathlib import Path
 from typing import Any
 
 from evaluation import judge as judge_module
 from evaluation.calibration import load_calibration, run_calibration
+from evaluation.dataset import REPORTED, Case, Dataset, abstention_required
 from evaluation.graders import (
     UNKNOWN,
     Grade,
@@ -51,6 +50,17 @@ from evaluation.metrics import (
     retrieval_scores,
     summarize,
 )
+from evaluation.outcomes import (
+    ABSTAINED,
+    ANSWERED,
+    CANCELLED,
+    CITATION_ERROR,
+    CONTEXT_FALLBACK,
+    OUTCOMES,
+    PERSISTENCE_ERROR,
+    PROVIDER_ERROR,
+    REFUSED,
+)
 from services.answering import (
     AnswerEvent,
     AnswerRequest,
@@ -63,37 +73,7 @@ from services.citations import PROMPT_VERSION, claims_block
 from services.llm.base import is_context_fallback
 from services.prompts import SYSTEM_INSTRUCTION
 
-FIXTURE_PATH = Path(__file__).parent / "fixture.json"
-
 DEFAULT_K = 5
-
-#: A case that reached the model and was stored. Every other outcome is named
-#: by the event that ended it, so there is one vocabulary rather than three.
-ANSWERED = "answered"
-ABSTAINED = "abstained"
-PROVIDER_ERROR = "provider_error"
-CITATION_ERROR = "citation_error"
-PERSISTENCE_ERROR = "persistence_error"
-CANCELLED = "cancelled"
-
-#: The question was not asked at all: the Document could not be asked about.
-REFUSED = "refused"
-#: The stored text is a failed call quoting the evidence back, not an answer.
-CONTEXT_FALLBACK = "context_fallback"
-
-#: Every way a case can end. A run reports all of them, because a case that
-#: abstained is a different result from a case that answered badly, and neither
-#: is the same as a case that never reached the model.
-OUTCOMES = (
-    ANSWERED,
-    ABSTAINED,
-    PROVIDER_ERROR,
-    CITATION_ERROR,
-    PERSISTENCE_ERROR,
-    CANCELLED,
-    REFUSED,
-    CONTEXT_FALLBACK,
-)
 
 #: The events that end a case, and the one whose name is not already an outcome.
 _TERMINAL_EVENTS = (
@@ -120,11 +100,6 @@ def outcome_for(event_name: str) -> str:
     return ANSWERED if event_name == "done" else event_name
 
 
-def load_fixture(path: Path = FIXTURE_PATH) -> dict:
-    """Read the labeled case set from disk."""
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
 @dataclass
 class CaseResult:
     """What one case did, and the evidence the run can measure it against."""
@@ -133,6 +108,9 @@ class CaseResult:
     document: str
     question: str
     outcome: str
+    split: str
+    category: str
+    expected_outcome: str
     detail: str | None = None
     turn_id: str | None = None
     retrieval: dict[str, Any] = field(default_factory=dict)
@@ -156,6 +134,10 @@ class CaseResult:
     correctness_verdict: str | None = None
     expected_answer: str | None = None
     expected_evidence: list[str] = field(default_factory=list)
+    #: What a person checking this answer has to find, in the reviewer's words.
+    #: It reaches the judge, because a reference answer is one wording of what
+    #: counts as correct and not the whole of it.
+    rubric: str = ""
     requires_abstention: bool | None = None
     grades: dict[str, Grade] = field(default_factory=dict)
     citation_precision: float | None = None
@@ -190,11 +172,7 @@ class CaseResult:
             expected_answer=self.expected_answer,
             expected_evidence=tuple(self.expected_evidence),
             requires_abstention=self.requires_abstention,
-            expected_outcome=expected_outcome_for(
-                self.outcome,
-                self.requires_abstention,
-                self.expected_answer,
-            ),
+            expected_outcome=self.expected_outcome,
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -211,40 +189,6 @@ class CaseResult:
         }
         result["generated"] = self.generated
         return result
-
-
-def requires_abstention_of(case: dict) -> bool | None:
-    """
-    Return what the case set says about abstaining, or None when it says nothing.
-
-    A case that carries gold evidence is a case the retrieval is expected to
-    reach, so it is expected to be answered. A case that declares neither an
-    expected answer nor any gold evidence is not graded on which of the two it
-    becomes: the case set has not said.
-    """
-    if "requires_abstention" in case:
-        return bool(case["requires_abstention"])
-    if case.get("expected_answer") or case.get("gold_snippets"):
-        return False
-    return None
-
-
-def expected_outcome_for(
-    outcome: str, requires_abstention: bool | None, expected_answer: str | None
-) -> str | None:
-    """
-    Return the outcome a case is supposed to end as.
-
-    A case that says it has to be abstained on has to be abstained on. A case
-    that carries an expected answer has to produce one. A case that declares
-    neither is not graded on what it ended as, because a case set that says
-    nothing about it cannot complain that it went the other way.
-    """
-    if requires_abstention:
-        return ABSTAINED
-    if expected_answer:
-        return ANSWERED
-    return None
 
 
 @dataclass
@@ -384,7 +328,7 @@ def _streamed(environment: EvaluationEnvironment, resolved: ResolvedTurn):
 
 
 def run_case(
-    case: dict,
+    case: Case,
     environment: EvaluationEnvironment,
     model,
     api_key: str = "evaluation",
@@ -398,10 +342,10 @@ def run_case(
     Conversation first, so the answer path reads recorded Turns rather than
     being handed a transcript.
     """
-    environment.seed_turns(case["document"], case.get("follow_up", []))
+    environment.seed_turns(case.document, case.follow_up)
     request = AnswerRequest(
-        filename=environment.stored_name(case["document"]),
-        query=case["question"],
+        filename=environment.stored_name(case.document),
+        query=case.question,
         provider=environment.provider(model, api_key),
         model=model,
     )
@@ -411,25 +355,31 @@ def run_case(
         # reported as refused rather than as a retrieval that found nothing.
         return _graded(
             CaseResult(
-                id=case["id"],
-                document=case["document"],
-                question=case["question"],
+                id=case.id,
+                document=case.document,
+                question=case.question,
                 outcome=REFUSED,
+                split=case.split,
+                category=case.category,
+                expected_outcome=case.expected_outcome,
                 detail=resolved.category,
             )
         )
 
     sources = list(resolved.sources)
     texts = [str(source.get("content") or "") for source in sources]
-    scores = retrieval_scores(texts, case.get("gold_snippets", []), k)
+    scores = retrieval_scores(texts, case.expected_evidence, k)
     events, first_token, total = _streamed(environment, resolved)
     name, payload = _terminal(events)
     outcome = outcome_for(name)
     result = CaseResult(
-        id=case["id"],
-        document=case["document"],
-        question=case["question"],
+        id=case.id,
+        document=case.document,
+        question=case.question,
         outcome=outcome,
+        split=case.split,
+        category=case.category,
+        expected_outcome=case.expected_outcome,
         detail=payload.get("category") or payload.get("reason"),
         turn_id=resolved.turn_id,
         retrieval=resolved.retrieval.payload,
@@ -438,9 +388,10 @@ def run_case(
         sources=sources,
         context=resolved.context,
         provenance=resolved.provenance.to_dict(),
-        expected_answer=case.get("expected_answer"),
-        expected_evidence=list(case.get("gold_snippets", [])),
-        requires_abstention=requires_abstention_of(case),
+        expected_answer=case.expected_answer,
+        expected_evidence=list(case.expected_evidence),
+        rubric=case.rubric,
+        requires_abstention=abstention_required(case),
         retrieval_seconds=resolved.provenance.retrieval_seconds,
         first_token_seconds=first_token,
         total_seconds=total,
@@ -509,7 +460,7 @@ def _judge(case: CaseResult, judge: Judge) -> CaseResult:
     correctness_verdict, correctness = (None, None)
     if case.expected_answer:
         correctness_verdict, correctness = judge_module.judge_correctness(
-            case.question, case.expected_answer, answer, context, judge
+            case.question, case.expected_answer, answer, context, judge, case.rubric
         )
     return replace(
         case,
@@ -639,19 +590,27 @@ def _run_record(
     k: int,
     cases: Sequence[CaseResult],
     judge: Judge | None,
+    dataset: Dataset,
+    split: str,
+    held_back: Sequence[str],
 ) -> dict[str, Any]:
     """
-    Describe the run as a whole: what was indexed, and how it was configured.
+    Describe the run as a whole: what it measured, and how it was configured.
 
-    The index manifest and generation of every Document are recorded alongside
-    the prompt version, provider, model, and settings, because a number is
-    only comparable to another number when those match. The prompt version and
-    the settings come from the configuration rather than from a case, so a run
-    in which every case failed still says what it was measuring.
+    The version of the case set and the split that was run are recorded beside
+    the index manifest and generation of every Document, the prompt version, the
+    provider, the model, and the settings, because a number is only comparable
+    to another number when those match. The set and the configuration come from
+    outside the run rather than from a case, so a run in which every case failed
+    still says what it was measuring.
     """
     retrieved = [case for case in cases if case.provenance]
     return {
         "k": k,
+        "dataset": dataset.version,
+        "split": split,
+        "cases": len(cases),
+        "held_back": list(held_back),
         "prompt_version": PROMPT_VERSION,
         "provider": model.provider,
         "model": model.id,
@@ -668,25 +627,38 @@ def _run_record(
 
 
 def evaluate(
-    fixture: dict,
+    dataset: Dataset,
     environment: EvaluationEnvironment,
     model,
     api_key: str = "evaluation",
     judge: Judge | None = None,
     k: int = DEFAULT_K,
     calibrate: bool = True,
+    split: str = REPORTED,
+    include_faults: bool = False,
 ) -> EvaluationReport:
     """
-    Run every case in the fixture through the answer path and measure the run.
+    Run one split of the case set through the answer path and measure the run.
+
+    The reported split is the default because it is the one a result is quoted
+    from. The cases carrying a fault are held back unless ``include_faults``
+    asks for them, because their expected outcome is only reachable in a run
+    that injects the fault, and a reported number that counted a deliberately
+    broken provider would be reporting the test. The cases left behind are
+    named in the run record rather than dropped quietly.
 
     ``judge`` may be None to skip the two model-graded metrics and the
     calibration set, which is what a retrieval-only run does: the deterministic
     graders, the case outcomes, and the retrieval scores still describe the
     production path, and nothing is reported as judged that was not judged.
     """
+    asked = dataset.cases_for(split, include_faults=include_faults)
+    held_back = (
+        [] if include_faults else [case.id for case in dataset.faults_for(split)]
+    )
     cases: list[CaseResult] = []
-    for fixture_case in fixture["questions"]:
-        result = run_case(fixture_case, environment, model, api_key, k=k)
+    for case in asked:
+        result = run_case(case, environment, model, api_key, k=k)
         if judge is not None:
             result = _judge(result, judge)
         if result.generated:
@@ -708,7 +680,7 @@ def evaluate(
         else None
     )
     return EvaluationReport(
-        run=_run_record(environment, model, k, cases, judge),
+        run=_run_record(environment, model, k, cases, judge, dataset, split, held_back),
         retrieval=retrieval,
         outcomes={
             outcome: sum(1 for case in cases if case.outcome == outcome)

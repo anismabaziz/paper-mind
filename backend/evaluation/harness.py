@@ -1,8 +1,8 @@
 """
-The evaluation environment: the application, with the fixture documents in it.
+The evaluation environment: the application, with the set's documents in it.
 
 A run is only worth reading if it describes the app, so a run is set up the
-way the app is: the fixture documents are stored and indexed through the same
+way the app is: the set's documents are stored and indexed through the same
 ingestion job and worker that the upload route uses, which gives each one a
 real Conversation, a real Index Generation, and a real Index Manifest, and the
 questions are then asked through the same answer path the chat route uses.
@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from evaluation.dataset import Dataset
 from repositories import Repositories, build_repositories
 from services.accounts.chat_settings_service import ModelCapabilities
 from services.answering import AnswerService
@@ -41,7 +42,7 @@ CONTRACT_PROBE_QUERY = "retrieval contract probe"
 
 
 def read_document(filename: str, docs_dir: Path = SAMPLE_DOCS_DIR) -> bytes:
-    """Return the bytes of one fixture document."""
+    """Return the bytes of one source document."""
     return (Path(docs_dir) / filename).read_bytes()
 
 
@@ -51,7 +52,7 @@ class EvaluationEnvironment:
     Everything a run asks questions through.
 
     The environment holds the production collaborators and the mapping from a
-    fixture document to the stored Document the application knows about. A
+    source document to the stored Document the application knows about. A
     live run prefixes the stored names so a measured run never answers from —
     or deletes — vectors belonging to a reader's own library.
     """
@@ -65,7 +66,7 @@ class EvaluationEnvironment:
     answer_service: AnswerService
     chat_provider_factory: Callable[[ChatCredentials], LLMProvider]
     documents: dict[str, str] = field(default_factory=dict)
-    #: Wall time each Document took to become answerable, keyed by fixture name.
+    #: Wall time each Document took to become answerable, keyed by source name.
     indexed_seconds: dict[str, float] = field(default_factory=dict)
     worker: IngestionWorker | None = None
     #: The clock the run measures with, held here because a report's latency is
@@ -73,12 +74,12 @@ class EvaluationEnvironment:
     #: decision the answer path makes.
     clock: Callable[[], float] = time.monotonic
 
-    def stored_name(self, fixture_filename: str) -> str:
-        """Return the stored Document a fixture document was indexed as."""
+    def stored_name(self, filename: str) -> str:
+        """Return the stored Document a source document was indexed as."""
         try:
-            return self.documents[fixture_filename]
+            return self.documents[filename]
         except KeyError:
-            raise KeyError(f"{fixture_filename} was not indexed for this run") from None
+            raise KeyError(f"{filename} was not indexed for this run") from None
 
     def provider(
         self, model: ModelCapabilities, api_key: str = "evaluation"
@@ -94,14 +95,14 @@ class EvaluationEnvironment:
             )
         )
 
-    def conversation_id(self, fixture_filename: str) -> str | None:
-        """Return the Conversation a fixture document's questions are recorded in."""
-        record = self.repositories.files.get_file(self.stored_name(fixture_filename))
+    def conversation_id(self, filename: str) -> str | None:
+        """Return the Conversation a source document's questions are recorded in."""
+        record = self.repositories.files.get_file(self.stored_name(filename))
         if record is None:
             return None
         return self.repositories.conversations.get_conversation_id(record["id"])
 
-    def seed_turns(self, fixture_filename: str, questions: Sequence[str]) -> None:
+    def seed_turns(self, filename: str, questions: Sequence[str]) -> None:
         """
         Record earlier questions on a Document's Conversation.
 
@@ -110,7 +111,7 @@ class EvaluationEnvironment:
         them back the way it reads any other recorded Turns. Nothing is
         injected into the prompt directly.
         """
-        conversation_id = self.conversation_id(fixture_filename)
+        conversation_id = self.conversation_id(filename)
         if conversation_id is None or not questions:
             return
         for question in questions:
@@ -121,7 +122,7 @@ class EvaluationEnvironment:
                 turn_id, "Answer recorded before this question.", []
             )
 
-    def index_state(self, fixture_filename: str) -> dict[str, Any]:
+    def index_state(self, filename: str) -> dict[str, Any]:
         """
         Return what the run knows about a Document's index.
 
@@ -129,12 +130,12 @@ class EvaluationEnvironment:
         the seconds say how long indexing it took, so a run reports the cost of
         preparing its evidence as well as the quality of it.
         """
-        record = self.repositories.files.get_file(self.stored_name(fixture_filename))
+        record = self.repositories.files.get_file(self.stored_name(filename))
         return {
             "index_manifest": (record or {}).get("index_manifest"),
             "index_generation": (record or {}).get("index_generation"),
             "is_processed": bool((record or {}).get("is_processed")),
-            "indexed_seconds": self.indexed_seconds.get(fixture_filename),
+            "indexed_seconds": self.indexed_seconds.get(filename),
         }
 
 
@@ -171,7 +172,7 @@ def require_hybrid_retrieval(
 
 
 def build_environment(
-    fixture: dict,
+    dataset: Dataset,
     *,
     settings: Settings,
     session_factory: Any,
@@ -185,7 +186,7 @@ def build_environment(
     worker_id: str = "evaluation-worker",
 ) -> EvaluationEnvironment:
     """
-    Index the fixture documents into a working application and return it.
+    Index the case set's documents into a working application and return it.
 
     Each document is stored, given a first ingestion job, and processed by the
     production worker, so what the run retrieves is what a reader who uploaded
@@ -220,8 +221,8 @@ def build_environment(
     )
     documents: dict[str, str] = {}
     indexed_seconds: dict[str, float] = {}
-    for document in fixture.get("documents", []):
-        filename = document["filename"]
+    for document in dataset.documents:
+        filename = document.filename
         stored = f"{documents_prefix}{filename}"
         storage.save(stored, read_document(filename, docs_dir))
         repositories.files.create_file_with_job(

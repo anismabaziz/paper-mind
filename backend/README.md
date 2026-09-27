@@ -121,15 +121,26 @@ Its embedding, reranking, and chat providers are deterministic and local. The te
 
 ## Evaluation
 
-`evaluation/` asks a committed labeled case set
-(`evaluation/fixture.json`): ten questions over two sample documents in
-`evaluation/sample_docs/` — one authored in-repo (CC0), one published paper
+`evaluation/` asks a versioned labeled case set
+(`evaluation/datasets/`): 57 reviewed questions over four sample documents in
+`evaluation/sample_docs/` — three authored in-repo (CC0), one published paper
 (CC BY 4.0). Every case goes through the application's answer path, the one
 `POST /response` uses, so the numbers describe the app rather than a second
 implementation of it. The sample documents are stored and indexed by the same
 ingestion job and worker the upload route uses, which gives each one a real
 Conversation, a real index generation, and a real index manifest, and the run
 reports how long each took to index.
+
+Each case declares what it expects: the outcome the run has to end as, the
+passages that have to support the answer, and a rubric saying what a correct
+answer has to contain, which reaches the judge so a reworded answer is not
+scored against one reference wording. The set is split into a tuning half and a
+reported half before any configuration was chosen, so a quoted number was not a
+fitted one, and each source document is pinned by content hash, so a replaced
+file cannot quietly keep answering to expectations reviewed against the old
+one. A question the document cannot answer may be abstained on or declined, and
+both are accepted; the cases that need a failure injected are held back from a
+run and named in the run record.
 
 Each case ends as whatever it was: an answer, an abstention, a provider
 failure, an unusable citation, a failed save, or a refusal. Only an answer the
@@ -210,6 +221,7 @@ uv run python -m evaluation.cli --live --no-calibration    # judge without the l
 uv run python -m evaluation.cli --live --json              # machine-readable
 uv run python -m evaluation.cli --live --rerank            # force RERANK=true (local cross-encoder 50→5)
 uv run python -m evaluation.cli --live --compare-rerank    # the case set twice: gate off, then on
+uv run python -m evaluation.cli --live --split tuning      # the tuning half instead of the reported one
 ```
 
 The generator and the judge are configured apart, so a run can generate with

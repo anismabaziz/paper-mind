@@ -278,9 +278,10 @@ cd backend
 
 The full-stack run applies every migration to an empty database, uses deterministic local embedding, reranking, and chat providers, and removes its database, collection, and containers when it finishes. It needs Docker but no model API keys or paid services.
 
-The evaluator (`backend/evaluation/`) runs `fixture.json` through the
-production answer path and reports three things together. Retrieval is scored
-per question and in aggregate with hit rate, recall, MRR, and nDCG, where the
+The evaluator (`backend/evaluation/`) runs a versioned labeled case set
+(`backend/evaluation/datasets/`) through the production answer path and
+reports three things together. Retrieval is scored per question and in
+aggregate with hit rate, recall, MRR, and nDCG, where the
 ideal ranking is one relevant chunk per gold snippet, so a run that found only
 some of the evidence cannot read as a perfect one. Answers are graded twice
 over: six deterministic graders decide the case outcome, the abstention
@@ -297,9 +298,17 @@ to input and output tokens, finish reasons, and a cost estimated from the
 catalog's prices. A judged run also grades a hand-labelled calibration set and
 reports where the judge disagreed with the person.
 
-Live runs are opt-in (`--live`); `--compare-rerank` runs the case
-set twice, once with the reranker gate off and once with it on, and reports
-both. See [backend/README.md](backend/README.md) for free local live
+The case set is 57 reviewed questions over four sample documents, split into a
+tuning half and a reported half before any configuration was chosen, so the
+numbers a report quotes were not the numbers that were fitted. Every document
+is pinned by content hash, so a replaced file cannot keep answering to
+expectations a person wrote against the old one, and a report names the version
+of the set it measured. The handful of cases that only mean something with a
+failure injected are held back from a run and named in the run record.
+
+Live runs are opt-in (`--live`); `--split tuning` runs the other half, and
+`--compare-rerank` runs the case set twice, once with the reranker gate off and
+once with it on, and reports both. See [backend/README.md](backend/README.md) for free local live
 instructions (`http://localhost:6333` with `--no-judge` needs no chat key).
 
 ## Technologies

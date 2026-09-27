@@ -54,7 +54,8 @@ from services.llm.factory import build_chat_provider
 from settings import Settings
 from storage import get_storage
 
-from evaluation.evaluator import DEFAULT_K, evaluate, load_fixture
+from evaluation.dataset import REPORTED, SPLITS, load_dataset
+from evaluation.evaluator import DEFAULT_K, evaluate
 from evaluation.harness import build_environment, remove_documents
 from evaluation.judge import Judge, JudgeSettings
 
@@ -158,7 +159,7 @@ def with_rerank(base: Settings, enabled: bool) -> Settings:
 
 
 def _run_once(
-    fixture: dict,
+    dataset,
     app_settings: Settings,
     *,
     provider: str,
@@ -167,15 +168,16 @@ def _run_once(
     judge: Judge | None = None,
     k: int = DEFAULT_K,
     calibrate: bool = True,
+    split: str = REPORTED,
 ) -> dict:
-    """Index the fixture documents, run every case, and clean up after itself."""
+    """Index the documents, run one split of the set, and clean up after itself."""
     from services.embeddings.local_embeddings import LocalEmbeddingService
     from services.retrieval.reranker import RerankerService
     from services.retrieval.vector_service import VectorService
 
     settings_module.set_settings(app_settings)
     environment = build_environment(
-        fixture,
+        dataset,
         settings=app_settings,
         session_factory=None,
         storage=get_storage(),
@@ -192,13 +194,15 @@ def _run_once(
     try:
         started = time.monotonic()
         report = evaluate(
-            fixture,
+            dataset,
             environment,
             provider=environment.provider(model_for(provider, model), generator_key),
             model=model_for(provider, model),
             judge=judge,
             k=k,
             calibrate=calibrate,
+            split=split,
+            include_faults=include_faults,
         )
         report.run["seconds"] = time.monotonic() - started
         return report.as_dict()
@@ -218,6 +222,7 @@ def run(
     rerank: bool | None = None,
     compare_rerank: bool = False,
     calibrate: bool = True,
+    split: str = REPORTED,
 ) -> dict:
     """
     Run the labeled case set through the production answer path.
@@ -245,13 +250,13 @@ def run(
         else None
     )
 
-    fixture = load_fixture()
+    dataset = load_dataset()
     base_settings = settings_module.get_settings()
     if compare_rerank:
         return {
             "rerank": {
                 label: _run_once(
-                    fixture,
+                    dataset,
                     with_rerank(base_settings, enabled),
                     provider=provider,
                     model=model,
@@ -259,12 +264,13 @@ def run(
                     judge=grader,
                     k=k,
                     calibrate=calibrate,
+                    split=split,
                 )
                 for label, enabled in (("off", False), ("on", True))
             }
         }
     return _run_once(
-        fixture,
+        dataset,
         base_settings if rerank is None else with_rerank(base_settings, rerank),
         provider=provider,
         model=model,
@@ -272,6 +278,7 @@ def run(
         judge=grader,
         k=k,
         calibrate=calibrate,
+        split=split,
     )
 
 
@@ -304,10 +311,14 @@ def _print(report: dict) -> None:
     run_record = report["run"]
     retrieval = report["retrieval"]
     judged_by = run_record.get("judge")
+    held_back = run_record["held_back"]
     print(
         f"Run: {run_record['provider']}/{run_record['model']}, prompt "
         f"{run_record['prompt_version']}, retrieval "
-        f"{','.join(run_record['retrieval_methods']) or 'none'}"
+        f"{','.join(run_record['retrieval_methods']) or 'none'}, set "
+        f"{run_record['dataset']} split {run_record['split']}, "
+        f"{run_record['cases']} cases"
+        + (f", {len(held_back)} held back" if held_back else "")
         + (
             f", judged by {judged_by['provider']}/{judged_by['model']} "
             f"(rubric {judged_by['rubric_version']})"
@@ -428,6 +439,12 @@ def main(argv=None):
         help=f"chat model that judges, default {DEFAULT_MODEL}",
     )
     parser.add_argument("--k", type=int, default=DEFAULT_K)
+    parser.add_argument(
+        "--split",
+        default=REPORTED,
+        choices=SPLITS,
+        help=f"which split of the case set to run, default {REPORTED}",
+    )
     parser.add_argument("--json", dest="as_json", action="store_true")
     parser.add_argument(
         "--rerank",
@@ -470,6 +487,7 @@ def main(argv=None):
         rerank=rerank,
         compare_rerank=args.compare_rerank,
         calibrate=not args.no_calibration,
+        split=args.split,
     )
     if args.as_json:
         print(json.dumps(report, indent=2))
