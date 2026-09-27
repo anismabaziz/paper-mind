@@ -140,7 +140,9 @@ class ConversationRepository(BaseRepository):
         reader cannot follow, and keeping them together is what makes that
         checkable.
         """
-        return self._finish_turn(turn_id, TURN_ANSWERED, answer, sources, None, None, claims)
+        return self._finish_turn(
+            turn_id, TURN_ANSWERED, answer, sources, None, None, claims
+        )
 
     def abstain_turn(self, turn_id: str, answer: str, reason: AbstentionReason) -> bool:
         """

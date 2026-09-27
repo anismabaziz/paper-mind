@@ -33,8 +33,8 @@ CLAIMS_CLOSE = "</claims>"
 #: The citation contract, appended to the system instruction.
 CLAIMS_INSTRUCTION = (
     "Cite every factual claim. After the answer, add a claims block: the line "
-    f"{CLAIMS_OPEN}, then one JSON object per line with the keys \"claim\" and "
-    "\"sources\", then the line "
+    f'{CLAIMS_OPEN}, then one JSON object per line with the keys "claim" and '
+    '"sources", then the line '
     f"{CLAIMS_CLOSE}. Each claim is one statement you made, and its sources "
     "are the ids of the retrieved passages that support it, taken only from "
     "the bracketed ids in the context such as [S1]. Never invent an id, never "
@@ -103,8 +103,7 @@ def assign_source_ids(sources: Iterable[dict[str, Any]]) -> list[dict[str, Any]]
 def render_evidence(sources: Iterable[dict[str, Any]]) -> str:
     """Return the evidence as the model reads it, with each Passage's id."""
     return "\n\n".join(
-        f"[{source['source_id']}] {source.get('content') or ''}"
-        for source in sources
+        f"[{source['source_id']}] {source.get('content') or ''}" for source in sources
     )
 
 
