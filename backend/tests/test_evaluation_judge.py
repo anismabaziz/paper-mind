@@ -159,6 +159,9 @@ class TestRubric:
 
         waits = []
         monkeypatch.setattr(time_module, "sleep", waits.append)
+        # The run's own pacing is exercised elsewhere; this is the pause between
+        # a failed call and the next attempt.
+        monkeypatch.setattr(cli, "PROVIDER_PACE_SECONDS", 0.0)
 
         class ThrottledOnce(LLMProvider):
             """A judge provider that is throttled once and then answers."""
