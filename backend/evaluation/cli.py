@@ -87,7 +87,10 @@ JUDGE_FAILED = "the judge's call failed"
 #: spends it and then reports the cases it could not afford as provider
 #: failures — a number about the account, not about the application. The wait
 #: is the harness's own pacing; nothing in the answer path knows about it.
-PROVIDER_PACE_SECONDS = 6.0
+DEFAULT_PACE_SECONDS = 6.0
+
+#: The pause this process is running with, which ``--pace`` sets.
+PROVIDER_PACE_SECONDS = DEFAULT_PACE_SECONDS
 
 #: How long to wait before asking the judge again, and how many times to ask.
 #: A judge is three calls per case on a rate-limited account, and a throttle is
@@ -610,6 +613,7 @@ def _print(run_report: dict) -> None:
 
 def main(argv=None):
     """Parse the arguments and print the run."""
+    global PROVIDER_PACE_SECONDS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--live", action="store_true", help="run against real providers"
@@ -664,10 +668,10 @@ def main(argv=None):
     parser.add_argument(
         "--pace",
         type=float,
-        default=PROVIDER_PACE_SECONDS,
+        default=DEFAULT_PACE_SECONDS,
         help=(
             "seconds to wait between provider calls, so a rate-limited account "
-            f"is not reported as a failing one; default {PROVIDER_PACE_SECONDS}, "
+            f"is not reported as a failing one; default {DEFAULT_PACE_SECONDS}, "
             "0 to send every call as fast as it can"
         ),
     )
@@ -714,7 +718,6 @@ def main(argv=None):
     elif args.rerank_off:
         rerank = False
 
-    global PROVIDER_PACE_SECONDS
     PROVIDER_PACE_SECONDS = max(args.pace, 0.0)
     if args.ablate:
         return _ablation_main(args)
