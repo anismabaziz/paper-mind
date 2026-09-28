@@ -264,9 +264,12 @@ uv run python -m evaluation.cli --live --ablate --report evaluation/reports/<nam
 
 `--ablate` measures retrieval only, so it needs no key and reports no answer,
 citation, abstention, token, or dollar figure — the manifest says so rather than
-leaving those cells looking empty. The published report in
-`evaluation/reports/2026-09-retrieval-baseline-v1/` is one of these: real
-documents, real BGE-M3 embeddings, real Qdrant, retrieval only.
+leaving those cells looking empty. Two reports are published, both from real
+documents, real BGE-M3 embeddings, and real Qdrant:
+`reports/2026-09-retrieval-baseline-v1/` over the reported half of the case set
+and `reports/2026-09-retrieval-tuning-v1/` over the tuning half, which is the
+half every variant's value was chosen on. Read the tuning report for why a
+variant exists and the baseline report for what it does.
 
 Re-running says whether the run reproduced the published one:
 

@@ -1,0 +1,526 @@
+{
+  "cases": [
+    {
+      "candidates": 2,
+      "category": "exact_lookup",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": true,
+      "id": "primer-stages",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.008495832997141406
+    },
+    {
+      "candidates": 2,
+      "category": "exact_lookup",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": true,
+      "id": "primer-hit-rate",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.011546709007234313
+    },
+    {
+      "candidates": 2,
+      "category": "paraphrase",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": true,
+      "id": "primer-overlap",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.007467290997738019
+    },
+    {
+      "candidates": 5,
+      "category": "numeric_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-jump-counts",
+      "method": "hybrid",
+      "ndcg_at_k": 0.5,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 0.3333333333333333,
+      "seconds": 0.01243149999936577
+    },
+    {
+      "candidates": 5,
+      "category": "exact_lookup",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-sensor-placement",
+      "method": "hybrid",
+      "ndcg_at_k": 0.38685280723454163,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 0.2,
+      "seconds": 0.01198304200079292
+    },
+    {
+      "candidates": 5,
+      "category": "exact_lookup",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-participants",
+      "method": "hybrid",
+      "ndcg_at_k": 0.43067655807339306,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 0.25,
+      "seconds": 0.016353624989278615
+    },
+    {
+      "candidates": 5,
+      "category": "numeric_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-candidate-counts",
+      "method": "hybrid",
+      "ndcg_at_k": 0.9197207891481876,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.01572466699872166
+    },
+    {
+      "candidates": 5,
+      "category": "multi_section_evidence",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": false,
+      "id": "skating-pps-across-sections",
+      "method": "hybrid",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.018490417001885362
+    },
+    {
+      "candidates": 3,
+      "category": "exact_lookup",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-metrics-list",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.012086041999282315
+    },
+    {
+      "candidates": 3,
+      "category": "paraphrase",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-recall-vs-hit-rate",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.011231707991100848
+    },
+    {
+      "candidates": 3,
+      "category": "table_reasoning",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-table-sparse-recall",
+      "method": "hybrid",
+      "ndcg_at_k": 0.6131471927654584,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.008246666999184527
+    },
+    {
+      "candidates": 3,
+      "category": "paraphrase",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-cold-start",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.008457499992800876
+    },
+    {
+      "candidates": 3,
+      "category": "unanswerable",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": false,
+      "id": "eval-unanswerable-model",
+      "method": "hybrid",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.007601874996908009
+    },
+    {
+      "candidates": 2,
+      "category": "exact_lookup",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": true,
+      "id": "notes-run-record",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.013488417011103593
+    },
+    {
+      "candidates": 2,
+      "category": "paraphrase",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": true,
+      "id": "notes-five-outcomes",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.015204333001747727
+    },
+    {
+      "candidates": 2,
+      "category": "numeric_reasoning",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": true,
+      "id": "notes-rerank-cost",
+      "method": "hybrid",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.01697733299806714
+    }
+  ],
+  "comparison": {
+    "baseline": "expansion-none",
+    "delta": {
+      "hit_rate": 0.0,
+      "mrr": 0.0,
+      "ndcg": 0.0,
+      "recall": 0.0
+    },
+    "improvements": [],
+    "latency_delta": {
+      "retrieval_seconds": {
+        "p50": 0.0017195835025631823,
+        "p95": 0.0012368229945423082
+      }
+    },
+    "regressions": [],
+    "variant": "expansion-deterministic"
+  },
+  "dataset": "2026-09-labeled-cases-v1",
+  "evidence": {
+    "abstention": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "answers": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "citations": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "cost": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "deterministic": {
+      "graded": 16,
+      "measured": true
+    },
+    "human_calibration": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "model_graded": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "provider_failures": {
+      "measured": false,
+      "reason": "no provider was called, so no call could fail"
+    },
+    "tokens": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    }
+  },
+  "experiment": "expansion-deterministic",
+  "family": "query-expansion",
+  "held_back": [
+    "skating-failure-provider"
+  ],
+  "index": {
+    "bruening-2018-wearable-jump-monitor-figure-skating.pdf": {
+      "index_generation": 1,
+      "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"11349a78036284774230762bdcafa9f38ee19ec4a7115a46acb4d47ab9ddbf46\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
+      "indexed_seconds": 23.032657,
+      "is_processed": true
+    },
+    "papermind-eval-methods.pdf": {
+      "index_generation": 1,
+      "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
+      "indexed_seconds": 5.593472,
+      "is_processed": true
+    },
+    "papermind-rag-primer.pdf": {
+      "index_generation": 1,
+      "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
+      "indexed_seconds": 10.930474,
+      "is_processed": true
+    },
+    "papermind-team-notes.pdf": {
+      "index_generation": 1,
+      "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
+      "indexed_seconds": 4.875348,
+      "is_processed": true
+    }
+  },
+  "latency": {
+    "retrieval_seconds": {
+      "p50": 0.012034542000037618,
+      "p95": 0.017355603999021696,
+      "samples": 16
+    }
+  },
+  "retrieval": {
+    "hit_rate": 0.875,
+    "k": 5,
+    "mrr": 0.7364583333333333,
+    "ndcg": 0.7406498342013488,
+    "per_question": [
+      {
+        "candidates": 2,
+        "category": "exact_lookup",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": true,
+        "id": "primer-stages",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.008495832997141406
+      },
+      {
+        "candidates": 2,
+        "category": "exact_lookup",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": true,
+        "id": "primer-hit-rate",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.011546709007234313
+      },
+      {
+        "candidates": 2,
+        "category": "paraphrase",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": true,
+        "id": "primer-overlap",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.007467290997738019
+      },
+      {
+        "candidates": 5,
+        "category": "numeric_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-jump-counts",
+        "method": "hybrid",
+        "ndcg_at_k": 0.5,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "seconds": 0.01243149999936577
+      },
+      {
+        "candidates": 5,
+        "category": "exact_lookup",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-sensor-placement",
+        "method": "hybrid",
+        "ndcg_at_k": 0.38685280723454163,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.2,
+        "seconds": 0.01198304200079292
+      },
+      {
+        "candidates": 5,
+        "category": "exact_lookup",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-participants",
+        "method": "hybrid",
+        "ndcg_at_k": 0.43067655807339306,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.25,
+        "seconds": 0.016353624989278615
+      },
+      {
+        "candidates": 5,
+        "category": "numeric_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-candidate-counts",
+        "method": "hybrid",
+        "ndcg_at_k": 0.9197207891481876,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.01572466699872166
+      },
+      {
+        "candidates": 5,
+        "category": "multi_section_evidence",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": false,
+        "id": "skating-pps-across-sections",
+        "method": "hybrid",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.018490417001885362
+      },
+      {
+        "candidates": 3,
+        "category": "exact_lookup",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-metrics-list",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.012086041999282315
+      },
+      {
+        "candidates": 3,
+        "category": "paraphrase",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-recall-vs-hit-rate",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.011231707991100848
+      },
+      {
+        "candidates": 3,
+        "category": "table_reasoning",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-table-sparse-recall",
+        "method": "hybrid",
+        "ndcg_at_k": 0.6131471927654584,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.008246666999184527
+      },
+      {
+        "candidates": 3,
+        "category": "paraphrase",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-cold-start",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.008457499992800876
+      },
+      {
+        "candidates": 3,
+        "category": "unanswerable",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": false,
+        "id": "eval-unanswerable-model",
+        "method": "hybrid",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.007601874996908009
+      },
+      {
+        "candidates": 2,
+        "category": "exact_lookup",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": true,
+        "id": "notes-run-record",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.013488417011103593
+      },
+      {
+        "candidates": 2,
+        "category": "paraphrase",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": true,
+        "id": "notes-five-outcomes",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.015204333001747727
+      },
+      {
+        "candidates": 2,
+        "category": "numeric_reasoning",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": true,
+        "id": "notes-rerank-cost",
+        "method": "hybrid",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.01697733299806714
+      }
+    ],
+    "questions": 16,
+    "recall": 0.875
+  },
+  "split": "tuning"
+}

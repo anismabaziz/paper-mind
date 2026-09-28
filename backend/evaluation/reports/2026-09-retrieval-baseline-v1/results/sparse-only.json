@@ -1,0 +1,1307 @@
+{
+  "cases": [
+    {
+      "candidates": 2,
+      "category": "exact_lookup",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": true,
+      "id": "primer-recall-stricter",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.00879666701075621
+    },
+    {
+      "candidates": 2,
+      "category": "paraphrase",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": true,
+      "id": "primer-faithfulness",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.016035749998991378
+    },
+    {
+      "candidates": 2,
+      "category": "paraphrase",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": true,
+      "id": "primer-chunk-size",
+      "method": "sparse",
+      "ndcg_at_k": 0.6131471927654584,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.011879625002620742
+    },
+    {
+      "candidates": 2,
+      "category": "paraphrase",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": true,
+      "id": "primer-limits",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.010108291986398399
+    },
+    {
+      "candidates": 2,
+      "category": "unanswerable",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": false,
+      "id": "primer-unanswerable-model",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.006387457993696444
+    },
+    {
+      "candidates": 2,
+      "category": "follow_up",
+      "document": "papermind-rag-primer.pdf",
+      "hit_at_k": true,
+      "id": "primer-follow-up-generation",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.012040125002386048
+    },
+    {
+      "candidates": 5,
+      "category": "numeric_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": false,
+      "id": "skating-isolated-jumps",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.006326540998998098
+    },
+    {
+      "candidates": 5,
+      "category": "numeric_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-errors",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.016696375008905306
+    },
+    {
+      "candidates": 5,
+      "category": "numeric_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-routine-landings",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.005858542004716583
+    },
+    {
+      "candidates": 5,
+      "category": "numeric_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": false,
+      "id": "skating-rotation-threshold",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.01092337499721907
+    },
+    {
+      "candidates": 5,
+      "category": "paraphrase",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-missed-jumps",
+      "method": "sparse",
+      "ndcg_at_k": 0.6131471927654584,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.011635125003522262
+    },
+    {
+      "candidates": 5,
+      "category": "paraphrase",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-false-positive",
+      "method": "sparse",
+      "ndcg_at_k": 0.5,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 0.3333333333333333,
+      "seconds": 0.013031417009187862
+    },
+    {
+      "candidates": 5,
+      "category": "table_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": false,
+      "id": "skating-table-worst-flight-time",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.01144245799514465
+    },
+    {
+      "candidates": 5,
+      "category": "table_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": false,
+      "id": "skating-table-successful-pps",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.015830375006771646
+    },
+    {
+      "candidates": 5,
+      "category": "multi_section_evidence",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-height-underestimate",
+      "method": "sparse",
+      "ndcg_at_k": 0.6934264036172708,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 0.5,
+      "seconds": 0.013592292001703754
+    },
+    {
+      "candidates": 5,
+      "category": "numeric_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-rotation-doubles-triples",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.014230584012693726
+    },
+    {
+      "candidates": 5,
+      "category": "paraphrase",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-conclusion",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.010434124997118488
+    },
+    {
+      "candidates": 5,
+      "category": "unanswerable",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": false,
+      "id": "skating-unanswerable-heart-rate",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.012039916997309774
+    },
+    {
+      "candidates": 5,
+      "category": "unanswerable",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": false,
+      "id": "skating-unanswerable-cost",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.008284333991468884
+    },
+    {
+      "candidates": 1,
+      "category": "paraphrase",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-reciprocal-rank",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.007398499990813434
+    },
+    {
+      "candidates": 3,
+      "category": "table_reasoning",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-table-rerank-latency",
+      "method": "sparse",
+      "ndcg_at_k": 0.6131471927654584,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.006891124998219311
+    },
+    {
+      "candidates": 3,
+      "category": "paraphrase",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-sparse-paradox",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.010616291998303495
+    },
+    {
+      "candidates": 3,
+      "category": "paraphrase",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-correctness",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.011848624999402091
+    },
+    {
+      "candidates": 2,
+      "category": "paraphrase",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-citation-pair",
+      "method": "sparse",
+      "ndcg_at_k": 0.6131471927654584,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.011141625000163913
+    },
+    {
+      "candidates": 3,
+      "category": "paraphrase",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-abstention-errors",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.01242658300907351
+    },
+    {
+      "candidates": 3,
+      "category": "paraphrase",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-split-when",
+      "method": "sparse",
+      "ndcg_at_k": 0.6131471927654584,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.007961458002682775
+    },
+    {
+      "candidates": 3,
+      "category": "multi_section_evidence",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-what-cannot-be-generated",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.013474207997205667
+    },
+    {
+      "candidates": 3,
+      "category": "multi_section_evidence",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-report-alongside",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.013430040999082848
+    },
+    {
+      "candidates": 3,
+      "category": "follow_up",
+      "document": "papermind-eval-methods.pdf",
+      "hit_at_k": true,
+      "id": "eval-follow-up-ordering",
+      "method": "sparse",
+      "ndcg_at_k": 0.6309297535714575,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 0.5,
+      "seconds": 0.021290292002959177
+    },
+    {
+      "candidates": 2,
+      "category": "paraphrase",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": true,
+      "id": "notes-provider-failure",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.03545016600401141
+    },
+    {
+      "candidates": 1,
+      "category": "paraphrase",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": true,
+      "id": "notes-citation-repair",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.02378925000084564
+    },
+    {
+      "candidates": 2,
+      "category": "prompt_injection",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": true,
+      "id": "notes-injection-what-it-says",
+      "method": "sparse",
+      "ndcg_at_k": 0.6309297535714575,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 0.5,
+      "seconds": 0.006836291009676643
+    },
+    {
+      "candidates": 2,
+      "category": "prompt_injection",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": true,
+      "id": "notes-injection-not-agreed",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.006485000005341135
+    },
+    {
+      "candidates": 2,
+      "category": "follow_up",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": true,
+      "id": "notes-follow-up-hole",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.012970083000254817
+    },
+    {
+      "candidates": 2,
+      "category": "unanswerable",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": false,
+      "id": "notes-unanswerable-judge",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.007530874994699843
+    },
+    {
+      "candidates": 2,
+      "category": "unanswerable",
+      "document": "papermind-team-notes.pdf",
+      "hit_at_k": false,
+      "id": "notes-unanswerable-jump-count",
+      "method": "sparse",
+      "ndcg_at_k": 0.0,
+      "outcome": "success",
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.023106416992959566
+    },
+    {
+      "candidates": 5,
+      "category": "numeric_reasoning",
+      "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "hit_at_k": true,
+      "id": "skating-rotation-speed",
+      "method": "sparse",
+      "ndcg_at_k": 1.0,
+      "outcome": "success",
+      "recall_at_k": 1.0,
+      "reciprocal_rank": 1.0,
+      "seconds": 0.010866415992495604
+    }
+  ],
+  "comparison": {
+    "baseline": "dense-only",
+    "delta": {
+      "hit_rate": 0.027027027027027084,
+      "mrr": 0.10045045045045053,
+      "ndcg": 0.08770181850642911,
+      "recall": 0.04054054054054057
+    },
+    "improvements": [
+      {
+        "baseline": {
+          "hit_at_k": false,
+          "ndcg_at_k": 0.0,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.0
+        },
+        "delta": {
+          "hit_at_k": 1,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "id": "skating-errors",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.3065735963827292,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.3333333333333333
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": 0.306574,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.666667
+        },
+        "id": "skating-missed-jumps",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.6131471927654584,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.6131471927654584,
+          "recall_at_k": 0.5,
+          "reciprocal_rank": 1.0
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": 0.080279,
+          "recall_at_k": 0.5,
+          "reciprocal_rank": -0.5
+        },
+        "id": "skating-height-underestimate",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.6934264036172708,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.5
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.43067655807339306,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.25
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": 0.569323,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.75
+        },
+        "id": "skating-conclusion",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.6309297535714575,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": 0.36907,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.5
+        },
+        "id": "eval-correctness",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.38685280723454163,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.5
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": 0.226294,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.5
+        },
+        "id": "eval-citation-pair",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.6131471927654584,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.5,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.3333333333333333
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": 0.5,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.666667
+        },
+        "id": "eval-abstention-errors",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.9197207891481876,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": 0.080279,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.0
+        },
+        "id": "eval-what-cannot-be-generated",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": false,
+          "ndcg_at_k": 0.0,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.0
+        },
+        "delta": {
+          "hit_at_k": 1,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "id": "skating-rotation-speed",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
+      }
+    ],
+    "latency_delta": {
+      "retrieval_seconds": {
+        "p50": -0.0006703339895466343,
+        "p95": 0.003330908386851659
+      }
+    },
+    "regressions": [
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": -0.5,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": -0.666667
+        },
+        "id": "skating-false-positive",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.5,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.3333333333333333
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.38685280723454163,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.2
+        },
+        "delta": {
+          "hit_at_k": -1,
+          "ndcg_at_k": -0.386853,
+          "recall_at_k": -1.0,
+          "reciprocal_rank": -0.2
+        },
+        "id": "skating-table-worst-flight-time",
+        "variant": {
+          "hit_at_k": false,
+          "ndcg_at_k": 0.0,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.0
+        }
+      }
+    ],
+    "variant": "sparse-only"
+  },
+  "dataset": "2026-09-labeled-cases-v1",
+  "evidence": {
+    "abstention": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "answers": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "citations": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "cost": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "deterministic": {
+      "graded": 37,
+      "measured": true
+    },
+    "human_calibration": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "model_graded": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    },
+    "provider_failures": {
+      "measured": false,
+      "reason": "no provider was called, so no call could fail"
+    },
+    "tokens": {
+      "measured": false,
+      "reason": "retrieval-only measurement, nothing asked a model"
+    }
+  },
+  "experiment": "sparse-only",
+  "family": "retrieval-method",
+  "held_back": [
+    "skating-failure-citation",
+    "eval-failure-citation",
+    "notes-failure-provider"
+  ],
+  "index": {
+    "bruening-2018-wearable-jump-monitor-figure-skating.pdf": {
+      "index_generation": 1,
+      "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"11349a78036284774230762bdcafa9f38ee19ec4a7115a46acb4d47ab9ddbf46\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
+      "indexed_seconds": 23.857919,
+      "is_processed": true
+    },
+    "papermind-eval-methods.pdf": {
+      "index_generation": 1,
+      "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
+      "indexed_seconds": 7.409824,
+      "is_processed": true
+    },
+    "papermind-rag-primer.pdf": {
+      "index_generation": 1,
+      "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
+      "indexed_seconds": 11.542553,
+      "is_processed": true
+    },
+    "papermind-team-notes.pdf": {
+      "index_generation": 1,
+      "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
+      "indexed_seconds": 5.560442,
+      "is_processed": true
+    }
+  },
+  "latency": {
+    "retrieval_seconds": {
+      "p50": 0.011635125003522262,
+      "p95": 0.02324298359453678,
+      "samples": 37
+    }
+  },
+  "retrieval": {
+    "hit_rate": 0.7567567567567568,
+    "k": 5,
+    "mrr": 0.6981981981981983,
+    "ndcg": 0.6627303209347967,
+    "per_question": [
+      {
+        "candidates": 2,
+        "category": "exact_lookup",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": true,
+        "id": "primer-recall-stricter",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.00879666701075621
+      },
+      {
+        "candidates": 2,
+        "category": "paraphrase",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": true,
+        "id": "primer-faithfulness",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.016035749998991378
+      },
+      {
+        "candidates": 2,
+        "category": "paraphrase",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": true,
+        "id": "primer-chunk-size",
+        "method": "sparse",
+        "ndcg_at_k": 0.6131471927654584,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.011879625002620742
+      },
+      {
+        "candidates": 2,
+        "category": "paraphrase",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": true,
+        "id": "primer-limits",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.010108291986398399
+      },
+      {
+        "candidates": 2,
+        "category": "unanswerable",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": false,
+        "id": "primer-unanswerable-model",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.006387457993696444
+      },
+      {
+        "candidates": 2,
+        "category": "follow_up",
+        "document": "papermind-rag-primer.pdf",
+        "hit_at_k": true,
+        "id": "primer-follow-up-generation",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.012040125002386048
+      },
+      {
+        "candidates": 5,
+        "category": "numeric_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": false,
+        "id": "skating-isolated-jumps",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.006326540998998098
+      },
+      {
+        "candidates": 5,
+        "category": "numeric_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-errors",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.016696375008905306
+      },
+      {
+        "candidates": 5,
+        "category": "numeric_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-routine-landings",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.005858542004716583
+      },
+      {
+        "candidates": 5,
+        "category": "numeric_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": false,
+        "id": "skating-rotation-threshold",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.01092337499721907
+      },
+      {
+        "candidates": 5,
+        "category": "paraphrase",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-missed-jumps",
+        "method": "sparse",
+        "ndcg_at_k": 0.6131471927654584,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.011635125003522262
+      },
+      {
+        "candidates": 5,
+        "category": "paraphrase",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-false-positive",
+        "method": "sparse",
+        "ndcg_at_k": 0.5,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.3333333333333333,
+        "seconds": 0.013031417009187862
+      },
+      {
+        "candidates": 5,
+        "category": "table_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": false,
+        "id": "skating-table-worst-flight-time",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.01144245799514465
+      },
+      {
+        "candidates": 5,
+        "category": "table_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": false,
+        "id": "skating-table-successful-pps",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.015830375006771646
+      },
+      {
+        "candidates": 5,
+        "category": "multi_section_evidence",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-height-underestimate",
+        "method": "sparse",
+        "ndcg_at_k": 0.6934264036172708,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "seconds": 0.013592292001703754
+      },
+      {
+        "candidates": 5,
+        "category": "numeric_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-rotation-doubles-triples",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.014230584012693726
+      },
+      {
+        "candidates": 5,
+        "category": "paraphrase",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-conclusion",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.010434124997118488
+      },
+      {
+        "candidates": 5,
+        "category": "unanswerable",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": false,
+        "id": "skating-unanswerable-heart-rate",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.012039916997309774
+      },
+      {
+        "candidates": 5,
+        "category": "unanswerable",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": false,
+        "id": "skating-unanswerable-cost",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.008284333991468884
+      },
+      {
+        "candidates": 1,
+        "category": "paraphrase",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-reciprocal-rank",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.007398499990813434
+      },
+      {
+        "candidates": 3,
+        "category": "table_reasoning",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-table-rerank-latency",
+        "method": "sparse",
+        "ndcg_at_k": 0.6131471927654584,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.006891124998219311
+      },
+      {
+        "candidates": 3,
+        "category": "paraphrase",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-sparse-paradox",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.010616291998303495
+      },
+      {
+        "candidates": 3,
+        "category": "paraphrase",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-correctness",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.011848624999402091
+      },
+      {
+        "candidates": 2,
+        "category": "paraphrase",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-citation-pair",
+        "method": "sparse",
+        "ndcg_at_k": 0.6131471927654584,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.011141625000163913
+      },
+      {
+        "candidates": 3,
+        "category": "paraphrase",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-abstention-errors",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.01242658300907351
+      },
+      {
+        "candidates": 3,
+        "category": "paraphrase",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-split-when",
+        "method": "sparse",
+        "ndcg_at_k": 0.6131471927654584,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.007961458002682775
+      },
+      {
+        "candidates": 3,
+        "category": "multi_section_evidence",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-what-cannot-be-generated",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.013474207997205667
+      },
+      {
+        "candidates": 3,
+        "category": "multi_section_evidence",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-report-alongside",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.013430040999082848
+      },
+      {
+        "candidates": 3,
+        "category": "follow_up",
+        "document": "papermind-eval-methods.pdf",
+        "hit_at_k": true,
+        "id": "eval-follow-up-ordering",
+        "method": "sparse",
+        "ndcg_at_k": 0.6309297535714575,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "seconds": 0.021290292002959177
+      },
+      {
+        "candidates": 2,
+        "category": "paraphrase",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": true,
+        "id": "notes-provider-failure",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.03545016600401141
+      },
+      {
+        "candidates": 1,
+        "category": "paraphrase",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": true,
+        "id": "notes-citation-repair",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.02378925000084564
+      },
+      {
+        "candidates": 2,
+        "category": "prompt_injection",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": true,
+        "id": "notes-injection-what-it-says",
+        "method": "sparse",
+        "ndcg_at_k": 0.6309297535714575,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "seconds": 0.006836291009676643
+      },
+      {
+        "candidates": 2,
+        "category": "prompt_injection",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": true,
+        "id": "notes-injection-not-agreed",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.006485000005341135
+      },
+      {
+        "candidates": 2,
+        "category": "follow_up",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": true,
+        "id": "notes-follow-up-hole",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.012970083000254817
+      },
+      {
+        "candidates": 2,
+        "category": "unanswerable",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": false,
+        "id": "notes-unanswerable-judge",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.007530874994699843
+      },
+      {
+        "candidates": 2,
+        "category": "unanswerable",
+        "document": "papermind-team-notes.pdf",
+        "hit_at_k": false,
+        "id": "notes-unanswerable-jump-count",
+        "method": "sparse",
+        "ndcg_at_k": 0.0,
+        "outcome": "success",
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.023106416992959566
+      },
+      {
+        "candidates": 5,
+        "category": "numeric_reasoning",
+        "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+        "hit_at_k": true,
+        "id": "skating-rotation-speed",
+        "method": "sparse",
+        "ndcg_at_k": 1.0,
+        "outcome": "success",
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "seconds": 0.010866415992495604
+      }
+    ],
+    "questions": 37,
+    "recall": 0.7567567567567568
+  },
+  "split": "validation"
+}

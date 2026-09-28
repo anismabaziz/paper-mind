@@ -314,7 +314,9 @@ instructions (`http://localhost:6333` with `--no-judge` needs no chat key).
 **A published report backs the retrieval claims.**
 [`backend/evaluation/reports/2026-09-retrieval-baseline-v1/`](backend/evaluation/reports/2026-09-retrieval-baseline-v1/)
 is a checked-in run of the reported half of the case set against real
-documents, real local embeddings, and real Qdrant. It compares the shipped
+documents, real local embeddings, and real Qdrant, with
+[`2026-09-retrieval-tuning-v1`](backend/evaluation/reports/2026-09-retrieval-tuning-v1/)
+beside it covering the half the variants were chosen on. It compares the shipped
 configuration with dense-only, sparse-only, hybrid-only, reranked, two
 candidate depths, two query-expansion policies, and two chunking policies, all
 chosen on the tuning half, and reports retrieval quality, retrieval latency, and
