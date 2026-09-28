@@ -135,6 +135,9 @@ _TRANSIENT_MARKERS = (
     "reset",
     "overloaded",
     "rate limit",
+    # An SDK that reports a throttle with no body to quote leaves only its
+    # exception name, which carries no space.
+    "ratelimit",
     "too many requests",
     "internal server error",
     "bad gateway",

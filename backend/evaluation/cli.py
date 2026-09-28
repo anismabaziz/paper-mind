@@ -227,11 +227,14 @@ def _run_once(
     environment = _environment(dataset, app_settings, EVAL_PREFIX)
     try:
         started = time.monotonic()
+        # The generator is built inside the run, from the model and the key,
+        # through the app's own provider factory: the run asks the same factory
+        # a reader's request does rather than building a provider of its own.
         report = evaluate(
             dataset,
             environment,
-            provider=environment.provider(model_for(provider, model), generator_key),
             model=model_for(provider, model),
+            api_key=generator_key,
             judge=judge,
             k=k,
             calibrate=calibrate,
