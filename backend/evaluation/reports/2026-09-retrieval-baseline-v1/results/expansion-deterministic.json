@@ -11,7 +11,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.06370041699847206
+      "seconds": 0.010968750008032657
     },
     {
       "candidates": 2,
@@ -24,7 +24,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.05672154200146906
+      "seconds": 0.01677291700616479
     },
     {
       "candidates": 2,
@@ -37,7 +37,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.05242504199850373
+      "seconds": 0.021636292003677227
     },
     {
       "candidates": 2,
@@ -50,7 +50,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.06299187500553671
+      "seconds": 0.011764707989641465
     },
     {
       "candidates": 2,
@@ -63,7 +63,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.05194795900024474
+      "seconds": 0.01385766601015348
     },
     {
       "candidates": 2,
@@ -76,7 +76,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.07109020800271537
+      "seconds": 0.012377042003208771
     },
     {
       "candidates": 5,
@@ -89,7 +89,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.032810749995405786
+      "seconds": 0.013129790997481905
     },
     {
       "candidates": 5,
@@ -102,7 +102,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.042331874996307306
+      "seconds": 0.013098167008138262
     },
     {
       "candidates": 5,
@@ -115,7 +115,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.06344433299091179
+      "seconds": 0.02523908299917821
     },
     {
       "candidates": 5,
@@ -128,7 +128,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.08612375000666361
+      "seconds": 0.01204041599703487
     },
     {
       "candidates": 5,
@@ -141,7 +141,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.04083216701110359
+      "seconds": 0.01539099999354221
     },
     {
       "candidates": 5,
@@ -154,7 +154,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.09512037500098813
+      "seconds": 0.015907790992059745
     },
     {
       "candidates": 5,
@@ -167,7 +167,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.2,
-      "seconds": 0.06827229099872056
+      "seconds": 0.032178041990846395
     },
     {
       "candidates": 5,
@@ -180,7 +180,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.0738464589958312
+      "seconds": 0.008339499996509403
     },
     {
       "candidates": 5,
@@ -189,11 +189,11 @@
       "hit_at_k": true,
       "id": "skating-height-underestimate",
       "method": "hybrid",
-      "ndcg_at_k": 0.8503449055347546,
+      "ndcg_at_k": 0.6131471927654584,
       "outcome": "success",
-      "recall_at_k": 1.0,
+      "recall_at_k": 0.5,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04452375000983011
+      "seconds": 0.013113333989167586
     },
     {
       "candidates": 5,
@@ -206,7 +206,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.049536874998011626
+      "seconds": 0.01660183300555218
     },
     {
       "candidates": 5,
@@ -219,7 +219,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.07798195799114183
+      "seconds": 0.01654749999579508
     },
     {
       "candidates": 5,
@@ -232,7 +232,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.057929292001063004
+      "seconds": 0.013224833004642278
     },
     {
       "candidates": 5,
@@ -245,7 +245,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.07338045799406245
+      "seconds": 0.012397792001138441
     },
     {
       "candidates": 3,
@@ -258,7 +258,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04789104199153371
+      "seconds": 0.00760279200039804
     },
     {
       "candidates": 3,
@@ -271,7 +271,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.06931820799945854
+      "seconds": 0.006898541992995888
     },
     {
       "candidates": 3,
@@ -284,7 +284,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.03362724999897182
+      "seconds": 0.009141750007984228
     },
     {
       "candidates": 3,
@@ -297,7 +297,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.055282125002122484
+      "seconds": 0.006229999999050051
     },
     {
       "candidates": 3,
@@ -306,11 +306,11 @@
       "hit_at_k": true,
       "id": "eval-citation-pair",
       "method": "hybrid",
-      "ndcg_at_k": 0.38685280723454163,
+      "ndcg_at_k": 0.6131471927654584,
       "outcome": "success",
       "recall_at_k": 1.0,
-      "reciprocal_rank": 0.5,
-      "seconds": 0.05183054199733306
+      "reciprocal_rank": 1.0,
+      "seconds": 0.0064091669919434935
     },
     {
       "candidates": 3,
@@ -323,7 +323,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.03993708299822174
+      "seconds": 0.00625900000159163
     },
     {
       "candidates": 3,
@@ -336,7 +336,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.07277062500361353
+      "seconds": 0.008363041008124128
     },
     {
       "candidates": 3,
@@ -349,7 +349,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.08229525000206195
+      "seconds": 0.00528591699548997
     },
     {
       "candidates": 3,
@@ -362,7 +362,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.032536040991544724
+      "seconds": 0.006175750007969327
     },
     {
       "candidates": 3,
@@ -375,7 +375,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.028591416994458996
+      "seconds": 0.005370625003706664
     },
     {
       "candidates": 2,
@@ -388,7 +388,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.03106404098798521
+      "seconds": 0.01342212499002926
     },
     {
       "candidates": 2,
@@ -401,7 +401,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.05191520799417049
+      "seconds": 0.008417375007411465
     },
     {
       "candidates": 2,
@@ -414,7 +414,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.08052179199876264
+      "seconds": 0.012425624998286366
     },
     {
       "candidates": 2,
@@ -427,7 +427,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.058607749990187585
+      "seconds": 0.009390916005941108
     },
     {
       "candidates": 2,
@@ -440,7 +440,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.05495470800087787
+      "seconds": 0.006073959011700936
     },
     {
       "candidates": 2,
@@ -453,7 +453,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.04944016700028442
+      "seconds": 0.010303290997399017
     },
     {
       "candidates": 2,
@@ -466,7 +466,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.08138245799636934
+      "seconds": 0.008613124999101274
     },
     {
       "candidates": 5,
@@ -479,46 +479,47 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.056041916002868675
+      "seconds": 0.0102340409939643
     }
   ],
   "comparison": {
     "baseline": "expansion-none",
     "delta": {
       "hit_rate": 0.0,
-      "mrr": -0.013513513513513487,
-      "ndcg": -0.01214457992649609,
+      "mrr": 0.0,
+      "ndcg": -0.003858807051287272,
       "recall": 0.0
     },
-    "improvements": [],
-    "latency_delta": {
-      "retrieval_seconds": {
-        "p50": -0.0023305839858949184,
-        "p95": -0.0035126079950714567
-      }
-    },
-    "regressions": [
+    "improvements": [
       {
         "baseline": {
           "hit_at_k": true,
-          "ndcg_at_k": 1.0,
+          "ndcg_at_k": 0.38685280723454163,
           "recall_at_k": 1.0,
-          "reciprocal_rank": 1.0
+          "reciprocal_rank": 0.5
         },
         "delta": {
           "hit_at_k": 0,
-          "ndcg_at_k": -0.080279,
+          "ndcg_at_k": 0.226294,
           "recall_at_k": 0.0,
-          "reciprocal_rank": 0.0
+          "reciprocal_rank": 0.5
         },
-        "id": "eval-what-cannot-be-generated",
+        "id": "eval-citation-pair",
         "variant": {
           "hit_at_k": true,
-          "ndcg_at_k": 0.9197207891481876,
+          "ndcg_at_k": 0.6131471927654584,
           "recall_at_k": 1.0,
           "reciprocal_rank": 1.0
         }
-      },
+      }
+    ],
+    "latency_delta": {
+      "retrieval_seconds": {
+        "p50": -0.0006873750098748133,
+        "p95": -0.015352315994095995
+      }
+    },
+    "regressions": [
       {
         "baseline": {
           "hit_at_k": true,
@@ -593,40 +594,40 @@
     "bruening-2018-wearable-jump-monitor-figure-skating.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"11349a78036284774230762bdcafa9f38ee19ec4a7115a46acb4d47ab9ddbf46\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 23.857919,
+      "indexed_seconds": 22.106143,
       "is_processed": true
     },
     "papermind-eval-methods.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 7.409824,
+      "indexed_seconds": 5.983243,
       "is_processed": true
     },
     "papermind-rag-primer.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 11.542553,
+      "indexed_seconds": 11.763046,
       "is_processed": true
     },
     "papermind-team-notes.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 5.560442,
+      "indexed_seconds": 5.353086,
       "is_processed": true
     }
   },
   "latency": {
     "retrieval_seconds": {
-      "p50": 0.056041916002868675,
-      "p95": 0.08306095000298226,
+      "p50": 0.011764707989641465,
+      "p95": 0.022356850202777407,
       "samples": 37
     }
   },
   "retrieval": {
     "hit_rate": 0.7297297297297297,
     "k": 5,
-    "mrr": 0.6405405405405405,
-    "ndcg": 0.6125095933891166,
+    "mrr": 0.654054054054054,
+    "ndcg": 0.6122149088691604,
     "per_question": [
       {
         "candidates": 2,
@@ -639,7 +640,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.06370041699847206
+        "seconds": 0.010968750008032657
       },
       {
         "candidates": 2,
@@ -652,7 +653,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.05672154200146906
+        "seconds": 0.01677291700616479
       },
       {
         "candidates": 2,
@@ -665,7 +666,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.05242504199850373
+        "seconds": 0.021636292003677227
       },
       {
         "candidates": 2,
@@ -678,7 +679,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.06299187500553671
+        "seconds": 0.011764707989641465
       },
       {
         "candidates": 2,
@@ -691,7 +692,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.05194795900024474
+        "seconds": 0.01385766601015348
       },
       {
         "candidates": 2,
@@ -704,7 +705,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.07109020800271537
+        "seconds": 0.012377042003208771
       },
       {
         "candidates": 5,
@@ -717,7 +718,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.032810749995405786
+        "seconds": 0.013129790997481905
       },
       {
         "candidates": 5,
@@ -730,7 +731,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.042331874996307306
+        "seconds": 0.013098167008138262
       },
       {
         "candidates": 5,
@@ -743,7 +744,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.06344433299091179
+        "seconds": 0.02523908299917821
       },
       {
         "candidates": 5,
@@ -756,7 +757,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.08612375000666361
+        "seconds": 0.01204041599703487
       },
       {
         "candidates": 5,
@@ -769,7 +770,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.04083216701110359
+        "seconds": 0.01539099999354221
       },
       {
         "candidates": 5,
@@ -782,7 +783,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.09512037500098813
+        "seconds": 0.015907790992059745
       },
       {
         "candidates": 5,
@@ -795,7 +796,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.2,
-        "seconds": 0.06827229099872056
+        "seconds": 0.032178041990846395
       },
       {
         "candidates": 5,
@@ -808,7 +809,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.0738464589958312
+        "seconds": 0.008339499996509403
       },
       {
         "candidates": 5,
@@ -817,11 +818,11 @@
         "hit_at_k": true,
         "id": "skating-height-underestimate",
         "method": "hybrid",
-        "ndcg_at_k": 0.8503449055347546,
+        "ndcg_at_k": 0.6131471927654584,
         "outcome": "success",
-        "recall_at_k": 1.0,
+        "recall_at_k": 0.5,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04452375000983011
+        "seconds": 0.013113333989167586
       },
       {
         "candidates": 5,
@@ -834,7 +835,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.049536874998011626
+        "seconds": 0.01660183300555218
       },
       {
         "candidates": 5,
@@ -847,7 +848,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.07798195799114183
+        "seconds": 0.01654749999579508
       },
       {
         "candidates": 5,
@@ -860,7 +861,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.057929292001063004
+        "seconds": 0.013224833004642278
       },
       {
         "candidates": 5,
@@ -873,7 +874,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.07338045799406245
+        "seconds": 0.012397792001138441
       },
       {
         "candidates": 3,
@@ -886,7 +887,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04789104199153371
+        "seconds": 0.00760279200039804
       },
       {
         "candidates": 3,
@@ -899,7 +900,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.06931820799945854
+        "seconds": 0.006898541992995888
       },
       {
         "candidates": 3,
@@ -912,7 +913,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.03362724999897182
+        "seconds": 0.009141750007984228
       },
       {
         "candidates": 3,
@@ -925,7 +926,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.055282125002122484
+        "seconds": 0.006229999999050051
       },
       {
         "candidates": 3,
@@ -934,11 +935,11 @@
         "hit_at_k": true,
         "id": "eval-citation-pair",
         "method": "hybrid",
-        "ndcg_at_k": 0.38685280723454163,
+        "ndcg_at_k": 0.6131471927654584,
         "outcome": "success",
         "recall_at_k": 1.0,
-        "reciprocal_rank": 0.5,
-        "seconds": 0.05183054199733306
+        "reciprocal_rank": 1.0,
+        "seconds": 0.0064091669919434935
       },
       {
         "candidates": 3,
@@ -951,7 +952,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.03993708299822174
+        "seconds": 0.00625900000159163
       },
       {
         "candidates": 3,
@@ -964,7 +965,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.07277062500361353
+        "seconds": 0.008363041008124128
       },
       {
         "candidates": 3,
@@ -977,7 +978,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.08229525000206195
+        "seconds": 0.00528591699548997
       },
       {
         "candidates": 3,
@@ -990,7 +991,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.032536040991544724
+        "seconds": 0.006175750007969327
       },
       {
         "candidates": 3,
@@ -1003,7 +1004,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.028591416994458996
+        "seconds": 0.005370625003706664
       },
       {
         "candidates": 2,
@@ -1016,7 +1017,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.03106404098798521
+        "seconds": 0.01342212499002926
       },
       {
         "candidates": 2,
@@ -1029,7 +1030,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.05191520799417049
+        "seconds": 0.008417375007411465
       },
       {
         "candidates": 2,
@@ -1042,7 +1043,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.08052179199876264
+        "seconds": 0.012425624998286366
       },
       {
         "candidates": 2,
@@ -1055,7 +1056,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.058607749990187585
+        "seconds": 0.009390916005941108
       },
       {
         "candidates": 2,
@@ -1068,7 +1069,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.05495470800087787
+        "seconds": 0.006073959011700936
       },
       {
         "candidates": 2,
@@ -1081,7 +1082,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.04944016700028442
+        "seconds": 0.010303290997399017
       },
       {
         "candidates": 2,
@@ -1094,7 +1095,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.08138245799636934
+        "seconds": 0.008613124999101274
       },
       {
         "candidates": 5,
@@ -1107,11 +1108,11 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.056041916002868675
+        "seconds": 0.0102340409939643
       }
     ],
     "questions": 37,
-    "recall": 0.7297297297297297
+    "recall": 0.7162162162162162
   },
   "split": "validation"
 }

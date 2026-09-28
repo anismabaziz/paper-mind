@@ -11,7 +11,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.032476749998750165
+      "seconds": 0.03616366699861828
     },
     {
       "candidates": 2,
@@ -24,7 +24,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.030415665998589247
+      "seconds": 0.03390529200260062
     },
     {
       "candidates": 2,
@@ -37,7 +37,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.03692675000638701
+      "seconds": 0.009713917010230944
     },
     {
       "candidates": 5,
@@ -50,20 +50,20 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.3333333333333333,
-      "seconds": 0.023582040987093933
+      "seconds": 0.016607083001872525
     },
     {
       "candidates": 5,
       "category": "exact_lookup",
       "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
-      "hit_at_k": true,
+      "hit_at_k": false,
       "id": "skating-sensor-placement",
       "method": "hybrid",
-      "ndcg_at_k": 0.38685280723454163,
+      "ndcg_at_k": 0.0,
       "outcome": "success",
-      "recall_at_k": 1.0,
-      "reciprocal_rank": 0.2,
-      "seconds": 0.009743417002027854
+      "recall_at_k": 0.0,
+      "reciprocal_rank": 0.0,
+      "seconds": 0.01399058400420472
     },
     {
       "candidates": 5,
@@ -76,7 +76,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.25,
-      "seconds": 0.024387500001466833
+      "seconds": 0.0136098340008175
     },
     {
       "candidates": 5,
@@ -89,7 +89,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.013490500001353212
+      "seconds": 0.03952554101124406
     },
     {
       "candidates": 5,
@@ -102,7 +102,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.02227258299535606
+      "seconds": 0.015003624997916631
     },
     {
       "candidates": 3,
@@ -115,7 +115,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.010783499994431622
+      "seconds": 0.012495292001403868
     },
     {
       "candidates": 3,
@@ -128,7 +128,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.030306291999295354
+      "seconds": 0.014751082999282517
     },
     {
       "candidates": 3,
@@ -141,7 +141,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.010128499998245388
+      "seconds": 0.034951915993588045
     },
     {
       "candidates": 3,
@@ -154,7 +154,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.016166000001248904
+      "seconds": 0.010234457993647084
     },
     {
       "candidates": 3,
@@ -167,7 +167,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.009217082988470793
+      "seconds": 0.006311082994216122
     },
     {
       "candidates": 2,
@@ -180,7 +180,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.017820000008214265
+      "seconds": 0.009005542000522837
     },
     {
       "candidates": 2,
@@ -193,7 +193,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.010191166002186947
+      "seconds": 0.009172707999823615
     },
     {
       "candidates": 2,
@@ -206,7 +206,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.01514945799135603
+      "seconds": 0.010466875013662502
     }
   ],
   "comparison": {
@@ -275,40 +275,40 @@
     "bruening-2018-wearable-jump-monitor-figure-skating.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"11349a78036284774230762bdcafa9f38ee19ec4a7115a46acb4d47ab9ddbf46\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 23.032657,
+      "indexed_seconds": 20.077411,
       "is_processed": true
     },
     "papermind-eval-methods.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 5.593472,
+      "indexed_seconds": 5.389173,
       "is_processed": true
     },
     "papermind-rag-primer.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 10.930474,
+      "indexed_seconds": 10.766092,
       "is_processed": true
     },
     "papermind-team-notes.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 4.875348,
+      "indexed_seconds": 3.895133,
       "is_processed": true
     }
   },
   "latency": {
     "retrieval_seconds": {
-      "p50": 0.016993000004731584,
-      "p95": 0.033589250000659376,
+      "p50": 0.01380020900251111,
+      "p95": 0.037004135501774726,
       "samples": 16
     }
   },
   "retrieval": {
-    "hit_rate": 0.875,
+    "hit_rate": 0.8125,
     "k": 5,
-    "mrr": 0.7052083333333333,
-    "ndcg": 0.7175829437995649,
+    "mrr": 0.6927083333333334,
+    "ndcg": 0.693404643347406,
     "per_question": [
       {
         "candidates": 2,
@@ -321,7 +321,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.032476749998750165
+        "seconds": 0.03616366699861828
       },
       {
         "candidates": 2,
@@ -334,7 +334,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.030415665998589247
+        "seconds": 0.03390529200260062
       },
       {
         "candidates": 2,
@@ -347,7 +347,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.03692675000638701
+        "seconds": 0.009713917010230944
       },
       {
         "candidates": 5,
@@ -360,20 +360,20 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.3333333333333333,
-        "seconds": 0.023582040987093933
+        "seconds": 0.016607083001872525
       },
       {
         "candidates": 5,
         "category": "exact_lookup",
         "document": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
-        "hit_at_k": true,
+        "hit_at_k": false,
         "id": "skating-sensor-placement",
         "method": "hybrid",
-        "ndcg_at_k": 0.38685280723454163,
+        "ndcg_at_k": 0.0,
         "outcome": "success",
-        "recall_at_k": 1.0,
-        "reciprocal_rank": 0.2,
-        "seconds": 0.009743417002027854
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "seconds": 0.01399058400420472
       },
       {
         "candidates": 5,
@@ -386,7 +386,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.25,
-        "seconds": 0.024387500001466833
+        "seconds": 0.0136098340008175
       },
       {
         "candidates": 5,
@@ -399,7 +399,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.013490500001353212
+        "seconds": 0.03952554101124406
       },
       {
         "candidates": 5,
@@ -412,7 +412,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.02227258299535606
+        "seconds": 0.015003624997916631
       },
       {
         "candidates": 3,
@@ -425,7 +425,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.010783499994431622
+        "seconds": 0.012495292001403868
       },
       {
         "candidates": 3,
@@ -438,7 +438,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.030306291999295354
+        "seconds": 0.014751082999282517
       },
       {
         "candidates": 3,
@@ -451,7 +451,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.010128499998245388
+        "seconds": 0.034951915993588045
       },
       {
         "candidates": 3,
@@ -464,7 +464,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.016166000001248904
+        "seconds": 0.010234457993647084
       },
       {
         "candidates": 3,
@@ -477,7 +477,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.009217082988470793
+        "seconds": 0.006311082994216122
       },
       {
         "candidates": 2,
@@ -490,7 +490,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.017820000008214265
+        "seconds": 0.009005542000522837
       },
       {
         "candidates": 2,
@@ -503,7 +503,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.010191166002186947
+        "seconds": 0.009172707999823615
       },
       {
         "candidates": 2,
@@ -516,11 +516,11 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.01514945799135603
+        "seconds": 0.010466875013662502
       }
     ],
     "questions": 16,
-    "recall": 0.875
+    "recall": 0.8125
   },
   "split": "tuning"
 }
