@@ -246,6 +246,9 @@ def test_transience_is_read_from_the_error_not_the_provider():
     assert is_transient_error(ConnectionError("connection reset by peer"))
     assert is_transient_error(RuntimeError("429 rate limit exceeded"))
     assert is_transient_error(RuntimeError("503 service unavailable"))
+    # An SDK that reports a throttle as its exception's own name, with no body
+    # to quote, still has to read as a throttle.
+    assert is_transient_error(RuntimeError("RateLimitError"))
     assert not is_transient_error(PermissionError("invalid api key"))
     assert not is_transient_error(ValueError("bad request"))
 
