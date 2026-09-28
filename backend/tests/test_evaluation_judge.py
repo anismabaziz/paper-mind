@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from evaluation import judge
+from evaluation import cli, judge
 from evaluation.calibration import (
     CALIBRATION_PATH,
     CalibrationCase,
@@ -113,6 +113,42 @@ class TestRubric:
         assert "unfaithful" in prompt
         assert UNKNOWN in prompt
         assert RUBRIC_VERSION in prompt
+
+    def test_a_judge_call_that_failed_is_unknown_rather_than_a_crash(self):
+        """One throttled call must not throw away a run that is half done."""
+        from services.llm.base import ChatCredentials, LLMProvider
+
+        class Throttled(LLMProvider):
+            """A judge provider that is rate limited on every call."""
+
+            name = "throttled"
+
+            def _build_client(self):
+                """No client is needed to fail the way the SDK does."""
+                return None
+
+            def verify(self):
+                """Verification is not what this double exercises."""
+                return None
+
+            def _generate_response(self, query, context, history=""):
+                """Fail the way an SDK reports a throttle with no body."""
+                raise RuntimeError("RateLimitError")
+
+            def _stream_response(self, query, context, history=""):
+                """Refuse a stream: the judge grades one-shot, and this double never streams."""
+                raise NotImplementedError
+
+        original = cli._judge_provider
+        cli._judge_provider = lambda provider, model, api_key: Throttled(api_key, model)
+        try:
+            built = cli.build_evaluation_judge("groq", "openai/gpt-oss-120b", "key")
+        finally:
+            cli._judge_provider = original
+
+        verdict, score = judge_faithfulness("Q", "A", "CTX", built)
+
+        assert (verdict, score) == (UNKNOWN, None)
 
     def test_the_correctness_prompt_carries_the_expected_answer(self):
         """Correctness is judged against the label, so the label is in the prompt."""
