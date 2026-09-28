@@ -167,6 +167,29 @@ MODEL_CATALOG = (
         finish_reasons=_GROQ_FINISH_REASONS,
         complete_finish_reasons=COMPLETE_FINISH_REASONS,
     ),
+    ModelCapabilities(
+        # A third Qwen-family option alongside the two Groq-hosted open models,
+        # with a quarter of their output window and a shorter one: its own
+        # listing reports 16k max completion against the 131k context, so the
+        # input budget has to leave room for an answer that can actually fit.
+        # Prices are the ones Groq's model listing reports.
+        provider="groq",
+        id="qwen/qwen3.8-27b",
+        context_window_tokens=131_072,
+        max_output_tokens=16_384,
+        structured_output=True,
+        tool_use=True,
+        input_cost_per_million_usd=0.80,
+        output_cost_per_million_usd=4.00,
+        pricing_tier="standard",
+        data_location="cloud",
+        timeout_seconds=VERIFY_TIMEOUT_SECONDS,
+        max_input_tokens=112_000,
+        answer_token_budget=DEFAULT_ANSWER_TOKEN_BUDGET,
+        generation_timeout_seconds=DEFAULT_GENERATION_TIMEOUT_SECONDS,
+        finish_reasons=_GROQ_FINISH_REASONS,
+        complete_finish_reasons=COMPLETE_FINISH_REASONS,
+    ),
 )
 
 DEFAULT_PROVIDER = "google"

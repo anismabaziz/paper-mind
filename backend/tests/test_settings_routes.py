@@ -240,6 +240,7 @@ def test_get_settings_exposes_current_model_capabilities(client):
         ("google", "gemini-3.5-flash"),
         ("groq", "openai/gpt-oss-20b"),
         ("groq", "openai/gpt-oss-120b"),
+        ("groq", "qwen/qwen3.8-27b"),
     }
     assert catalog[("google", "gemini-2.5-flash")] == {
         "provider": "google",

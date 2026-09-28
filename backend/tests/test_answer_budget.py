@@ -78,6 +78,10 @@ def test_every_model_publishes_an_explicit_input_and_output_budget():
         assert model.max_input_tokens + model.answer_token_budget <= (
             model.context_window_tokens
         ), model.id
+        # A budget larger than the model's own output window is a promise the
+        # provider cannot keep, and it is the kind of mismatch that only shows
+        # up as a truncated answer on one model.
+        assert model.answer_token_budget <= model.max_output_tokens, model.id
 
 
 def test_every_model_publishes_a_generation_timeout():
