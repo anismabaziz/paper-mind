@@ -78,6 +78,10 @@ EVAL_PREFIX = "eval-"
 GENERATOR_API_KEY_ENV = "PAPERMIND_EVAL_GENERATOR_API_KEY"
 JUDGE_API_KEY_ENV = "PAPERMIND_EVAL_JUDGE_API_KEY"
 
+#: What a judge call that failed comes back as: a reply that is not a verdict,
+#: so the case is reported Unknown rather than graded or crashed on.
+JUDGE_FAILED = "the judge's call failed"
+
 #: The judge's one-shot instruction, carried as the question so the provider's
 #: own prompt framing stays the one the app uses.
 JUDGE_INSTRUCTION = (
@@ -141,16 +145,27 @@ def build_evaluation_judge(provider: str, model: str, api_key: str) -> Judge:
 
 
 def _judge_callable(provider: str, model: str, api_key: str) -> Callable[[str], str]:
-    """Return the callable that sends one rubric prompt to the judge's model."""
+    """
+    Return the callable that sends one rubric prompt to the judge's model.
+
+    A call that fails — a throttle, a timeout, a provider that fell back to
+    quoting the request back — comes back as a reply that is not a verdict
+    rather than as an exception. A throttled judge is a case nothing could be
+    decided about, which the report already has a word for: Unknown. Raising
+    instead would throw away a half-finished run over one call.
+    """
     judge_provider = _judge_provider(provider, model, api_key)
 
     def grade(prompt: str) -> str:
-        """Return the judge's reply, refusing to grade a call that failed."""
-        verdict = judge_provider.generate_response(JUDGE_INSTRUCTION, prompt)
+        """Return the judge's reply, or a non-verdict when the call failed."""
+        try:
+            verdict = judge_provider.generate_response(JUDGE_INSTRUCTION, prompt)
+        except Exception:  # noqa: BLE001 - any provider failure is an Unknown
+            return JUDGE_FAILED
         if verdict in (judge_provider.FALLBACK_ANSWER,) or is_context_fallback(verdict):
             # Reported without the provider's own words: a failure can quote the
             # request or the key back, and neither belongs in a report.
-            raise RuntimeError("Evaluation judge failed: the provider call failed")
+            return JUDGE_FAILED
         return verdict
 
     return grade

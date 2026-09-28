@@ -1409,8 +1409,14 @@ class TestCliConfiguration:
         assert credentials.model == "openai/gpt-oss-120b"
         assert credentials.api_key == "groq-secret"
 
-    def test_a_failed_judge_call_reports_a_category_and_no_key(self, monkeypatch):
-        """A provider error can quote the key back, and never reaches a report."""
+    def test_a_failed_judge_call_is_unknown_and_carries_no_key(self, monkeypatch):
+        """
+        A provider error can quote the key back, and never reaches a report.
+
+        A judge that could not be reached leaves the case Unknown rather than
+        throwing the run away, so the reply that stands in for it must carry
+        neither the failure's own words nor the key it tried to echo back.
+        """
         secret = "sk-judge-secret"
         monkeypatch.setattr(
             cli,
@@ -1419,11 +1425,10 @@ class TestCliConfiguration:
         )
         grader = cli.build_evaluation_judge("google", "gemini-2.5-flash", secret)
 
-        with pytest.raises(RuntimeError) as failure:
-            grader("grade this")
+        reply = grader("grade this")
 
-        assert secret not in str(failure.value)
-        assert "the provider call failed" in str(failure.value)
+        assert secret not in reply
+        assert judge.parse_verdict(reply) == (judge.UNKNOWN, None)
 
     def test_the_cli_defaults_to_an_active_catalog_model(self, monkeypatch, capsys):
         """Do test the cli defaults to an active catalog model."""
