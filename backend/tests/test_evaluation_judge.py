@@ -114,9 +114,13 @@ class TestRubric:
         assert UNKNOWN in prompt
         assert RUBRIC_VERSION in prompt
 
-    def test_a_judge_call_that_failed_is_unknown_rather_than_a_crash(self):
+    def test_a_judge_call_that_failed_is_unknown_rather_than_a_crash(self, monkeypatch):
         """One throttled call must not throw away a run that is half done."""
-        from services.llm.base import ChatCredentials, LLMProvider
+        from services.llm.base import LLMProvider
+
+        # The pause between attempts is exercised by the test below; this one
+        # only asks what a judge that never answered becomes.
+        monkeypatch.setattr(cli, "JUDGE_BACKOFF_SECONDS", ())
 
         class Throttled(LLMProvider):
             """A judge provider that is rate limited on every call."""
@@ -141,14 +145,61 @@ class TestRubric:
 
         original = cli._judge_provider
         cli._judge_provider = lambda provider, model, api_key: Throttled(api_key, model)
-        try:
-            built = cli.build_evaluation_judge("groq", "openai/gpt-oss-120b", "key")
-        finally:
-            cli._judge_provider = original
+        built = cli.build_evaluation_judge("groq", "openai/gpt-oss-120b", "key")
 
         verdict, score = judge_faithfulness("Q", "A", "CTX", built)
 
         assert (verdict, score) == (UNKNOWN, None)
+
+    def test_a_throttled_judge_is_asked_again_before_giving_up(self, monkeypatch):
+        """A rate limit is the one failure a pause fixes, so it is retried."""
+        import time as time_module
+
+        from services.llm.base import ChatBudget, LLMProvider
+
+        waits = []
+        monkeypatch.setattr(time_module, "sleep", waits.append)
+
+        class ThrottledOnce(LLMProvider):
+            """A judge provider that is throttled once and then answers."""
+
+            name = "throttled-once"
+
+            def __init__(self, api_key, model):
+                """Start with one throttle still to come."""
+                super().__init__(api_key, model, budget=ChatBudget())
+                self.attempts = 0
+
+            def _build_client(self):
+                """No client is needed to fail and then answer."""
+                return None
+
+            def verify(self):
+                """Verification is not what this double exercises."""
+                return None
+
+            def _generate_response(self, query, context, history=""):
+                """Throttle the first call, then return the verdict."""
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise RuntimeError("RateLimitError")
+                return "faithful"
+
+            def _stream_response(self, query, context, history=""):
+                """Refuse a stream: the judge grades one-shot."""
+                raise NotImplementedError
+
+        monkeypatch.setattr(
+            cli,
+            "_judge_provider",
+            lambda provider, model, api_key: ThrottledOnce(api_key, model),
+        )
+        built = cli.build_evaluation_judge("groq", "openai/gpt-oss-120b", "key")
+
+        verdict, score = judge_faithfulness("Q", "A", "CTX", built)
+
+        assert (verdict, score) == ("faithful", 1.0)
+        assert waits == [cli.JUDGE_BACKOFF_SECONDS[0]]
 
     def test_the_correctness_prompt_carries_the_expected_answer(self):
         """Correctness is judged against the label, so the label is in the prompt."""

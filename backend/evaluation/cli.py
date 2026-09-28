@@ -82,6 +82,12 @@ JUDGE_API_KEY_ENV = "PAPERMIND_EVAL_JUDGE_API_KEY"
 #: so the case is reported Unknown rather than graded or crashed on.
 JUDGE_FAILED = "the judge's call failed"
 
+#: How long to wait before asking the judge again, and how many times to ask.
+#: A judge is three calls per case on a rate-limited account, and a throttle is
+#: the one failure a pause fixes; a rejected key or a malformed prompt is not,
+#: so only a transient failure spends another call.
+JUDGE_BACKOFF_SECONDS = (2.0, 6.0, 15.0)
+
 #: The judge's one-shot instruction, carried as the question so the provider's
 #: own prompt framing stays the one the app uses.
 JUDGE_INSTRUCTION = (
@@ -153,20 +159,35 @@ def _judge_callable(provider: str, model: str, api_key: str) -> Callable[[str], 
     rather than as an exception. A throttled judge is a case nothing could be
     decided about, which the report already has a word for: Unknown. Raising
     instead would throw away a half-finished run over one call.
+
+    A call that produced no verdict is asked again after a pause, because a
+    rate limit is the one failure that waiting fixes, and a judged run that
+    quietly decided a third of its cases is a worse report than a slower one.
+    Only a bounded number of extra calls: an account that is out of credit
+    should end the run's judging, not spend it.
     """
     judge_provider = _judge_provider(provider, model, api_key)
 
     def grade(prompt: str) -> str:
         """Return the judge's reply, or a non-verdict when the call failed."""
-        try:
-            verdict = judge_provider.generate_response(JUDGE_INSTRUCTION, prompt)
-        except Exception:  # noqa: BLE001 - any provider failure is an Unknown
-            return JUDGE_FAILED
-        if verdict in (judge_provider.FALLBACK_ANSWER,) or is_context_fallback(verdict):
-            # Reported without the provider's own words: a failure can quote the
-            # request or the key back, and neither belongs in a report.
-            return JUDGE_FAILED
-        return verdict
+        for attempt in range(len(JUDGE_BACKOFF_SECONDS) + 1):
+            if attempt:
+                time.sleep(JUDGE_BACKOFF_SECONDS[attempt - 1])
+            try:
+                reply = judge_provider.generate_response(JUDGE_INSTRUCTION, prompt)
+            except Exception as exc:  # noqa: BLE001 - any failure is an Unknown
+                if not is_transient_error(exc):
+                    return JUDGE_FAILED
+                continue
+            if reply in (judge_provider.FALLBACK_ANSWER,) or is_context_fallback(reply):
+                # A provider that failed hands back the context it was given
+                # rather than raising, and a throttle looks like every other
+                # failure from here. The call is asked again; the reply that
+                # stands in for a judge that never answered carries neither the
+                # failure's own words nor the key it tried to echo back.
+                continue
+            return reply
+        return JUDGE_FAILED
 
     return grade
 
@@ -405,19 +426,26 @@ def result_of_run(run_record: dict) -> dict:
 
     The evidence section is what a reader goes to first: it says which of the
     numbers in the result a model decided, which a deterministic grader decided,
-    and which the run could not measure at all.
+    and which the run could not measure at all. The latency is flattened to the
+    retrieval measurement a table cell wants, because an answer-path run's
+    steady state is the only population of it that describes a reader waiting.
     """
+    latency = dict(run_record["latency"])
+    latency["retrieval_seconds"] = latency["steady_state"]["retrieval_seconds"]
     return {
         "experiment": experiments.BASELINE.id,
         "family": experiments.BASELINE.family,
         "dataset": run_record["run"]["dataset"],
         "split": run_record["run"]["split"],
+        "held_back": run_record["run"]["held_back"],
         "index": run_record["run"]["documents"],
         "retrieval": run_record["retrieval"],
         "answers": run_record["answers"],
-        "latency": run_record["latency"],
+        "outcomes": run_record["outcomes"],
+        "latency": latency,
         "cost": run_record["cost"],
         "calibration": run_record.get("calibration"),
+        "judge": run_record["run"].get("judge"),
         "cases": run_record["cases"],
         "evidence": report.evidence_from_run(run_record),
     }
@@ -678,7 +706,7 @@ def main(argv=None):
         include_faults=args.include_faults,
     )
     if args.report:
-        _publish_report([result_of_run(run_report)], [run_report["run"]], args)
+        _publish_report([result_of_run(run_report)], [run_report], args)
     if args.as_json:
         print(json.dumps(run_report, indent=2))
         return

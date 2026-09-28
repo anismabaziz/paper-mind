@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from evaluation import ablations, experiments, evaluator, report
+from evaluation import ablations, cli, experiments, evaluator, report
 from evaluation.dataset import TUNING, load_dataset
 from evaluation.harness import SAMPLE_DOCS_DIR, remove_documents
 from services.accounts.chat_settings_service import model_for
@@ -200,6 +200,78 @@ class TestWhatTheManifestRecords:
         written = json.dumps(manifest)
         assert "PAPERMIND_EVAL_GENERATOR_API_KEY" not in written
         assert "api_key" not in written
+
+
+def an_answer_run(dataset, environment, cases, judge=None):
+    """Return the report shape a live run hands to the report writer."""
+    from dataclasses import replace
+
+    return evaluator.evaluate(
+        replace(dataset, cases=tuple(cases)),
+        environment,
+        MODEL,
+        api_key="not-a-real-key",
+        judge=judge,
+        split=TUNING,
+    ).as_dict()
+
+
+def a_judge(reply="faithful"):
+    """Return a judge with the identity a run records beside its scores."""
+    from evaluation.judge import Judge, JudgeSettings
+
+    return Judge(
+        settings=JudgeSettings(provider="google", model="gemini-2.5-flash"),
+        grade=lambda prompt: reply,
+    )
+
+
+class TestAnAnswerPathReport:
+    """A report of the answer path is read for what the answers said."""
+
+    def test_a_judged_run_reports_its_judge_as_measured(
+        self, dataset, environment, cases
+    ):
+        """A run that graded with a judge is not reported as unjudged."""
+        result = report.evidence_from_run(
+            an_answer_run(dataset, environment, cases, a_judge())
+        )
+
+        assert result["model_graded"]["measured"] is True
+        assert result["model_graded"]["verdicts"] > 0
+
+    def test_a_calibration_that_decided_nothing_is_not_calibration(
+        self, dataset, environment, cases
+    ):
+        """Agreement over no decided cases is not a number."""
+        result = report.evidence_from_run(
+            an_answer_run(dataset, environment, cases, a_judge("I cannot say"))
+        )
+
+        assert result["human_calibration"]["measured"] is True
+        assert result["human_calibration"]["agreement"] is None
+        assert result["human_calibration"]["decided"] == 0
+
+    def test_the_summary_of_an_answer_run_shows_the_answer_metrics(
+        self, dataset, settings_obj, environment, cases
+    ):
+        """A report a reviewer opens for answer quality has to show them."""
+        run_record = an_answer_run(dataset, environment, cases)
+        results = [cli.result_of_run(run_record)]
+
+        summary = report.render(
+            report.build_manifest(
+                dataset=dataset,
+                settings=settings_obj,
+                results=results,
+                run_records=[run_record],
+            ),
+            results,
+        )
+
+        assert "## Answers" in summary
+        assert "Correctness" in summary
+        assert "Abstention" in summary
 
 
 class TestAnAnswerPathRun:

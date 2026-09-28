@@ -63,6 +63,12 @@ _TIMING_FIELDS = frozenset(
     }
 )
 
+#: What a report measured, which decides how its summary is written. Retrieval
+#: reports compare experiments; an answer-path report has one column and its
+#: numbers are about answers, not about ranking.
+ABLATION_MODE = "retrieval-ablations"
+ANSWER_MODE = "answer-path"
+
 #: The kinds of evidence a report distinguishes. Deterministic checks are
 #: computed from text; model-graded results come from a judge; human
 #: calibration compares the judge with a person; provider failures are the runs
@@ -180,6 +186,7 @@ def evidence_from_run(run: dict[str, Any]) -> dict[str, Any]:
     no good citations, which is why the answer and token sections are not
     measured for a run in which nothing was written.
     """
+    record = run.get("run", run)
     answers = run["answers"]
     cost = run["cost"]
     outcomes = run["outcomes"]
@@ -187,6 +194,9 @@ def evidence_from_run(run: dict[str, Any]) -> dict[str, Any]:
     judged = [case for case in run["cases"] if case.get("verdict")]
     failures = outcomes.get("provider_error", 0) + outcomes.get("context_fallback", 0)
     priced = cost["priced_cases"] > 0
+    # A judge that could not be reached decides nothing, which is reported as
+    # Unknown rather than as a score: a broken judge is not evidence about the
+    # model that wrote the answer.
     return {
         "deterministic": {
             "measured": True,
@@ -194,11 +204,17 @@ def evidence_from_run(run: dict[str, Any]) -> dict[str, Any]:
         },
         "model_graded": (
             {"measured": True, "verdicts": len(judged)}
-            if run.get("judge")
+            if record.get("judge")
             else {"measured": False, "reason": "no judge was configured for this run"}
         ),
         "human_calibration": (
-            {"measured": True, "agreement": calibration["agreement"]}
+            # A calibration run that decided nothing has not calibrated
+            # anything, however many cases it was handed.
+            {
+                "measured": True,
+                "agreement": calibration["agreement"],
+                "decided": calibration["agreed"] + calibration["disagreed"],
+            }
             if calibration
             else {"measured": False, "reason": "the calibration set was not run"}
         ),
@@ -309,9 +325,17 @@ def _split_of(results: Sequence[dict[str, Any]]) -> str:
     return splits.pop() or ""
 
 
+def _run_record(run_records: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Return the run record, whether a whole report or the record was passed."""
+    if not run_records:
+        return {}
+    first = run_records[0]
+    return first.get("run", first)
+
+
 def _model(settings, run_records: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Return the models a report names: the two local ones and the two remote."""
-    run = run_records[0] if run_records else {}
+    run = _run_record(run_records)
     judge = run.get("judge")
     return {
         "embedding": {
@@ -382,9 +406,10 @@ def build_manifest(
     run of the same experiments is compared against the first by comparing two
     manifests rather than two directories of numbers.
     """
-    run = run_records[0] if run_records else {}
+    run = _run_record(run_records)
     return {
         "report_version": REPORT_VERSION,
+        "mode": ANSWER_MODE if run_records else ABLATION_MODE,
         "revision": revision or git_revision(),
         "dataset": {
             "version": dataset.version,
@@ -609,6 +634,76 @@ def columns(results: Iterable[dict[str, Any]]) -> list[Column]:
     return table
 
 
+def _model_line(model: dict[str, Any] | None, label: str) -> str:
+    """Return the line naming the model that generated or judged a run."""
+    if not model:
+        return ""
+    revision = f" at `{model['revision']}`" if model.get("revision") else ""
+    return f"{label} `{model['id']}` on {model['provider']}{revision}"
+
+
+#: The answer metrics a table of an answer-path run shows, in the order a
+#: reader wants them: what the answers said, then whether they can be checked.
+ANSWER_METRICS = (
+    ("correctness", "Correctness"),
+    ("faithfulness", "Faithfulness"),
+    ("citation_precision", "Citation precision"),
+    ("citation_recall", "Citation recall"),
+    ("abstention", "Abstention"),
+)
+
+
+def _answer_table(results: Sequence[dict[str, Any]]) -> list[str]:
+    """
+    Return the table of what the answers said and what could be decided.
+
+    A metric with cases nothing could be decided about shows its ``unknown``
+    count beside the mean, because a mean over the cases that survived a
+    throttled judge reads as a better result than it is.
+    """
+    lines = [
+        "## Answers",
+        "",
+        "| Metric | Mean | Scored | Unknown | Failed |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for result in results:
+        answers = result.get("answers") or {}
+        for name, label in ANSWER_METRICS:
+            metric = answers.get(name)
+            if metric is None:
+                continue
+            lines.append(
+                f"| {label} | {_number(metric['mean'])} | "
+                f"{metric['scored']}/{metric['graded']} | {metric['unknown']} | "
+                f"{metric['failed']} |"
+            )
+        cost = result.get("cost") or {}
+        if cost.get("priced_cases"):
+            lines.append(
+                f"| Cost | ${cost['usd']:.4f} | {cost['priced_cases']} answered | "
+                f"{cost['input_tokens']} in / {cost['output_tokens']} out | - |"
+            )
+    calibration = next(
+        (result.get("calibration") for result in results if result.get("calibration")),
+        None,
+    )
+    if calibration:
+        decided = calibration["agreed"] + calibration["disagreed"]
+        agreement = calibration["agreement"]
+        lines += [
+            "",
+            f"The judge agreed with the hand-labelled set on "
+            + (
+                f"{agreement:.0%} of {decided} decided cases."
+                if agreement is not None
+                else f"none of {calibration['cases']} labelled cases — it decided "
+                "nothing, so its verdicts above carry no weight."
+            ),
+        ]
+    return lines
+
+
 def _moved(results: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return every question that moved, with the move and the direction."""
     moved = []
@@ -639,15 +734,23 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
     dataset = manifest["dataset"]
     models = manifest["models"]
     environment = manifest["environment"]
+    mode = manifest.get("mode", ABLATION_MODE)
     lines = [
-        f"# Retrieval baseline: case set {dataset['version']}",
+        f"# {'Answers' if mode == ANSWER_MODE else 'Retrieval'}"
+        f"{'' if mode == ANSWER_MODE else ' baseline'}: case set "
+        f"{dataset['version']}",
         "",
         f"Measured on revision `{revision['revision'][:12] or 'unknown'}` "
         f"({revision.get('subject', '')})"
         + (", with uncommitted changes" if revision.get("dirty") else ""),
         f"Case set {dataset['version']} (reviewed {dataset['reviewed_on']}), split "
-        f"`{dataset['split']}`: {dataset['cases']} questions asked of each of the "
-        f"{len(results)} experiments, "
+        f"`{dataset['split']}`: {dataset['cases']} questions asked of "
+        + (
+            "the shipped configuration."
+            if mode == ANSWER_MODE
+            else f"each of the {len(results)} experiments."
+        )
+        + " "
         + (
             f"{len(dataset['held_back'])} of the split's cases held back "
             f"({', '.join(f'`{name}`' for name in dataset['held_back'])})."
@@ -659,12 +762,18 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
             f" at `{models['embedding']['revision']}`"
             if models["embedding"]["revision"]
             else ""
-        ),
-        f"Reranker `{models['reranker']['id']}`"
+        )
+        + _model_line(models["generator"], "Generating model")
+        + _model_line(models["judge"], "Judging model")
         + (
-            f" at `{models['reranker']['revision']}`"
-            if models["reranker"]["revision"]
-            else ""
+            ""
+            if mode == ANSWER_MODE
+            else f"Reranker `{models['reranker']['id']}`"
+            + (
+                f" at `{models['reranker']['revision']}`"
+                if models["reranker"]["revision"]
+                else ""
+            )
         ),
         f"Citation prompt `{manifest['prompts']['citation']}`, Python "
         f"{environment['python']}, RRF k="
@@ -686,6 +795,8 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
             lines.append(
                 f"- **{kind.replace('_', ' ')}**: not measured — " + "; ".join(reasons)
             )
+    if mode == ANSWER_MODE:
+        lines += [""] + _answer_table(results)
     lines += [
         "",
         "## Experiments",
@@ -733,7 +844,8 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         "",
         "```",
         "docker compose up db qdrant",
-        "uv run python -m evaluation.cli --live --report <directory> --ablate",
+        "uv run python -m evaluation.cli --live --report <directory>"
+        + (" --ablate" if mode != ANSWER_MODE else ""),
         "uv run python -m evaluation.cli --live --report <directory> --compare-report "
         "<published directory>",
         "```",
