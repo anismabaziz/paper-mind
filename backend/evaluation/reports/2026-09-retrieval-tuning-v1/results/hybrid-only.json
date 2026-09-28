@@ -11,7 +11,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.0262271670071641
+      "seconds": 0.013718417001655325
     },
     {
       "candidates": 2,
@@ -24,7 +24,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.011153208994073793
+      "seconds": 0.01224999999976717
     },
     {
       "candidates": 2,
@@ -37,7 +37,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04824841700610705
+      "seconds": 0.008273375002318062
     },
     {
       "candidates": 5,
@@ -50,7 +50,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.3333333333333333,
-      "seconds": 0.023102958002709784
+      "seconds": 0.013408292012172751
     },
     {
       "candidates": 5,
@@ -63,7 +63,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.016287959006149322
+      "seconds": 0.009421582988579758
     },
     {
       "candidates": 5,
@@ -76,7 +76,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.25,
-      "seconds": 0.011477874999400228
+      "seconds": 0.0082528749917401
     },
     {
       "candidates": 5,
@@ -89,7 +89,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.014087832998484373
+      "seconds": 0.007409458004985936
     },
     {
       "candidates": 5,
@@ -102,7 +102,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.013031583992415108
+      "seconds": 0.007587208005134016
     },
     {
       "candidates": 3,
@@ -115,7 +115,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.010616833009407856
+      "seconds": 0.00732912500097882
     },
     {
       "candidates": 3,
@@ -128,7 +128,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.02467620899551548
+      "seconds": 0.010156125004868954
     },
     {
       "candidates": 3,
@@ -141,7 +141,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.011096957998233847
+      "seconds": 0.011233375000301749
     },
     {
       "candidates": 3,
@@ -154,7 +154,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.008184541991795413
+      "seconds": 0.009803915992961265
     },
     {
       "candidates": 3,
@@ -167,7 +167,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.00887045900162775
+      "seconds": 0.00711250001040753
     },
     {
       "candidates": 2,
@@ -180,7 +180,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.013667708000866696
+      "seconds": 0.00747866700112354
     },
     {
       "candidates": 2,
@@ -193,7 +193,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.013288916001329198
+      "seconds": 0.010143125007743947
     },
     {
       "candidates": 2,
@@ -206,7 +206,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.012894999992568046
+      "seconds": 0.013034458010224625
     }
   ],
   "comparison": {
@@ -242,8 +242,8 @@
     ],
     "latency_delta": {
       "retrieval_seconds": {
-        "p50": 0.0027384165005059913,
-        "p95": 0.016111219261802034
+        "p50": 0.0041953744876082055,
+        "p95": 0.0027857922650582623
       }
     },
     "regressions": [
@@ -340,32 +340,32 @@
     "bruening-2018-wearable-jump-monitor-figure-skating.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"11349a78036284774230762bdcafa9f38ee19ec4a7115a46acb4d47ab9ddbf46\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 23.032657,
+      "indexed_seconds": 20.077411,
       "is_processed": true
     },
     "papermind-eval-methods.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 5.593472,
+      "indexed_seconds": 5.389173,
       "is_processed": true
     },
     "papermind-rag-primer.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 10.930474,
+      "indexed_seconds": 10.766092,
       "is_processed": true
     },
     "papermind-team-notes.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 4.875348,
+      "indexed_seconds": 3.895133,
       "is_processed": true
     }
   },
   "latency": {
     "retrieval_seconds": {
-      "p50": 0.013160249996872153,
-      "p95": 0.031732479506899836,
+      "p50": 0.009612749490770511,
+      "p95": 0.013485823259543395,
       "samples": 16
     }
   },
@@ -386,7 +386,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.0262271670071641
+        "seconds": 0.013718417001655325
       },
       {
         "candidates": 2,
@@ -399,7 +399,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.011153208994073793
+        "seconds": 0.01224999999976717
       },
       {
         "candidates": 2,
@@ -412,7 +412,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04824841700610705
+        "seconds": 0.008273375002318062
       },
       {
         "candidates": 5,
@@ -425,7 +425,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.3333333333333333,
-        "seconds": 0.023102958002709784
+        "seconds": 0.013408292012172751
       },
       {
         "candidates": 5,
@@ -438,7 +438,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.016287959006149322
+        "seconds": 0.009421582988579758
       },
       {
         "candidates": 5,
@@ -451,7 +451,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.25,
-        "seconds": 0.011477874999400228
+        "seconds": 0.0082528749917401
       },
       {
         "candidates": 5,
@@ -464,7 +464,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.014087832998484373
+        "seconds": 0.007409458004985936
       },
       {
         "candidates": 5,
@@ -477,7 +477,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.013031583992415108
+        "seconds": 0.007587208005134016
       },
       {
         "candidates": 3,
@@ -490,7 +490,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.010616833009407856
+        "seconds": 0.00732912500097882
       },
       {
         "candidates": 3,
@@ -503,7 +503,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.02467620899551548
+        "seconds": 0.010156125004868954
       },
       {
         "candidates": 3,
@@ -516,7 +516,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.011096957998233847
+        "seconds": 0.011233375000301749
       },
       {
         "candidates": 3,
@@ -529,7 +529,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.008184541991795413
+        "seconds": 0.009803915992961265
       },
       {
         "candidates": 3,
@@ -542,7 +542,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.00887045900162775
+        "seconds": 0.00711250001040753
       },
       {
         "candidates": 2,
@@ -555,7 +555,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.013667708000866696
+        "seconds": 0.00747866700112354
       },
       {
         "candidates": 2,
@@ -568,7 +568,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.013288916001329198
+        "seconds": 0.010143125007743947
       },
       {
         "candidates": 2,
@@ -581,7 +581,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.012894999992568046
+        "seconds": 0.013034458010224625
       }
     ],
     "questions": 16,

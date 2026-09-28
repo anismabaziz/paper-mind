@@ -576,7 +576,7 @@
       "question": "Do larger chunks carry whole tables and sections?"
     }
   ],
-  "measurements_digest": "d5cfc08f992ed0b4548ec8b9814aafd2610a130bff2f8e9597a2c52669d55a94",
+  "measurements_digest": "c5061d23410f08cd30dbbed068ca1df9a9934fb7d6d0feda901e7833b207d525",
   "models": {
     "embedding": {
       "id": "BAAI/bge-m3",
@@ -666,8 +666,8 @@
   "revision": {
     "dirty": false,
     "files_changed": 0,
-    "revision": "97d4ceb28e3da95c11a257dac0b6a3e848150df0",
-    "subject": "fix: say which split a report is read on"
+    "revision": "d85d2514c9acf4de2e45a4453da5dfe184dde116",
+    "subject": "fix: report how far a re-run's numbers moved, not only whether the setup matched"
   },
   "settings": {
     "chunk_overlap_tokens": 50,

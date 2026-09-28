@@ -11,7 +11,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.05194083300011698
+      "seconds": 0.05466045899083838
     },
     {
       "candidates": 2,
@@ -24,7 +24,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04846245799853932
+      "seconds": 0.019460541996522807
     },
     {
       "candidates": 2,
@@ -37,7 +37,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.047698834008770064
+      "seconds": 0.014057874999707565
     },
     {
       "candidates": 2,
@@ -50,7 +50,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.03513424999255221
+      "seconds": 0.011615750001510605
     },
     {
       "candidates": 2,
@@ -63,7 +63,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.024382208997849375
+      "seconds": 0.01684933400247246
     },
     {
       "candidates": 2,
@@ -76,7 +76,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.07185241699335165
+      "seconds": 0.017933958006324247
     },
     {
       "candidates": 5,
@@ -89,7 +89,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.03888962499331683
+      "seconds": 0.015437666996149346
     },
     {
       "candidates": 5,
@@ -102,7 +102,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.04086420900421217
+      "seconds": 0.009712084007333033
     },
     {
       "candidates": 5,
@@ -115,7 +115,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.03559770900756121
+      "seconds": 0.009417667009984143
     },
     {
       "candidates": 5,
@@ -128,7 +128,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.02976787500665523
+      "seconds": 0.011499499989440665
     },
     {
       "candidates": 5,
@@ -141,7 +141,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.029048667012830265
+      "seconds": 0.016154041994013824
     },
     {
       "candidates": 5,
@@ -154,7 +154,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.040436666007735766
+      "seconds": 0.011541792002390139
     },
     {
       "candidates": 5,
@@ -167,7 +167,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.2,
-      "seconds": 0.03210391600441653
+      "seconds": 0.012196790994494222
     },
     {
       "candidates": 5,
@@ -180,7 +180,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.03968620799423661
+      "seconds": 0.020348541002022102
     },
     {
       "candidates": 5,
@@ -189,11 +189,11 @@
       "hit_at_k": true,
       "id": "skating-height-underestimate",
       "method": "hybrid",
-      "ndcg_at_k": 0.8503449055347546,
+      "ndcg_at_k": 0.6131471927654584,
       "outcome": "success",
-      "recall_at_k": 1.0,
+      "recall_at_k": 0.5,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04639024999050889
+      "seconds": 0.012182374994154088
     },
     {
       "candidates": 5,
@@ -206,7 +206,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.049564959001145326
+      "seconds": 0.013842792002833448
     },
     {
       "candidates": 5,
@@ -219,7 +219,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04095274998690002
+      "seconds": 0.011513749996083789
     },
     {
       "candidates": 5,
@@ -232,7 +232,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.02727904199855402
+      "seconds": 0.012531041997135617
     },
     {
       "candidates": 5,
@@ -245,7 +245,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.022308832994895056
+      "seconds": 0.009537457997794263
     },
     {
       "candidates": 3,
@@ -258,7 +258,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.03217529099492822
+      "seconds": 0.03183191700372845
     },
     {
       "candidates": 3,
@@ -271,7 +271,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04555741700460203
+      "seconds": 0.011186167001142167
     },
     {
       "candidates": 3,
@@ -284,7 +284,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.05673508299514651
+      "seconds": 0.008260041009634733
     },
     {
       "candidates": 3,
@@ -297,7 +297,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.06683804099156987
+      "seconds": 0.014104125002631918
     },
     {
       "candidates": 3,
@@ -310,7 +310,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.03315920798922889
+      "seconds": 0.034656417003134266
     },
     {
       "candidates": 3,
@@ -323,7 +323,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.03504808299476281
+      "seconds": 0.009691333005321212
     },
     {
       "candidates": 3,
@@ -336,7 +336,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.030645249993540347
+      "seconds": 0.01581195900507737
     },
     {
       "candidates": 3,
@@ -349,7 +349,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.036058832993148826
+      "seconds": 0.013402832992142066
     },
     {
       "candidates": 3,
@@ -362,7 +362,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.031193458009511232
+      "seconds": 0.011971332991379313
     },
     {
       "candidates": 3,
@@ -375,7 +375,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.05279758399410639
+      "seconds": 0.012424957996699959
     },
     {
       "candidates": 2,
@@ -388,7 +388,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.039770959003362805
+      "seconds": 0.014907457996741869
     },
     {
       "candidates": 2,
@@ -401,7 +401,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04205254199041519
+      "seconds": 0.009696791996248066
     },
     {
       "candidates": 2,
@@ -414,7 +414,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 0.5,
-      "seconds": 0.03140200000780169
+      "seconds": 0.01381299999775365
     },
     {
       "candidates": 2,
@@ -427,7 +427,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.040300292006577365
+      "seconds": 0.015625791987986304
     },
     {
       "candidates": 2,
@@ -440,7 +440,7 @@
       "outcome": "success",
       "recall_at_k": 1.0,
       "reciprocal_rank": 1.0,
-      "seconds": 0.04849641599867027
+      "seconds": 0.018756083998596296
     },
     {
       "candidates": 2,
@@ -453,7 +453,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.049749709010939114
+      "seconds": 0.014457458004471846
     },
     {
       "candidates": 2,
@@ -466,7 +466,7 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.048597125001833774
+      "seconds": 0.015087124993442558
     },
     {
       "candidates": 5,
@@ -479,16 +479,16 @@
       "outcome": "success",
       "recall_at_k": 0.0,
       "reciprocal_rank": 0.0,
-      "seconds": 0.1380073330074083
+      "seconds": 0.012796834009350277
     }
   ],
   "comparison": {
     "baseline": "rerank-on",
     "delta": {
       "hit_rate": -0.027027027027027084,
-      "mrr": 0.003153153153153232,
-      "ndcg": -0.010861543505720772,
-      "recall": -0.027027027027027084
+      "mrr": -0.010360360360360366,
+      "ndcg": -0.021218648571893706,
+      "recall": -0.04054054054054057
     },
     "improvements": [
       {
@@ -553,12 +553,33 @@
           "recall_at_k": 1.0,
           "reciprocal_rank": 1.0
         }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.9197207891481876,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": 0.080279,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.0
+        },
+        "id": "eval-what-cannot-be-generated",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 1.0,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0
+        }
       }
     ],
     "latency_delta": {
       "retrieval_seconds": {
-        "p50": -0.26103474998672027,
-        "p95": -1.0328027836105318
+        "p50": -0.15883133301394992,
+        "p95": -0.9610491829953386
       }
     },
     "regressions": [
@@ -592,16 +613,37 @@
         },
         "delta": {
           "hit_at_k": 0,
-          "ndcg_at_k": -0.149655,
-          "recall_at_k": 0.0,
+          "ndcg_at_k": -0.386853,
+          "recall_at_k": -0.5,
           "reciprocal_rank": 0.0
         },
         "id": "skating-height-underestimate",
         "variant": {
           "hit_at_k": true,
-          "ndcg_at_k": 0.8503449055347546,
+          "ndcg_at_k": 0.6131471927654584,
+          "recall_at_k": 0.5,
+          "reciprocal_rank": 1.0
+        }
+      },
+      {
+        "baseline": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.6131471927654584,
           "recall_at_k": 1.0,
           "reciprocal_rank": 1.0
+        },
+        "delta": {
+          "hit_at_k": 0,
+          "ndcg_at_k": -0.226294,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": -0.5
+        },
+        "id": "eval-citation-pair",
+        "variant": {
+          "hit_at_k": true,
+          "ndcg_at_k": 0.38685280723454163,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.5
         }
       },
       {
@@ -678,32 +720,32 @@
     "bruening-2018-wearable-jump-monitor-figure-skating.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"11349a78036284774230762bdcafa9f38ee19ec4a7115a46acb4d47ab9ddbf46\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 23.857919,
+      "indexed_seconds": 22.106143,
       "is_processed": true
     },
     "papermind-eval-methods.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 7.409824,
+      "indexed_seconds": 5.983243,
       "is_processed": true
     },
     "papermind-rag-primer.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 11.542553,
+      "indexed_seconds": 11.763046,
       "is_processed": true
     },
     "papermind-team-notes.pdf": {
       "index_generation": 1,
       "index_manifest": "{\"chunk_overlap_tokens\": 50, \"chunk_size_tokens\": 512, \"collection_name\": \"pdf-index\", \"collection_schema_version\": \"named-dense-sparse-v1\", \"content_hash\": \"dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6\", \"embedding_model\": \"BAAI/bge-m3\", \"embedding_revision\": \"\", \"index_generation\": 1, \"parser\": \"auto\", \"parser_version\": \"pymupdf-docling-page-chunks-v1\", \"reranker_enabled\": false, \"reranker_model\": \"cross-encoder/ms-marco-MiniLM-L-6-v2\", \"reranker_revision\": \"\", \"sparse_method\": \"hashed-tf-qdrant-idf-v1\", \"sparse_tokenizer_version\": \"lowercase-regex-stopwords-v1\", \"vector_dimension\": 1024}",
-      "indexed_seconds": 5.560442,
+      "indexed_seconds": 5.353086,
       "is_processed": true
     }
   },
   "latency": {
     "retrieval_seconds": {
-      "p50": 0.040300292006577365,
-      "p95": 0.0678409161919262,
+      "p50": 0.01381299999775365,
+      "p95": 0.0323968170036096,
       "samples": 37
     }
   },
@@ -711,7 +753,7 @@
     "hit_rate": 0.7297297297297297,
     "k": 5,
     "mrr": 0.6405405405405405,
-    "ndcg": 0.614679301790517,
+    "ndcg": 0.6082685527967523,
     "per_question": [
       {
         "candidates": 2,
@@ -724,7 +766,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.05194083300011698
+        "seconds": 0.05466045899083838
       },
       {
         "candidates": 2,
@@ -737,7 +779,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04846245799853932
+        "seconds": 0.019460541996522807
       },
       {
         "candidates": 2,
@@ -750,7 +792,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.047698834008770064
+        "seconds": 0.014057874999707565
       },
       {
         "candidates": 2,
@@ -763,7 +805,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.03513424999255221
+        "seconds": 0.011615750001510605
       },
       {
         "candidates": 2,
@@ -776,7 +818,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.024382208997849375
+        "seconds": 0.01684933400247246
       },
       {
         "candidates": 2,
@@ -789,7 +831,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.07185241699335165
+        "seconds": 0.017933958006324247
       },
       {
         "candidates": 5,
@@ -802,7 +844,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.03888962499331683
+        "seconds": 0.015437666996149346
       },
       {
         "candidates": 5,
@@ -815,7 +857,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.04086420900421217
+        "seconds": 0.009712084007333033
       },
       {
         "candidates": 5,
@@ -828,7 +870,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.03559770900756121
+        "seconds": 0.009417667009984143
       },
       {
         "candidates": 5,
@@ -841,7 +883,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.02976787500665523
+        "seconds": 0.011499499989440665
       },
       {
         "candidates": 5,
@@ -854,7 +896,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.029048667012830265
+        "seconds": 0.016154041994013824
       },
       {
         "candidates": 5,
@@ -867,7 +909,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.040436666007735766
+        "seconds": 0.011541792002390139
       },
       {
         "candidates": 5,
@@ -880,7 +922,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.2,
-        "seconds": 0.03210391600441653
+        "seconds": 0.012196790994494222
       },
       {
         "candidates": 5,
@@ -893,7 +935,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.03968620799423661
+        "seconds": 0.020348541002022102
       },
       {
         "candidates": 5,
@@ -902,11 +944,11 @@
         "hit_at_k": true,
         "id": "skating-height-underestimate",
         "method": "hybrid",
-        "ndcg_at_k": 0.8503449055347546,
+        "ndcg_at_k": 0.6131471927654584,
         "outcome": "success",
-        "recall_at_k": 1.0,
+        "recall_at_k": 0.5,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04639024999050889
+        "seconds": 0.012182374994154088
       },
       {
         "candidates": 5,
@@ -919,7 +961,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.049564959001145326
+        "seconds": 0.013842792002833448
       },
       {
         "candidates": 5,
@@ -932,7 +974,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04095274998690002
+        "seconds": 0.011513749996083789
       },
       {
         "candidates": 5,
@@ -945,7 +987,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.02727904199855402
+        "seconds": 0.012531041997135617
       },
       {
         "candidates": 5,
@@ -958,7 +1000,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.022308832994895056
+        "seconds": 0.009537457997794263
       },
       {
         "candidates": 3,
@@ -971,7 +1013,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.03217529099492822
+        "seconds": 0.03183191700372845
       },
       {
         "candidates": 3,
@@ -984,7 +1026,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04555741700460203
+        "seconds": 0.011186167001142167
       },
       {
         "candidates": 3,
@@ -997,7 +1039,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.05673508299514651
+        "seconds": 0.008260041009634733
       },
       {
         "candidates": 3,
@@ -1010,7 +1052,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.06683804099156987
+        "seconds": 0.014104125002631918
       },
       {
         "candidates": 3,
@@ -1023,7 +1065,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.03315920798922889
+        "seconds": 0.034656417003134266
       },
       {
         "candidates": 3,
@@ -1036,7 +1078,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.03504808299476281
+        "seconds": 0.009691333005321212
       },
       {
         "candidates": 3,
@@ -1049,7 +1091,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.030645249993540347
+        "seconds": 0.01581195900507737
       },
       {
         "candidates": 3,
@@ -1062,7 +1104,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.036058832993148826
+        "seconds": 0.013402832992142066
       },
       {
         "candidates": 3,
@@ -1075,7 +1117,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.031193458009511232
+        "seconds": 0.011971332991379313
       },
       {
         "candidates": 3,
@@ -1088,7 +1130,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.05279758399410639
+        "seconds": 0.012424957996699959
       },
       {
         "candidates": 2,
@@ -1101,7 +1143,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.039770959003362805
+        "seconds": 0.014907457996741869
       },
       {
         "candidates": 2,
@@ -1114,7 +1156,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04205254199041519
+        "seconds": 0.009696791996248066
       },
       {
         "candidates": 2,
@@ -1127,7 +1169,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 0.5,
-        "seconds": 0.03140200000780169
+        "seconds": 0.01381299999775365
       },
       {
         "candidates": 2,
@@ -1140,7 +1182,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.040300292006577365
+        "seconds": 0.015625791987986304
       },
       {
         "candidates": 2,
@@ -1153,7 +1195,7 @@
         "outcome": "success",
         "recall_at_k": 1.0,
         "reciprocal_rank": 1.0,
-        "seconds": 0.04849641599867027
+        "seconds": 0.018756083998596296
       },
       {
         "candidates": 2,
@@ -1166,7 +1208,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.049749709010939114
+        "seconds": 0.014457458004471846
       },
       {
         "candidates": 2,
@@ -1179,7 +1221,7 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.048597125001833774
+        "seconds": 0.015087124993442558
       },
       {
         "candidates": 5,
@@ -1192,11 +1234,11 @@
         "outcome": "success",
         "recall_at_k": 0.0,
         "reciprocal_rank": 0.0,
-        "seconds": 0.1380073330074083
+        "seconds": 0.012796834009350277
       }
     ],
     "questions": 37,
-    "recall": 0.7297297297297297
+    "recall": 0.7162162162162162
   },
   "split": "validation"
 }
