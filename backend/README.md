@@ -282,3 +282,11 @@ Timing and dollars are deliberately outside the manifest's digest, because they
 move on every run; what a reproduction is judged on is the retrieval numbers,
 the outcomes, the verdicts, and a changed model revision, which is reported on
 its own since a checkout cannot pin that.
+
+`--pace SECONDS` is the wait between provider calls, six seconds by default.
+A rate-limited account measures its allowance in tokens per day, and a run that
+asks for everything at once spends it and then reports the cases it could not
+afford as provider failures — a number about the account, not about the
+application. `--pace 0` removes the wait for a paid account. A judged run over
+the reported half costs roughly 70k generator tokens and 120k judge tokens, so
+on a free daily allowance it is about one run per model per day.
