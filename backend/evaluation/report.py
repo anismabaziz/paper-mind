@@ -465,26 +465,77 @@ def reproduction(current: Path, previous: Path) -> dict[str, Any]:
     """
     Return whether a new report reproduces a published one, and what moved.
 
+    Two questions, deliberately answered apart. Did the setup match — the same
+    revision, case set, documents, models, settings, and environment? And did
+    the numbers move? Retrieval is measured against an approximate index whose
+    sparse scores carry collection-wide term weights, so the second question has
+    a real answer of its own against a store that is otherwise identical, and
+    reporting that as a failed reproduction would teach a reader to ignore the
+    check.
+
     A changed model revision is called out on its own, because that is the one
     difference a reader cannot fix by checking out the same revision: the model
     behind it moved without a line of this codebase changing.
     """
     published = load_manifest(previous)
     fresh = load_manifest(current)
-    changes = manifest_changes(published, fresh)
+    changes = manifest_changes(
+        {
+            name: value
+            for name, value in published.items()
+            if name != "measurements_digest"
+        },
+        {name: value for name, value in fresh.items() if name != "measurements_digest"},
+    )
     return {
         "reproduced": not changes,
-        # Whether the numbers moved, kept apart from whether the setup that
-        # produced them is the same: a different machine changes the environment
-        # without changing a single measurement.
         "measurements_changed": (
             published["measurements_digest"] != fresh["measurements_digest"]
         ),
+        "measurement_deltas": retrieval_deltas(previous, current),
         "changes": changes,
         "model_revisions_changed": [
             change for change in changes if change["field"].startswith("models.")
         ],
     }
+
+
+def load_results(directory: Path) -> dict[str, dict[str, Any]]:
+    """Return every result a report directory holds, by experiment id."""
+    return {
+        path.stem: json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((Path(directory) / RESULTS_DIR).glob("*.json"))
+    }
+
+
+def retrieval_deltas(previous: Path, current: Path) -> list[dict[str, Any]]:
+    """
+    Return how far each experiment's retrieval numbers moved between two reports.
+
+    The largest movement is the number a reader wants: a variant that looked
+    better by less than the run-to-run movement was never a result.
+    """
+    before, after = load_results(previous), load_results(current)
+    deltas = []
+    for experiment, result in after.items():
+        published = before.get(experiment)
+        if published is None:
+            continue
+        deltas.append(
+            {
+                "experiment": experiment,
+                "largest_move": max(
+                    (
+                        abs(
+                            result["retrieval"][metric] - published["retrieval"][metric]
+                        )
+                        for metric in ("hit_rate", "recall", "mrr", "ndcg")
+                    ),
+                    default=0.0,
+                ),
+            }
+        )
+    return deltas
 
 
 def load_manifest(directory: Path) -> dict[str, Any]:
@@ -690,9 +741,15 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         "The manifest holds the revision, the case set, the document hashes, the "
         "prompts, the models, the settings, and the environment; each result "
         "beside it holds the index manifest and generation of every document, "
-        "with the per-question rows the numbers came from. A run that measured "
-        "the same things reproduces the manifest; a run that did not names the "
-        "field that moved, and a changed model revision is reported on its own.",
+        "with the per-question rows the numbers came from. A re-run says whether "
+        "the setup matched and how far each experiment's numbers moved, and a "
+        "changed model revision is named on its own.",
+        "",
+        "The setup is checkable; the numbers are a sample. Retrieval is measured "
+        "against an approximate index whose sparse scores carry term weights "
+        "taken across the whole collection, so two runs over the same documents "
+        "in the same collection can rank a borderline passage differently. Treat "
+        "a difference smaller than the reported movement as no difference.",
         "",
     ]
     return "\n".join(lines)

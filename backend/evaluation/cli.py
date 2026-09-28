@@ -686,7 +686,7 @@ def _publish_report(results, run_records, args) -> None:
     if args.compare_report:
         outcome = report.reproduction(directory, Path(args.compare_report))
         if outcome["reproduced"]:
-            print(f"Reproduces {args.compare_report}: every field matches")
+            print(f"Reproduces {args.compare_report}: the setup matches")
         else:
             print(f"Does not reproduce {args.compare_report}:")
             for change in outcome["changes"]:
@@ -696,6 +696,19 @@ def _publish_report(results, run_records, args) -> None:
                 f"  model revision moved: {change['field']} "
                 f"{change['before'] or '(unpinned)'} -> {change['after'] or '(unpinned)'}"
             )
+        moved = sorted(
+            outcome["measurement_deltas"], key=lambda row: -row["largest_move"]
+        )
+        if moved and moved[0]["largest_move"] > 0:
+            print(
+                "Retrieval numbers moved between the two runs, by at most "
+                f"{moved[0]['largest_move']:.3f} ("
+                f"{moved[0]['experiment']}), which is the run-to-run movement a "
+                "smaller difference should be read against:"
+            )
+            for row in moved:
+                if row["largest_move"] > 0:
+                    print(f"  {row['experiment']}: {row['largest_move']:.3f}")
 
 
 def _print_ablations(results: list[dict]) -> None:

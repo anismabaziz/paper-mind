@@ -401,40 +401,39 @@ class TestRunningItAgain:
         assert outcome["reproduced"] is True
         assert outcome["measurements_changed"] is False
 
-    def test_a_moved_measurement_is_reported_apart_from_a_moved_machine(
+    def test_moved_numbers_are_reported_without_failing_the_setup(
         self, dataset, settings_obj, tmp_path
     ):
-        """A different number is worth more than a different kernel string."""
+        """
+        The same setup can measure different numbers, and that is a finding.
+
+        Retrieval runs against an approximate index, so a re-run that matched
+        the revision, the set, the models, and the settings is still a
+        reproduction; how far the numbers moved is reported beside it.
+        """
         first = a_manifest(dataset, settings_obj, [a_result()])
-        moved = a_manifest(
-            dataset,
-            settings_obj,
-            [
-                a_result(
-                    retrieval={
-                        "questions": 2,
-                        "k": 5,
-                        "hit_rate": 0.5,
-                        "recall": 0.5,
-                        "mrr": 0.5,
-                        "ndcg": 0.4,
-                        "per_question": [],
-                    }
-                )
-            ],
-            environment={
-                **report.environment_fingerprint(),
-                "python": "3.11.9",
-                "platform": "another machine",
-            },
+        moved = a_result(
+            retrieval={
+                "questions": 2,
+                "k": 5,
+                "hit_rate": 0.5,
+                "recall": 0.5,
+                "mrr": 0.5,
+                "ndcg": 0.4,
+                "per_question": [],
+            }
         )
+        again = a_manifest(dataset, settings_obj, [moved])
         report.write_report(tmp_path / "first", first, [a_result()])
-        report.write_report(tmp_path / "again", moved, [a_result()])
+        report.write_report(tmp_path / "again", again, [moved])
 
         outcome = report.reproduction(tmp_path / "again", tmp_path / "first")
 
-        assert outcome["reproduced"] is False
+        assert outcome["reproduced"] is True
         assert outcome["measurements_changed"] is True
+        assert outcome["measurement_deltas"] == [
+            {"experiment": "baseline", "largest_move": pytest.approx(0.5)}
+        ]
 
     def test_a_changed_model_revision_is_named(self, dataset, settings_obj, tmp_path):
         """A model that moved behind the code is the difference a checkout cannot explain."""
