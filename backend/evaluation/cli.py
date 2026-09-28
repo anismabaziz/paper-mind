@@ -82,6 +82,13 @@ JUDGE_API_KEY_ENV = "PAPERMIND_EVAL_JUDGE_API_KEY"
 #: so the case is reported Unknown rather than graded or crashed on.
 JUDGE_FAILED = "the judge's call failed"
 
+#: Seconds to wait before each provider call. A rate-limited account measures
+#: its budget in tokens per day, and a run that asks for everything at once
+#: spends it and then reports the cases it could not afford as provider
+#: failures — a number about the account, not about the application. The wait
+#: is the harness's own pacing; nothing in the answer path knows about it.
+PROVIDER_PACE_SECONDS = 6.0
+
 #: How long to wait before asking the judge again, and how many times to ask.
 #: A judge is three calls per case on a rate-limited account, and a throttle is
 #: the one failure a pause fixes; a rejected key or a malformed prompt is not,
@@ -109,11 +116,18 @@ def require_key(name: str) -> str:
     return value
 
 
+def pace() -> None:
+    """Wait the run's own pause between provider calls."""
+    if PROVIDER_PACE_SECONDS > 0:
+        time.sleep(PROVIDER_PACE_SECONDS)
+
+
 def generator_factory():
     """Return the factory the run's generator is built through."""
 
     def factory(credentials: ChatCredentials):
         """Build the generator for the credentials the answer path supplies."""
+        pace()
         return build_chat_provider(credentials, use_cache=False)
 
     return factory
@@ -170,6 +184,7 @@ def _judge_callable(provider: str, model: str, api_key: str) -> Callable[[str], 
 
     def grade(prompt: str) -> str:
         """Return the judge's reply, or a non-verdict when the call failed."""
+        pace()
         for attempt in range(len(JUDGE_BACKOFF_SECONDS) + 1):
             if attempt:
                 time.sleep(JUDGE_BACKOFF_SECONDS[attempt - 1])
@@ -647,6 +662,16 @@ def main(argv=None):
         help="run with and without reranking and report both",
     )
     parser.add_argument(
+        "--pace",
+        type=float,
+        default=PROVIDER_PACE_SECONDS,
+        help=(
+            "seconds to wait between provider calls, so a rate-limited account "
+            f"is not reported as a failing one; default {PROVIDER_PACE_SECONDS}, "
+            "0 to send every call as fast as it can"
+        ),
+    )
+    parser.add_argument(
         "--include-faults",
         action="store_true",
         help=(
@@ -689,6 +714,8 @@ def main(argv=None):
     elif args.rerank_off:
         rerank = False
 
+    global PROVIDER_PACE_SECONDS
+    PROVIDER_PACE_SECONDS = max(args.pace, 0.0)
     if args.ablate:
         return _ablation_main(args)
     run_report = run(
