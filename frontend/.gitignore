@@ -1,6 +1,11 @@
 # Logs
 logs
 *.log
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

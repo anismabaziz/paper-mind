@@ -314,7 +314,7 @@ export function ReaderPane() {
   }, []);
 
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas" data-testid="reader">
       {retryIngestion.isError && file && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
           <p className="text-xs font-medium text-destructive">Retry failed</p>
@@ -443,10 +443,11 @@ export function ReaderPane() {
               }}
               className="flex size-6 items-center justify-center text-ink-soft hover:text-ink"
               aria-label="Previous page"
+              data-testid="page-prev"
             >
               <ChevronLeft className="size-3.5" />
             </button>
-            <span className="font-mono text-[0.68rem] text-ink-soft">
+            <span className="font-mono text-[0.68rem] text-ink-soft" data-testid="page-indicator">
               {String(page).padStart(2, "0")} / {String(numPages ?? 0).padStart(2, "0")}
             </span>
             <button
@@ -458,6 +459,7 @@ export function ReaderPane() {
               }}
               className="flex size-6 items-center justify-center text-ink-soft hover:text-ink"
               aria-label="Next page"
+              data-testid="page-next"
             >
               <ChevronRight className="size-3.5" />
             </button>
@@ -509,7 +511,7 @@ export function ReaderPane() {
             </div>
           </div>
 
-          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-px-4">
+          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-px-4" data-testid="page-strip">
             <span className="label-meta shrink-0 pr-1">Pages</span>
             {(() => {
               const stripCount = metaPageCount ?? numPages;

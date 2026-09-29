@@ -319,6 +319,10 @@ class DeterministicChatFactory:
         """Fail the named provider operation on its next call."""
         self.failures.add(operation)
 
+    def unfail(self, operation: str) -> None:
+        """Clear a requested failure so a retry can succeed."""
+        self.failures.discard(operation)
+
     def hold_after_first_token(self) -> threading.Event:
         """Stop the next stream after its first token until the test releases it."""
         self.released = threading.Event()
@@ -388,6 +392,8 @@ class ApplicationHarness:
 def build_application(
     app_settings: Settings,
     session_factory,
+    register_test_routes=None,
+    port: int = 0,
 ) -> ApplicationHarness:
     """Serve the production app with real infrastructure and local adapters."""
     settings_module.set_settings(app_settings)
@@ -436,7 +442,25 @@ def build_application(
             manifest_builder=manifest_builder(app_settings),
         )
 
-    server = make_server("127.0.0.1", 0, application, threaded=True)
+    if register_test_routes is not None:
+        register_test_routes(
+            application,
+            {
+                "settings": app_settings,
+                "storage": storage,
+                "repositories": controlled_repositories,
+                "embeddings": embeddings,
+                "reranker": reranker,
+                "vector_store": vector_store,
+                "chat": chat,
+                "session_factory": session_factory,
+                "qdrant": qdrant,
+                "collection_name": app_settings.vector.index_name,
+                "worker_factory": worker_factory,
+            },
+        )
+
+    server = make_server("127.0.0.1", port, application, threaded=True)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     client = httpx.Client(base_url=f"http://127.0.0.1:{server.server_port}", timeout=30)
