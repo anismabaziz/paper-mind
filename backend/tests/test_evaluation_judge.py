@@ -144,7 +144,11 @@ class TestRubric:
                 raise NotImplementedError
 
         original = cli._judge_provider
-        cli._judge_provider = lambda provider, model, api_key: Throttled(api_key, model)
+        monkeypatch.setattr(
+            cli,
+            "_judge_provider",
+            lambda provider, model, api_key: Throttled(api_key, model),
+        )
         built = cli.build_evaluation_judge("groq", "openai/gpt-oss-120b", "key")
 
         verdict, score = judge_faithfulness("Q", "A", "CTX", built)
@@ -203,6 +207,57 @@ class TestRubric:
 
         assert (verdict, score) == ("faithful", 1.0)
         assert waits == [cli.JUDGE_BACKOFF_SECONDS[0]]
+
+    def test_the_judge_runs_under_a_budget_a_reasoning_model_can_answer_in(
+        self, monkeypatch
+    ):
+        """An empty reply is what a budget that ran out looks like."""
+        from services.llm.base import ChatBudget, LLMProvider
+
+        captured = {}
+
+        class Recording(LLMProvider):
+            """A judge provider that records the budget it was built with."""
+
+            name = "recording"
+
+            def __init__(self, credentials):
+                """Bind the credentials the judge was built with."""
+                self.credentials = credentials
+                super().__init__(
+                    credentials.api_key, credentials.model, budget=credentials.budget
+                )
+
+            def _build_client(self):
+                """No client is needed to record a budget."""
+                return None
+
+            def verify(self):
+                """Verification is not what this double exercises."""
+                return None
+
+            def _generate_response(self, query, context, history=""):
+                """Answer with the verdict the rubric asks for."""
+                return "faithful"
+
+            def _stream_response(self, query, context, history=""):
+                """Refuse a stream: the judge grades one-shot."""
+                raise NotImplementedError
+
+        def factory(credentials, **kwargs):
+            """Record the credentials and return the provider."""
+            captured["credentials"] = credentials
+            return Recording(credentials)
+
+        monkeypatch.setattr(cli, "build_chat_provider", factory)
+        monkeypatch.setattr(cli, "PROVIDER_PACE_SECONDS", 0.0)
+        built = cli.build_evaluation_judge("groq", "openai/gpt-oss-120b", "key")
+
+        assert built("grade this") == "faithful"
+        assert captured["credentials"].budget.max_output_tokens == (
+            cli.JUDGE_MAX_OUTPUT_TOKENS
+        )
+        assert isinstance(captured["credentials"].budget, ChatBudget)
 
     def test_the_correctness_prompt_carries_the_expected_answer(self):
         """Correctness is judged against the label, so the label is in the prompt."""
