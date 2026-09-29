@@ -252,6 +252,86 @@ class TestAnAnswerPathReport:
         assert result["human_calibration"]["agreement"] is None
         assert result["human_calibration"]["decided"] == 0
 
+    def test_an_answer_report_names_the_failures_and_the_command_to_re_run(
+        self, dataset, settings_obj, environment, cases
+    ):
+        """A reviewer goes to the failed questions and to the exact command."""
+        measured = ablations.measure(
+            environment, dataset, cases, experiments.experiment("baseline"), k=5
+        )
+        stored = measured.as_dict()
+        stored["answers"] = {
+            name: {
+                "graded": 2,
+                "scored": 1,
+                "mean": 1.0,
+                "passed": 1,
+                "failed": 0,
+                "unknown": 1,
+            }
+            for name in (
+                "correctness",
+                "faithfulness",
+                "citation_precision",
+                "citation_recall",
+                "abstention",
+            )
+        }
+        stored["cost"] = {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "usd": 0.0002,
+            "priced_cases": 1,
+            "model": "q",
+            "input_cost_per_million_usd": 0.8,
+            "output_cost_per_million_usd": 4.0,
+        }
+        stored["cases"] = [
+            {
+                "id": "first",
+                "outcome": "provider_error",
+                "grades": {},
+                "verdict": None,
+                "correctness_verdict": None,
+            },
+            {
+                "id": "second",
+                "outcome": "answered",
+                "grades": {"required_abstention": {"outcome": "failed"}},
+                "verdict": "faithful",
+                "correctness_verdict": "correct",
+            },
+        ]
+        manifest = report.build_manifest(
+            dataset=dataset,
+            settings=settings_obj,
+            results=[stored],
+            run_records=[
+                {
+                    "run": {
+                        "provider": "groq",
+                        "model": "qwen/qwen3.8-27b",
+                        "judge": {
+                            "provider": "groq",
+                            "model": "openai/gpt-oss-20b",
+                            "rubric_version": "faithfulness-rubric-v2",
+                        },
+                        "retrieval_methods": ["hybrid"],
+                    }
+                }
+            ],
+        )
+
+        summary = report.render(manifest, [stored])
+
+        assert "## Cases that failed" in summary
+        assert "`first`" in summary and "`second`" in summary
+        assert "required_abstention" in summary
+        assert "--provider groq --model qwen/qwen3.8-27b" in summary
+        assert "--judge-provider groq --judge-model openai/gpt-oss-20b" in summary
+        assert "## Experiments" not in summary
+        assert "No question changed rank" not in summary
+
     def test_the_summary_of_an_answer_run_shows_the_answer_metrics(
         self, dataset, settings_obj, environment, cases
     ):

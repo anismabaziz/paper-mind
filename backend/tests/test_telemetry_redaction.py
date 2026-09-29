@@ -130,9 +130,7 @@ def test_capture_window_closes_on_its_own():
     now[0] = 1_061.0
 
     assert redactor.capturing is False
-    assert redactor.scrub({"query": "secret question"})["query"][
-        "redacted"
-    ] == REDACTED
+    assert redactor.scrub({"query": "secret question"})["query"]["redacted"] == REDACTED
 
 
 def test_captured_text_never_carries_a_credential():
@@ -146,4 +144,8 @@ def test_captured_text_never_carries_a_credential():
 
 def test_a_fingerprint_of_empty_text_is_still_described():
     """An absent value is reported as an absence, not as a hash of nothing."""
-    assert fingerprint(None) == {"redacted": REDACTED, "chars": 0, "sha256": fingerprint("")["sha256"]}
+    assert fingerprint(None) == {
+        "redacted": REDACTED,
+        "chars": 0,
+        "sha256": fingerprint("")["sha256"],
+    }
