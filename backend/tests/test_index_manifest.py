@@ -23,6 +23,7 @@ from db import Base, FileRecord
 from repositories import build_repositories
 from services.accounts.secrets_service import encrypt_api_key
 from services.indexing import manifest as manifest_module
+from services.models import PINNED_MODEL_REVISIONS, model_source
 from services.parsing.document_parser import Chunk
 from services.retrieval import qdrant_store
 from services.retrieval.base import RetrievalResult
@@ -280,6 +281,13 @@ SETTING_CHANGES = [
 ]
 SETTING_CHANGE_IDS = [change[2] for change in SETTING_CHANGES]
 
+#: Selecting a different model also changes the commit it loads at, so a
+#: model change marks both its model and its revision.
+MODEL_REVISION_COMPANIONS = {
+    "embedding_model": "embedding_revision",
+    "reranker_model": "reranker_revision",
+}
+
 
 def apply_change(monkeypatch, settings_obj, target, value):
     """Change one runtime setting the manifest is built from."""
@@ -409,7 +417,12 @@ def test_each_retrieval_setting_change_marks_the_document_stale(
     index = index_status(client, filename)
     assert index["state"] == "stale", field
     assert field in index["changes"], field
-    assert [d["label"] for d in index["change_details"]] == [label], field
+    # Changing which model loads also changes the commit it loads at, so those
+    # two fields travel together. Nothing outside that pair may move: the test
+    # is that this one setting is what made the index stale.
+    companion = MODEL_REVISION_COMPANIONS.get(field, field)
+    assert set(index["changes"]) <= {field, companion}, field
+    assert label in [d["label"] for d in index["change_details"]], field
     # The old vectors stay: staleness must never delete a usable index.
     assert vectors.deleted == []
     assert vectors.deleted_generations == []
@@ -529,3 +542,40 @@ def test_reindex_rejects_a_deleting_or_missing_document(client, app):
     response = client.post(f"/files/{filename}/reindex")
     assert response.status_code == 409
     assert response.get_json()["category"] == "document_deleting"
+
+
+class TestRecordedModelRevision:
+    """The manifest records the commit the application will load."""
+
+    def test_an_unset_revision_records_the_pinned_commit(self, settings_obj):
+        """Otherwise a document would be indexed against "some commit"."""
+        assert settings_obj.embedding.revision == ""
+
+        recorded = manifest_module.runtime_manifest(settings_obj)
+
+        assert recorded.embedding_revision == PINNED_MODEL_REVISIONS["BAAI/bge-m3"]
+
+    def test_a_configured_revision_is_recorded_verbatim(
+        self, settings_obj, monkeypatch
+    ):
+        """The operator's setting is what will load, so it is what is recorded."""
+        # TEST_SETTINGS is a process-wide singleton, so the change is made
+        # through monkeypatch: an assignment here would outlive the test and
+        # silently re-pin every later test that builds a manifest.
+        monkeypatch.setattr(settings_obj.embedding, "revision", "9" * 40)
+
+        recorded = manifest_module.runtime_manifest(settings_obj)
+
+        assert recorded.embedding_revision == "9" * 40
+
+    def test_the_reranker_records_its_pinned_commit_too(self, settings_obj):
+        """Both local models are pinned, so neither manifest field is empty."""
+        recorded = manifest_module.runtime_manifest(settings_obj)
+
+        assert (
+            recorded.reranker_revision
+            == model_source(
+                settings_obj.rerank.rerank_model, settings_obj.rerank.revision
+            ).revision
+        )
+        assert recorded.reranker_revision != ""

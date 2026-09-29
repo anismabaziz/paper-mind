@@ -29,6 +29,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
+        # npm ci installs package-lock.json exactly and fails if it disagrees
+        # with package.json, so this is already frozen.
         run: npm ci
 
       - name: Lint
@@ -66,7 +68,12 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: uv sync --dev
+        # --frozen installs the lockfile as committed and fails when it does
+        # not match pyproject.toml, so a build can never resolve a version
+        # nobody reviewed. Plain `uv sync` would quietly re-resolve and
+        # re-lock, which is how a build starts testing something other than
+        # what ships.
+        run: uv sync --frozen --dev
 
       - name: Lint
         run: uv run ruff check .
@@ -98,7 +105,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: uv sync --dev
+        # --frozen: see the backend job. A test that runs against a version
+        # the lockfile does not name is not a test of what ships.
+        run: uv sync --frozen --dev
 
       - name: Test
         run: ./run-full-stack-tests.sh
@@ -127,7 +136,8 @@ jobs:
           python-version: "3.11"
 
       - name: Install backend dependencies
-        run: uv sync --dev
+        # --frozen: see the backend job.
+        run: uv sync --frozen --dev
         working-directory: backend
 
       - name: Set up Node
@@ -138,6 +148,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
+        # npm ci is lockfile-exact; see the frontend job.
         run: npm ci
 
       - name: Install Playwright browsers

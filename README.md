@@ -337,6 +337,68 @@ reproduced it. A run with generation and judging writes a report of the same
 shape with those sections filled in, and is what the answer-quality claims
 should be quoted from.
 
+## Keeping dependencies and models current
+
+Three things in this project can change what the application does without a
+commit: a package's code, a container image's bytes, and a model's weights.
+Each is pinned, and each pin has a job that notices when it stops meaning
+anything.
+
+**Packages.** `backend/uv.lock` and `frontend/package-lock.json` are the
+sources of truth; CI installs them with `uv sync --frozen` and `npm ci`, so a
+build never resolves a version nobody reviewed. A vulnerable *direct*
+dependency fails the `Dependency audit` workflow. An advisory the project has
+decided to live with is recorded with its reason in
+[`backend/audit/accepted.json`](backend/audit/accepted.json) rather than
+silently ignored, and a scheduled job flags acceptances that no longer match
+anything — a decision that outlived the package it was about.
+
+**Images.** Postgres and Qdrant are pinned by digest in
+[`backend/compose.yaml`](backend/compose.yaml) and
+[`backend/compose.test.yaml`](backend/compose.test.yaml), so a re-pushed tag
+cannot swap the database out from under an existing volume. The tag stays in
+the reference as the readable label; the digest decides which bytes run. To
+move a pin forward, resolve the new index digest with
+`docker buildx imagetools inspect <tag>` and update both files.
+
+**Models.** The local embedding model and reranker load at the commit recorded
+for them in [`backend/services/models.py`](backend/services/models.py), not at
+whatever the branch points at. Both load through stock `transformers`
+architectures, so no code from a model repository is executed; a model that
+genuinely needs `trust_remote_code` is refused unless the exact reviewed
+commit is recorded first. Because the revisions are part of the index manifest,
+changing one marks indexed documents stale and asks for a reindex rather than
+mixing vectors from two models.
+
+The remote catalogue is the part that moves on its own: providers retire models
+without a changelog entry. A scheduled job asks every catalogue entry whether
+its provider still serves it and fails naming the ones that do not, so a dead
+entry is removed while there is still time rather than after a user picks it.
+Run it locally with a key in the environment:
+
+```bash
+cd backend
+PAPERMIND_CHECK_GOOGLE_API_KEY=... PAPERMIND_CHECK_GROQ_API_KEY=... \
+  uv run python -m audit.cli models
+```
+
+**Bumping anything that changes answers needs a comparison.** A dependency
+bump, a model revision, or a container digest can move retrieval quality,
+latency, and cost without failing a single test, because the tests measure
+contracts rather than outcomes. The `comparison` check names the files that can
+do this, so a reviewer sees the omission rather than inferring it from a green
+run. Before accepting one, run the evaluation and compare against the last
+report:
+
+```bash
+cd backend
+uv run python -m evaluation.cli --live --split validation \
+  --report reports/<new-name> --compare-report reports/2026-09-retrieval-baseline-v1
+```
+
+Put the comparison in the pull request. If the numbers did not move, say so —
+that is the result, and it is worth as much as a passing test.
+
 ## Technologies
 
 - Backend: Python, Flask, SQLAlchemy, Alembic

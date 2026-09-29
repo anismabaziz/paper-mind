@@ -9,6 +9,10 @@ Two model options via the rerank model setting:
   - ``cross-encoder/ms-marco-MiniLM-L-6-v2`` (22M, ~10ms/50 docs, fast)
   - ``BAAI/bge-reranker-v2-m3`` (~80ms/50 docs, quality)
 
+Each loads at the commit recorded for it in :mod:`services.models`, without
+executing code from the model repository, so an upstream push cannot reorder
+results behind a build that says nothing changed.
+
 The service is intentionally lazy: ``sentence-transformers`` is only imported
 when reranking is actually requested, and the model is cached after first load
 (``HF_HOME`` / ``~/.cache/huggingface``). Tests inject a fake model through
@@ -20,6 +24,8 @@ from __future__ import annotations
 import threading
 import time
 from abc import ABC, abstractmethod
+
+from services.models import model_source
 
 
 class Reranker(ABC):
@@ -36,14 +42,24 @@ class Reranker(ABC):
 class RerankerService(Reranker):
     """Local cross-encoder re-scoring, gated by the ``enabled`` flag."""
 
-    def __init__(self, model_name: str, enabled: bool, model=None):
+    def __init__(
+        self,
+        model_name: str,
+        enabled: bool,
+        model=None,
+        revision: str = "",
+        trust_remote_code: bool = False,
+    ):
         """
         Bind the model name and gate.
 
         ``model`` injects a pre-loaded (or fake) cross-encoder; when omitted,
-        the real model loads lazily on first rerank.
+        the real model loads lazily on first rerank. ``revision`` and
+        ``trust_remote_code`` are the operator's settings; both are resolved
+        through :mod:`services.models`, which pins the weights to a commit and
+        refuses unreviewed repository code.
         """
-        self._model_name = model_name
+        self._source = model_source(model_name, revision, trust_remote_code)
         self._enabled = enabled
         self._model = model
         self._lock = threading.Lock()
@@ -51,7 +67,12 @@ class RerankerService(Reranker):
     @property
     def model_name(self) -> str:
         """Return the cross-encoder this reranker scores with."""
-        return self._model_name
+        return self._source.model_id
+
+    @property
+    def revision(self) -> str:
+        """Return the commit this reranker scores with, empty when unpinned."""
+        return self._source.revision
 
     def _get_model(self):
         """
@@ -72,8 +93,13 @@ class RerankerService(Reranker):
                     "Install it with `uv sync` or disable reranking."
                 ) from exc
 
+            # The revision and the code-execution policy come from
+            # ``services.models``; both cross-encoders load through stock
+            # transformers classes, so no code from the model repository runs.
             self._model = CrossEncoder(
-                self._model_name, device="cpu", trust_remote_code=True
+                self._source.model_id,
+                **self._source.load_kwargs(),
+                device="cpu",
             )
             return self._model
 
@@ -139,7 +165,7 @@ class RerankerService(Reranker):
             reranked.sort(key=lambda s: s["score"], reverse=True)
             elapsed = time.time() - start
             print(
-                f"Reranker: reranked {len(sources)} candidates in {elapsed:.3f}s (model {self._model_name})"
+                f"Reranker: reranked {len(sources)} candidates in {elapsed:.3f}s (model {self._source.model_id})"
             )
             return reranked
         except Exception as exc:

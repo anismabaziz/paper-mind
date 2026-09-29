@@ -258,11 +258,17 @@ def _environment(
         settings=app_settings,
         session_factory=None,
         storage=get_storage(),
-        embedding_service=LocalEmbeddingService(app_settings.embedding.embedding_model),
+        embedding_service=LocalEmbeddingService(
+            app_settings.embedding.embedding_model,
+            revision=app_settings.embedding.revision,
+            trust_remote_code=app_settings.embedding.trust_remote_code,
+        ),
         vector_service=VectorService(
             get_vector_index(),
             RerankerService(
                 app_settings.rerank.rerank_model,
+                revision=app_settings.rerank.revision,
+                trust_remote_code=app_settings.rerank.trust_remote_code,
                 enabled=(
                     app_settings.rerank.enabled
                     if rerank_enabled is None

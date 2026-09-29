@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:17.5-alpine
+    # Digest-pinned: a test run must be reproducible, and a re-pushed
+    # 17.5-alpine tag would make yesterday's green run unreproducible. See
+    # compose.yaml for how to move the pin forward.
+    image: postgres:17.5-alpine@sha256:6567bca8d7bc8c82c5922425a0baee57be8402df92bae5eacad5f01ae9544daa
     # Isolated test credentials: ephemeral per run, exported by
     # run-full-stack-tests.sh as POSTGRES_TEST_* so a development export can
     # never become the test password (and vice versa).
@@ -17,7 +20,7 @@ services:
       retries: 30
 
   qdrant:
-    image: qdrant/qdrant:v1.19.0
+    image: qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc
     ports:
       - "127.0.0.1:56333:6333"
       - "127.0.0.1:56334:6334"

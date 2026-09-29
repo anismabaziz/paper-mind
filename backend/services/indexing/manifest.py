@@ -21,6 +21,7 @@ import json
 from dataclasses import asdict, dataclass, fields
 from typing import Any
 
+from services.models import model_source
 from services.parsing.document_parser import PARSER_VERSION
 from services.retrieval.hybrid import SPARSE_METHOD, TOKENIZER_VERSION
 
@@ -123,7 +124,15 @@ def runtime_manifest(
     content_hash_value: str = "",
     index_generation: int = 0,
 ) -> IndexManifest:
-    """Build the manifest the running configuration would produce."""
+    """
+    Build the manifest the running configuration would produce.
+
+    The two model revisions are the commits the application will actually load
+    (resolved through :mod:`services.models`), not whatever the environment
+    variable happened to hold. Recording the setting instead would write an
+    empty string for every default install, and a document indexed then would
+    look compatible with an index built from any commit at all.
+    """
     return IndexManifest(
         content_hash=content_hash_value,
         parser=settings.parsing.use_docling,
@@ -131,12 +140,16 @@ def runtime_manifest(
         chunk_size_tokens=settings.chunking.chunk_size_tokens,
         chunk_overlap_tokens=settings.chunking.chunk_overlap_tokens,
         embedding_model=settings.embedding.embedding_model,
-        embedding_revision=settings.embedding.revision,
+        embedding_revision=model_source(
+            settings.embedding.embedding_model, settings.embedding.revision
+        ).revision,
         vector_dimension=vector_dimension(),
         sparse_method=SPARSE_METHOD,
         sparse_tokenizer_version=TOKENIZER_VERSION,
         reranker_model=settings.rerank.rerank_model,
-        reranker_revision=settings.rerank.revision,
+        reranker_revision=model_source(
+            settings.rerank.rerank_model, settings.rerank.revision
+        ).revision,
         reranker_enabled=settings.rerank.enabled,
         collection_name=settings.vector.index_name,
         collection_schema_version=COLLECTION_SCHEMA_VERSION,

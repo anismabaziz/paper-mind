@@ -51,13 +51,17 @@ class Services:
                 app_settings.chunking.chunk_overlap_tokens,
             ),
             embedding_service=LocalEmbeddingService(
-                app_settings.embedding.embedding_model
+                app_settings.embedding.embedding_model,
+                revision=app_settings.embedding.revision,
+                trust_remote_code=app_settings.embedding.trust_remote_code,
             ),
             vector_service=VectorService(
                 get_vector_index(),
                 RerankerService(
                     app_settings.rerank.rerank_model,
                     enabled=app_settings.rerank.enabled,
+                    revision=app_settings.rerank.revision,
+                    trust_remote_code=app_settings.rerank.trust_remote_code,
                 ),
             ),
             chat_provider_factory=build_chat_provider,

@@ -38,6 +38,7 @@ from evaluation.experiments import describe
 from services.answering import AnswerSettings
 from services.citations import PROMPT_VERSION
 from services.indexing.manifest import COLLECTION_SCHEMA_VERSION
+from services.models import model_source
 from services.retrieval.hybrid import RRF_K, TOKENIZER_VERSION
 from services.retrieval.vector_service import FETCH_K, MAX_RETRIEVED_SOURCES
 
@@ -334,17 +335,27 @@ def _run_record(run_records: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _model(settings, run_records: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Return the models a report names: the two local ones and the two remote."""
+    """
+    Return the models a report names: the two local ones and the two remote.
+
+    The two local revisions are the commits that will be loaded, resolved
+    through :mod:`services.models`, not the raw settings: a report whose
+    revision reads "" cannot say whether two runs loaded the same weights.
+    """
     run = _run_record(run_records)
     judge = run.get("judge")
     return {
         "embedding": {
             "id": settings.embedding.embedding_model,
-            "revision": settings.embedding.revision,
+            "revision": model_source(
+                settings.embedding.embedding_model, settings.embedding.revision
+            ).revision,
         },
         "reranker": {
             "id": settings.rerank.rerank_model,
-            "revision": settings.rerank.revision,
+            "revision": model_source(
+                settings.rerank.rerank_model, settings.rerank.revision
+            ).revision,
         },
         "generator": (
             {"provider": run["provider"], "id": run["model"]}
