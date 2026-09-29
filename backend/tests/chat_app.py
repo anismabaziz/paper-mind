@@ -23,7 +23,7 @@ from repositories import build_repositories
 from services.accounts.secrets_service import encrypt_api_key
 from services.llm.base import ChatCredentials, LLMProvider
 from services.parsing.document_parser import Chunk
-from services.retrieval.base import RetrievalResult
+from services.retrieval.base import RetrievalCandidate, RetrievalResult
 from services.retrieval.vector_service import FETCH_K
 from tests.ingestion_helpers import build_test_worker
 
@@ -108,10 +108,28 @@ class _Vectors:
         """Return the scripted matches, or raise what the test scripted."""
         if self.raise_with is not None:
             raise self.raise_with
+        sources = [dict(match) for match in self.matches]
         return RetrievalResult(
-            sources=[dict(match) for match in self.matches],
+            sources=sources,
             method="hybrid",
-            outcome="success" if self.matches else "empty",
+            outcome="success" if sources else "empty",
+            # The store's candidates, ranked as production ranks them, so a
+            # trace read over this boundary describes a real retrieval.
+            candidates=tuple(
+                RetrievalCandidate(
+                    rank=position,
+                    fused_rank=position,
+                    score=float(source.get("score") or 0.0),
+                    content_hash=str(
+                        source.get("content_hash")
+                        or f"hash-{source.get('chunk_index', 0)}"
+                    ),
+                    chunk_index=int(source.get("chunk_index") or 0),
+                    page=source.get("page"),
+                    selected=True,
+                )
+                for position, source in enumerate(sources, start=1)
+            ),
         )
 
     def delete_by_filename(self, filename):
@@ -272,7 +290,7 @@ def fake_chat():
 
 
 @pytest.fixture
-def app(repositories, fake_chat, settings_obj):
+def app(repositories, fake_chat, settings_obj, tracer):
     """Compose the app with fakes over the in-memory database."""
     storage = _Storage()
     services = replace(
@@ -283,6 +301,7 @@ def app(repositories, fake_chat, settings_obj):
         embedding_service=_Embeddings(),
         vector_service=_Vectors(),
         chat_provider_factory=fake_chat,
+        tracer=tracer,
     )
     application = create_app(settings_obj, services=services)
     application.config.update(

@@ -21,6 +21,7 @@ from services.retrieval.hybrid import (
     TOKENIZER_VERSION,
     build_sparse_vector,
 )
+from services.retrieval.reranker import Reranker
 from services.retrieval.vector_service import (
     MAX_RETRIEVED_SOURCES,
     VectorService,
@@ -455,3 +456,110 @@ class TestChunkMetadata:
         assert len(sources) == 1
         assert sources[0]["page_no"] == 5
         assert sources[0]["content_hash"] == "hash2"
+
+
+class TestRetrievalCandidateRanks:
+    """What retrieval can be explained by, for every candidate it returned."""
+
+    @staticmethod
+    def match(content, score, chunk_index=0, content_hash=None):
+        """Do match."""
+        return {
+            "id": f"v-{content_hash or content}",
+            "score": score,
+            "metadata": {
+                "content": content,
+                "pdf_name": "doc.pdf",
+                "chunk_index": chunk_index,
+                "page_no": chunk_index + 1,
+                "content_hash": content_hash or f"hash-{content}",
+            },
+        }
+
+    def test_a_hybrid_query_reports_a_fused_rank_for_every_candidate(
+        self, service_factory
+    ):
+        """Fusion happened inside the store, so every candidate carries its rank."""
+        service, _ = service_factory(
+            [self.match("low", 0.10, 0), self.match("high", 0.90, 1)]
+        )
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="keyword")
+
+        assert [c.rank for c in result.candidates] == [1, 2]
+        assert [c.fused_rank for c in result.candidates] == [1, 2]
+        assert [c.content_hash for c in result.candidates] == ["hash-low", "hash-high"]
+
+    def test_a_dense_query_reports_no_fused_rank(self, service_factory):
+        """There was no fusion to report, so no fused rank is invented."""
+        service, _ = service_factory([self.match("only", 0.5, 0)])
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="the and")
+
+        assert result.method == "dense"
+        assert result.candidates[0].fused_rank is None
+
+    def test_a_reranked_query_reports_the_rerank_result(
+        self, service_factory
+    ):
+        """Reranking is a reorder, and the trace shows the move it made."""
+        service, _ = service_factory(
+            [self.match("first", 0.90, 0), self.match("second", 0.80, 1)]
+        )
+        service._reranker = _ReversingReranker()
+
+        result = service.query_vectors(
+            [0.1], "doc.pdf", query_text="keyword", rerank=True
+        )
+
+        by_hash = {c.content_hash: c for c in result.candidates}
+        assert by_hash["hash-first"].rank == 1
+        assert by_hash["hash-first"].rerank_rank == 2
+        assert by_hash["hash-second"].rerank_rank == 1
+        assert by_hash["hash-second"].rerank_score == 1.0
+        assert result.rerank["applied"] is True
+        assert result.rerank["reordered"] is True
+
+    def test_candidates_say_which_ones_survived_the_bound(self, service_factory):
+        """A candidate the app dropped is still reported, marked as dropped."""
+        matches = [self.match(f"chunk {i}", 1.0 - i / 100, i) for i in range(8)]
+        service, _ = service_factory(matches)
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="keyword")
+
+        selected = [c.content_hash for c in result.candidates if c.selected]
+        assert selected == [f"hash-chunk {i}" for i in range(MAX_RETRIEVED_SOURCES)]
+        assert len(result.candidates) == 8
+
+    def test_a_duplicate_match_is_one_candidate(self, service_factory):
+        """Dedupe is a Passage-level decision, so a repeated match is not a second one."""
+        service, _ = service_factory(
+            [self.match("same", 0.4, 0), self.match("same", 0.9, 1)]
+        )
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="keyword")
+
+        assert [c.rank for c in result.candidates] == [1]
+        assert len(result.sources) == 1
+
+    def test_a_candidate_records_where_it_came_from(self, service_factory):
+        """A Page and a chunk are provenance, not private text, and are kept."""
+        service, _ = service_factory([self.match("only", 0.5, 3)])
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="keyword")
+
+        candidate = result.candidates[0]
+        assert (candidate.page, candidate.chunk_index) == (4, 3)
+        assert candidate.score == 0.5
+
+
+class _ReversingReranker(Reranker):
+    """Reranker that reverses the candidates, so a reorder is visible."""
+
+    def maybe_rerank(self, query, sources, enabled=None):
+        """Return the candidates last, with the reranker's own score."""
+        return [
+            {**source, "score": 1.0 - position / 10, "rerank_score": 1.0 - position / 10}
+            for position, source in enumerate(reversed(sources))
+        ]
+

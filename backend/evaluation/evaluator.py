@@ -293,16 +293,14 @@ def input_tokens_of(resolved: ResolvedTurn) -> int:
     """
     Return what one call costs the reader in input tokens.
 
-    The system instruction goes to the provider on every call, so leaving it out
-    would understate a run's input by the same amount for every case. The
-    provider's own usage metadata would be better; the app does not read it, so
-    this is the app's own tokenizer over the exact text it assembled.
+    The measure lives in the telemetry module, where the answer path uses the
+    same one for its traces: a run and a trace cannot disagree about what a
+    call read.
     """
-    return (
-        token_count(SYSTEM_INSTRUCTION)
-        + token_count(resolved.request.query)
-        + token_count(resolved.context)
-        + token_count(resolved.prior_turns)
+    from services.telemetry.usage import input_tokens
+
+    return input_tokens(
+        resolved.request.query, resolved.context, resolved.prior_turns
     )
 
 
@@ -316,15 +314,18 @@ def _terminal(events: Sequence[AnswerEvent]) -> tuple[str, dict[str, Any]]:
 
 
 def _streamed(environment: EvaluationEnvironment, resolved: ResolvedTurn):
-    """Walk the answer path's events, timing the first token and the whole stream."""
-    started = environment.clock()
-    first_token: float | None = None
-    events: list[AnswerEvent] = []
-    for event in environment.answer_service.stream(resolved):
-        if first_token is None and event.name == "token":
-            first_token = environment.clock() - started
-        events.append(event)
-    return events, first_token, environment.clock() - started
+    """
+    Walk the answer path's events and read the timings it measured.
+
+    The answer path already reads the clock around the stream, so a run reads
+    those measurements rather than starting a second pair of its own: one
+    request is timed once, and the report and the trace cannot disagree about
+    how long it took.
+    """
+    events = list(environment.answer_service.stream(resolved))
+    return events, resolved.trace.first_token_seconds, round(
+        resolved.trace.elapsed(), 6
+    )
 
 
 def run_case(

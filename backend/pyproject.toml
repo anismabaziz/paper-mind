@@ -63,6 +63,7 @@ files = [
     "services/indexing",
     "services/ingestion",
     "services/retrieval",
+    "services/telemetry",
     "services/titles.py",
 ]
 check_untyped_defs = true

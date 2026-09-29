@@ -36,6 +36,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         repositories=services.repositories,
         embedding_service=services.embedding_service,
         vector_service=services.vector_service,
+        tracer=services.tracer,
     )
 
     @app.route("/response", methods=["POST"])

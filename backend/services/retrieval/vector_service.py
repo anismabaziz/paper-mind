@@ -3,9 +3,11 @@
 import hashlib
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 from services.concurrency import map_batches_concurrently
 from services.retrieval.base import (
+    RetrievalCandidate,
     RetrievalMethod,
     RetrievalResult,
     VectorStore,
@@ -120,6 +122,81 @@ def build_vectors_from_chunks(
             }
         )
     return vectors
+
+
+def _candidates(
+    retrieved: list[dict],
+    reranked: list[dict],
+    shaped: list[dict],
+    *,
+    method: RetrievalMethod,
+) -> tuple[RetrievalCandidate, ...]:
+    """
+    Describe every candidate retrieval returned, and what each stage did to it.
+
+    Fusion happens inside the store, so for a hybrid query the order it returned
+    is already the fused order and the two ranks coincide. Saying so is better
+    than inventing a per-representation ranking nobody measured: a dense or
+    sparse query reports no fused rank, because there was no fusion to report.
+
+    Candidates are keyed by content hash, which is what survives deduping: two
+    matches of the same Passage are one Passage, and the reranker's position for
+    it is the one the reader is shown.
+    """
+    rerank_ranks: dict[str, int] = {}
+    rerank_scores: dict[str, float] = {}
+    for position, source in enumerate(reranked, start=1):
+        if "rerank_score" not in source:
+            continue
+        content_hash = str(source.get("content_hash"))
+        rerank_ranks[content_hash] = position
+        rerank_scores[content_hash] = float(source["rerank_score"])
+    selected = {str(source.get("content_hash")) for source in shaped}
+    fused = method == "hybrid"
+    candidates: list[RetrievalCandidate] = []
+    seen: set[str] = set()
+    for rank, source in enumerate(retrieved, start=1):
+        content_hash = str(source.get("content_hash"))
+        if content_hash in seen:
+            continue
+        seen.add(content_hash)
+        candidates.append(
+            RetrievalCandidate(
+                rank=rank,
+                fused_rank=rank if fused else None,
+                rerank_rank=rerank_ranks.get(content_hash),
+                score=float(source.get("score") or 0.0),
+                content_hash=content_hash,
+                chunk_index=int(source.get("chunk_index") or 0),
+                page=source.get("page"),
+                rerank_score=rerank_scores.get(content_hash),
+                selected=content_hash in selected,
+            )
+        )
+    return tuple(candidates)
+
+
+def _rerank_report(reranker: Any, candidates: tuple[RetrievalCandidate, ...]) -> dict:
+    """
+    Return what the reranker did to this call, as a trace records it.
+
+    ``applied`` is true when the reranker scored at least one candidate.
+    ``reordered`` is true when it moved one. A reranker that is configured but
+    missing from the service is reported as not applied: there is no gate to
+    misread, because the call the trace describes is the one that ran.
+    """
+    model = getattr(reranker, "model_name", None) if reranker is not None else None
+    applied = any(candidate.rerank_rank is not None for candidate in candidates)
+    reordered = any(
+        candidate.rerank_rank is not None and candidate.rerank_rank != candidate.rank
+        for candidate in candidates
+    )
+    return {
+        "applied": applied,
+        "model": model,
+        "candidates": len(candidates),
+        "reordered": reordered,
+    }
 
 
 def _sparse_setting_problems(
@@ -279,7 +356,8 @@ class VectorService:
             if isinstance(search_results, dict)
             else getattr(search_results, "matches", [])
         )
-        sources = matches_to_sources(matches, filename)
+        retrieved = matches_to_sources(matches, filename)
+        sources = retrieved
         if self._reranker is not None:
             sources = self._reranker.maybe_rerank(query_text, sources, enabled=rerank)
         shaped = shape_sources(sources)
@@ -291,10 +369,13 @@ class VectorService:
                     f"Vector store reported an invalid retrieval method: {reported_method}"
                 )
             actual_method = reported_method
+        candidates = _candidates(retrieved, sources, shaped, method=actual_method)
         return RetrievalResult(
             sources=shaped,
             method=actual_method,
             outcome="success" if shaped else "empty",
+            candidates=candidates,
+            rerank=_rerank_report(self._reranker, candidates),
         )
 
     def validate_generation(

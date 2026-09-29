@@ -251,6 +251,10 @@ class LLMProvider(ABC):
         # A subclass sets it when it reads one; ``None`` means the stream ended
         # without the provider saying why.
         self.last_finish_reason: str | None = None
+        # How many attempts the last stream took, counting the first one. A
+        # trace reports it so a slow answer that only arrived on the retry is
+        # distinguishable from one that was slow the first time.
+        self.last_attempts: int = 0
         self._use_cache = use_cache
         self._client_override = client
 
@@ -302,7 +306,9 @@ class LLMProvider(ABC):
         bills the account the user chose, and a switch would bill another one.
         """
         deadline = time.monotonic() + self.budget.timeout_seconds
+        self.last_attempts = 0
         for attempt in range(1, STREAM_ATTEMPTS + 1):
+            self.last_attempts = attempt
             emitted: list[str] = []
             self.last_finish_reason = None
             try:

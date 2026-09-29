@@ -9,12 +9,65 @@ RetrievalOutcome = Literal["success", "empty"]
 
 
 @dataclass(frozen=True)
+class RetrievalCandidate:
+    """
+    Where one candidate stood at each stage, without its text.
+
+    A candidate is a Passage the store returned, before the app kept the five
+    it would show. Its identity is the content hash and the chunk it came from,
+    so two runs can be compared without either run holding the words. ``rank``
+    is the position the store returned it at; ``fused_rank`` is the position it
+    holds once the store's fusion has ordered the two retrievals together, and
+    is None for a single-representation query where there is no fusion to
+    report. ``rerank_rank`` is where the cross-encoder put it, and is None when
+    the reranker did not run; ``selected`` says whether the app kept it among
+    the Passages the reader is shown.
+    """
+
+    rank: int
+    score: float
+    content_hash: str
+    chunk_index: int
+    page: int | None = None
+    fused_rank: int | None = None
+    rerank_score: float | None = None
+    rerank_rank: int | None = None
+    #: Whether the app kept this candidate among the Passages it would show.
+    selected: bool = False
+
+    def to_dict(self) -> dict:
+        """Return the candidate as a trace records it."""
+        return {
+            "rank": self.rank,
+            "fused_rank": self.fused_rank,
+            "rerank_rank": self.rerank_rank,
+            "score": self.score,
+            "rerank_score": self.rerank_score,
+            "content_hash": self.content_hash,
+            "chunk_index": self.chunk_index,
+            "page": self.page,
+            "selected": self.selected,
+        }
+
+
+@dataclass(frozen=True)
 class RetrievalResult:
-    """Shaped evidence plus the method and outcome that produced it."""
+    """
+    Shaped evidence plus the method and outcome that produced it.
+
+    ``candidates`` describes what the store returned before the app bounded it,
+    so an operator can see what a change to the method, the fusion, or the
+    reranker did to the ranking rather than only what survived. ``rerank`` says
+    whether the reranker ran for this call, with which model, and whether it
+    moved anything: a rerank that left the order unchanged is a cost with no
+    effect, and the trace should show that.
+    """
 
     sources: list[dict]
     method: RetrievalMethod
     outcome: RetrievalOutcome
+    candidates: tuple[RetrievalCandidate, ...] = ()
+    rerank: dict | None = None
 
 
 class VectorStoreError(RuntimeError):

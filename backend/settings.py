@@ -244,6 +244,43 @@ class IngestionSettings(BaseSettings):
     )
 
 
+class TelemetrySettings(BaseSettings):
+    """
+    Traces for the answer path: where they go, and what they may contain.
+
+    Local export is on by default and writes redacted spans to a file the
+    operator can read while the application runs. Nothing is sent anywhere
+    unless ``otlp_endpoint`` is set, because observability that leaves the
+    machine is a decision the operator makes.
+
+    ``capture_content`` writes the question, the answer, and the evidence into
+    the local file instead of a fingerprint of them. It is a debugging switch:
+    it is off unless asked for, and it stops on its own after
+    ``capture_window_seconds`` so a debugging session cannot become the way the
+    application runs. API keys are stripped either way.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    enabled: bool = Field(default=True, validation_alias="TELEMETRY_ENABLED")
+    local_export_path: Path = Field(
+        default=BACKEND_DIR / "data" / "traces" / "answer-traces.jsonl",
+        validation_alias="TELEMETRY_LOCAL_EXPORT_PATH",
+    )
+    otlp_endpoint: str = Field(default="", validation_alias="TELEMETRY_OTLP_ENDPOINT")
+    capture_content: bool = Field(
+        default=False, validation_alias="TELEMETRY_CAPTURE_CONTENT"
+    )
+    capture_window_seconds: float = Field(
+        default=900.0, validation_alias="TELEMETRY_CAPTURE_WINDOW_SECONDS"
+    )
+
+    @field_validator("enabled", "capture_content", mode="before")
+    @classmethod
+    def _coerce(cls, value):
+        return _parse_bool(value)
+
+
 class FrontendSettings(BaseSettings):
     """Frontend origin for CORS allowlist."""
 
@@ -280,6 +317,7 @@ class Settings(BaseSettings):
     auth: AuthSettings = Field(default_factory=AuthSettings)
     upload: UploadSettings = Field(default_factory=UploadSettings)
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     frontend: FrontendSettings = Field(default_factory=FrontendSettings)
 
 
