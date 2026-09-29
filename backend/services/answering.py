@@ -46,11 +46,25 @@ from services.llm.base import EmptyAnswerError, LLMProvider, ProviderTimeoutErro
 from services.retrieval.base import (
     RetrievalMethod,
     RetrievalOutcome,
+    RetrievalResult,
     VectorDimensionError,
     VectorStoreConfigurationError,
     VectorStoreUnavailableError,
 )
 from services.retrieval.query_expansion import expand_query
+from services.telemetry.answer import (
+    ABSTAINED,
+    ANSWERED,
+    CANCELLED,
+    CITATIONS,
+    GENERATION,
+    PERSISTENCE,
+    PERSISTENCE_ERROR,
+    AnswerTrace,
+    retrieval_attributes,
+)
+from services.telemetry.factory import tracer_for
+from services.telemetry.spans import error_category
 from settings import Settings
 
 log = logging.getLogger(__name__)
@@ -194,6 +208,10 @@ class ResolvedTurn:
     retrieval: Retrieval
     abstention: Abstention | None
     provenance: AnswerProvenance
+    #: The trace of this request, carried from the decision phase so the
+    #: outcome, the citations, and the store write land in the same trace the
+    #: retrieval that led to them was recorded in.
+    trace: AnswerTrace
 
 
 @dataclass(frozen=True)
@@ -233,6 +251,16 @@ UNCITED = AnswerFailure(
     UNRESOLVED_CITATIONS_REASON,
     "citations",
 )
+
+#: Which step of a trace a terminal event blames for the failure. The event
+#: names the outcome a reader sees; this names the step that caused it, so a
+#: provider timeout is recorded against generation and a failed save against
+#: persistence rather than both against whichever step happened to be open.
+_SPAN_FOR_EVENT = {
+    "provider_error": GENERATION,
+    "citation_error": CITATIONS,
+    "persistence_error": PERSISTENCE,
+}
 
 
 def vector_store_refusal(error: Exception) -> Refusal:
@@ -283,13 +311,21 @@ class AnswerService:
         repositories: Any,
         embedding_service: Any,
         vector_service: Any,
+        tracer: Any = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        """Bind the answer path to the dependencies the app serves with."""
+        """
+        Bind the answer path to the dependencies the app serves with.
+
+        ``tracer`` is where each request's trace goes. Left out, the answer path
+        builds the one the running configuration asks for, so a deployment
+        configures observability in settings and not in each caller.
+        """
         self._settings = settings
         self._repositories = repositories
         self._embeddings = embedding_service
         self._vectors = vector_service
+        self._tracer = tracer if tracer is not None else tracer_for(settings)
         self._clock = clock
 
     @property
@@ -312,44 +348,70 @@ class AnswerService:
         question the app will not accept. Everything else returns a
         :class:`ResolvedTurn` with the question already committed, so the
         reader can see it in history whatever the answer turns out to be.
+
+        Every request opens a trace, including one that is refused: a question
+        an operator cannot account for is exactly the question a trace is for.
         """
+        trace = AnswerTrace.start(self._tracer, model=request.model)
+        # The question is recorded so the trace can show there was one; the
+        # redactor replaces it with a fingerprint unless a local capture window
+        # is open.
+        trace.identify(filename=request.filename, query=request.query)
         refusal = self._refuse_unanswerable(request)
         if refusal is not None:
-            return refusal
+            return self._refused(trace, refusal)
 
         file_record = self.files.get_file(request.filename)
         conversation_id = self.conversations.get_conversation_id(file_record["id"])
         if not conversation_id:
-            return Refusal(404, "conversation_not_found", "Conversation not found")
+            return self._refused(
+                trace, Refusal(404, "conversation_not_found", "Conversation not found")
+            )
         if not isinstance(request.query, str) or not request.query.strip():
-            return Refusal(400, "invalid_query", "Query and Filename are required")
+            return self._refused(
+                trace,
+                Refusal(400, "invalid_query", "Query and Filename are required"),
+            )
         if len(request.query) > MAX_QUERY_CHARS:
-            return Refusal(400, "query_too_long", "Query is too long")
+            return self._refused(
+                trace, Refusal(400, "query_too_long", "Query is too long")
+            )
 
+        trace.identify(
+            document_id=file_record["id"],
+            conversation_id=conversation_id,
+            index_generation=file_record.get("index_generation"),
+        )
         try:
-            retrieval, sources, context, prior_turns_text = self._retrieve_context(
-                request, file_record, conversation_id
+            retrieval, sources, context, prior_turns_text, result = (
+                self._retrieve_context(request, file_record, conversation_id, trace)
             )
         except (
             VectorStoreUnavailableError,
             VectorStoreConfigurationError,
         ) as exc:
             log.exception("/response vector store failed for %s", request.filename)
-            return vector_store_refusal(exc)
+            # The retrieval span already carries the failure's category: the
+            # context it ran in classifies whatever escapes it.
+            return self._refused(trace, vector_store_refusal(exc))
         except VectorDimensionError as exc:
             log.warning(
                 "/response vector dimension mismatch for %s: %s", request.filename, exc
             )
-            return Refusal(409, "vector_dimension_mismatch", str(exc))
+            return self._refused(
+                trace, Refusal(409, "vector_dimension_mismatch", str(exc))
+            )
         except Exception:
             log.exception("/response retrieval failed for %s", request.filename)
-            return Refusal(500, "", "Internal server error")
+            return self._refused(trace, Refusal(500, "", "Internal server error"))
 
         if not self._still_present(request.filename):
             log.warning(
                 "/response refusing chat for deleting document %s", request.filename
             )
-            return deletion_block_refusal(self.files.get_file(request.filename))
+            return self._refused(
+                trace, deletion_block_refusal(self.files.get_file(request.filename))
+            )
 
         # Decided before the Turn is committed, and acted on below: whether
         # this question gets a model call is settled the moment retrieval is.
@@ -360,8 +422,9 @@ class AnswerService:
             log.exception(
                 "/response could not commit the question for %s", request.filename
             )
-            return Refusal(500, "", "Internal server error")
+            return self._refused(trace, Refusal(500, "", "Internal server error"))
 
+        trace.identify(turn_id=turn_id)
         return ResolvedTurn(
             turn_id=turn_id,
             request=request,
@@ -371,7 +434,14 @@ class AnswerService:
             retrieval=retrieval,
             abstention=abstention,
             provenance=self._provenance(request, file_record, retrieval),
+            trace=trace,
         )
+
+    @staticmethod
+    def _refused(trace: AnswerTrace, refusal: Refusal) -> Refusal:
+        """Record a refused request and return the refusal unchanged."""
+        trace.refused(refusal.category, refusal.status)
+        return refusal
 
     def stream(self, resolved: ResolvedTurn) -> Iterator[AnswerEvent]:
         """
@@ -380,11 +450,24 @@ class AnswerService:
         The turn is already on record, so a stream that ends early still leaves
         a Turn the reader can see. A client that walks away mid-answer closes
         the Turn as cancelled rather than leaving it pending forever.
+
+        The clock is read once here, before the first byte, and everything the
+        trace reports about this request is measured against it: the time to
+        the first token and the whole exchange are both what a reader waited,
+        not what one step inside the request cost. The trace is closed here
+        rather than in ``resolve`` because the work it records is this — the
+        retrieval span is already open, and the outcome, the citations, and the
+        store write have not happened yet.
         """
-        if resolved.abstention is not None:
-            yield from self._abstain(resolved, resolved.abstention)
-            return
-        yield from self._generate(resolved)
+        resolved.trace.begin(clock=self._clock)
+        try:
+            if resolved.abstention is not None:
+                yield from self._abstain(resolved, resolved.abstention)
+                return
+            yield from self._generate(resolved)
+        finally:
+            resolved.trace.timings()
+            resolved.trace.finish()
 
     def _refuse_unanswerable(self, request: AnswerRequest) -> Refusal | None:
         """Return the refusal that stops a question before retrieval."""
@@ -435,7 +518,8 @@ class AnswerService:
         request: AnswerRequest,
         file_record: dict[str, Any],
         conversation_id: str,
-    ) -> tuple[Retrieval, list[dict[str, Any]], str, str]:
+        trace: AnswerTrace,
+    ) -> tuple[Retrieval, list[dict[str, Any]], str, str, RetrievalResult]:
         """
         Return what retrieval produced, the supplied Passages, and the prompt.
 
@@ -466,29 +550,40 @@ class AnswerService:
             rewrite=rewriter,
         )
         started = self._clock()
-        query_embedding = self._embeddings.embed_texts(expansion.expanded_query)[0]
-        retrieval_result = self._vectors.query_vectors(
-            query_embedding,
-            request.filename,
-            query_text=expansion.expanded_query,
-            generation=file_record.get("index_generation"),
-            include_legacy=file_record.get("index_generation") is None,
-        )
-        elapsed = self._clock() - started
-        sources = assign_source_ids(
-            [_normalize_source(source) for source in retrieval_result.sources]
-        )
-        chat_context = build_chat_context(
-            request.query,
-            sources,
-            recent_turns,
-            expansion,
-            max_turns=limits.recent_turns,
-            prior_turns_token_budget=limits.prior_turns_token_budget,
-            context_token_budget=limits.context_token_budget,
-            turns_in_conversation=turns_in_conversation,
-            input_token_budget=request.model.max_input_tokens,
-        )
+        with trace.retrieval(
+            document_id=file_record.get("id"),
+            index_generation=file_record.get("index_generation"),
+            expansion_method=expansion.method,
+        ) as span:
+            query_embedding = self._embeddings.embed_texts(expansion.expanded_query)[0]
+            retrieval_result = self._vectors.query_vectors(
+                query_embedding,
+                request.filename,
+                query_text=expansion.expanded_query,
+                generation=file_record.get("index_generation"),
+                include_legacy=file_record.get("index_generation") is None,
+            )
+            elapsed = self._clock() - started
+            sources = assign_source_ids(
+                [_normalize_source(source) for source in retrieval_result.sources]
+            )
+            chat_context = build_chat_context(
+                request.query,
+                sources,
+                recent_turns,
+                expansion,
+                max_turns=limits.recent_turns,
+                prior_turns_token_budget=limits.prior_turns_token_budget,
+                context_token_budget=limits.context_token_budget,
+                turns_in_conversation=turns_in_conversation,
+                input_token_budget=request.model.max_input_tokens,
+            )
+            span.record(
+                **retrieval_attributes(retrieval_result),
+                latency_ms=round(elapsed * 1000, 3),
+                dropped_turns=chat_context.dropped_turns,
+                dropped_sources=chat_context.dropped_sources,
+            )
         # Citations must match what the model actually saw, so a Citation
         # Source the budget dropped is not stored against the answer.
         kept_sources = list(chat_context.sources)
@@ -502,7 +597,13 @@ class AnswerService:
             },
             seconds=elapsed,
         )
-        return retrieval, kept_sources, chat_context.context, chat_context.prior_turns
+        return (
+            retrieval,
+            kept_sources,
+            chat_context.context,
+            chat_context.prior_turns,
+            retrieval_result,
+        )
 
     def _provenance(
         self,
@@ -539,7 +640,9 @@ class AnswerService:
             return False
         return not is_deleting_record(current)
 
-    def _record_outcome(self, filename: str, record: Callable[..., Any], *args: Any):
+    def _record_outcome(
+        self, filename: str, record: Callable[..., Any], *args: Any
+    ):
         """Apply one terminal Turn outcome unless the Document is gone."""
         try:
             if not self._still_present(filename):
@@ -555,7 +658,16 @@ class AnswerService:
     def _fail(
         self, resolved: ResolvedTurn, failure: AnswerFailure, event_name: str
     ) -> Iterator[AnswerEvent]:
-        """Close the Turn as failed and yield the terminal event."""
+        """
+        Close the Turn as failed and yield the terminal event.
+
+        The failure the reader is told and the failure the trace records are the
+        same one: the category on the terminal event is the one the step that
+        failed is recorded as, so the stream and the trace never disagree about
+        why an answer ended.
+        """
+        resolved.trace.fail(_SPAN_FOR_EVENT[event_name], failure.category)
+        resolved.trace.identify(outcome=event_name)
         self._record_outcome(
             resolved.request.filename,
             self.conversations.fail_turn,
@@ -589,10 +701,14 @@ class AnswerService:
             recorded = self.conversations.abstain_turn(
                 resolved.turn_id, abstention.message, abstention.reason
             )
-        except Exception:
+        except Exception as exc:
             log.exception(
                 "/response could not record the abstention for %s",
                 resolved.request.filename,
+            )
+            resolved.trace.fail(PERSISTENCE, error_category(exc))
+            resolved.trace.persistence(
+                PERSISTENCE_ERROR, turn_id=resolved.turn_id
             )
             yield AnswerEvent(
                 "persistence_error",
@@ -605,11 +721,18 @@ class AnswerService:
                 resolved.turn_id,
                 resolved.request.filename,
             )
+            resolved.trace.persistence(
+                PERSISTENCE_ERROR,
+                turn_id=resolved.turn_id,
+                reason="turn already ended",
+            )
             yield AnswerEvent(
                 "persistence_error",
                 {"error": UNSAVED.message, "category": UNSAVED.category},
             )
             return
+        resolved.trace.identify(abstention_reason=abstention.reason)
+        resolved.trace.persistence(ABSTAINED, turn_id=resolved.turn_id)
         yield AnswerEvent("start", {"turn_id": resolved.turn_id})
         yield AnswerEvent(
             "abstained",
@@ -635,6 +758,12 @@ class AnswerService:
             prune_conflicting_claims(parsed.answer, parsed.claims), allowed
         )
         if not citations.invalid_ids:
+            resolved.trace.citations(
+                claims=len(citations.claims),
+                invalid_ids=0,
+                grounded=citations.grounded,
+                repaired=False,
+            )
             return ResolvedAnswer(parsed.answer, citations)
         log.warning(
             "/response cited passages not supplied for %s: %s of %s",
@@ -654,11 +783,23 @@ class AnswerService:
         repaired_claims = prune_conflicting_claims(parsed.answer, repaired.claims)
         citations = validate_claims(repaired_claims, allowed)
         if repaired_claims and not citations.invalid_ids:
+            resolved.trace.citations(
+                claims=len(citations.claims),
+                invalid_ids=0,
+                grounded=citations.grounded,
+                repaired=True,
+            )
             return ResolvedAnswer(parsed.answer, citations)
         log.warning(
             "/response citations unresolved for %s: %s",
             resolved.request.filename,
             ",".join(citations.invalid_ids),
+        )
+        resolved.trace.citations(
+            claims=len(citations.claims),
+            invalid_ids=len(citations.invalid_ids),
+            grounded=citations.grounded,
+            repaired=True,
         )
         return None
 
@@ -700,48 +841,80 @@ class AnswerService:
         yield AnswerEvent("start", {"turn_id": resolved.turn_id})
         fragments: list[str] = []
         splitter = AnswerSplitter()
-        try:
-            for token in request.provider.stream_response(
-                request.query, resolved.context, resolved.prior_turns
-            ):
-                fragments.append(token)
-                # The claims block is written in the model's own output but
-                # belongs to the app, so it is collected and never shown.
-                visible = splitter.feed(token)
-                if visible:
-                    yield AnswerEvent("token", {"text": visible})
-            trailing = splitter.finish()
-            if trailing:
-                yield AnswerEvent("token", {"text": trailing})
-        except GeneratorExit:
-            # The reader left mid-answer. The question stays on record as
-            # cancelled rather than pending, so it is never stranded, and no
-            # fragment the provider still holds can reach a later request.
-            self._record_outcome(
-                request.filename,
-                self.conversations.cancel_turn,
-                resolved.turn_id,
-                "client disconnected",
-            )
-            raise
-        except ProviderTimeoutError:
-            log.warning("/response generation timed out for %s", request.filename)
-            yield from self._fail(resolved, PROVIDER_SLOW, "provider_error")
-            return
-        except EmptyAnswerError:
-            log.warning("/response generation was empty for %s", request.filename)
-            yield from self._fail(resolved, PROVIDER_SILENT, "provider_error")
-            return
-        except Exception as exc:  # noqa: BLE001 - reported as one provider outcome
-            log.error(
-                "/response generation failed for %s: %s",
-                request.filename,
-                type(exc).__name__,
-            )
-            yield from self._fail(resolved, PROVIDER_DOWN, "provider_error")
-            return
+        with resolved.trace.generation(
+            query=request.query,
+            context=resolved.context,
+            prior_turns=resolved.prior_turns,
+        ) as span:
+            try:
+                for token in request.provider.stream_response(
+                    request.query, resolved.context, resolved.prior_turns
+                ):
+                    fragments.append(token)
+                    resolved.trace.mark_first_token()
+                    # The claims block is written in the model's own output but
+                    # belongs to the app, so it is collected and never shown.
+                    visible = splitter.feed(token)
+                    if visible:
+                        yield AnswerEvent("token", {"text": visible})
+                trailing = splitter.finish()
+                if trailing:
+                    yield AnswerEvent("token", {"text": trailing})
+            except GeneratorExit:
+                # The reader left mid-answer. The question stays on record as
+                # cancelled rather than pending, so it is never stranded, and no
+                # fragment the provider still holds can reach a later request.
+                self._record_outcome(
+                    request.filename,
+                    self.conversations.cancel_turn,
+                    resolved.turn_id,
+                    "client disconnected",
+                )
+                resolved.trace.identify(outcome=CANCELLED)
+                resolved.trace.persistence(
+                    CANCELLED, turn_id=resolved.turn_id, reason="client disconnected"
+                )
+                self._record_generation(
+                    resolved,
+                    span,
+                    generated="".join(fragments).strip() or None,
+                )
+                raise
+            except ProviderTimeoutError:
+                log.warning("/response generation timed out for %s", request.filename)
+                self._record_generation(
+                    resolved,
+                    span,
+                    generated="".join(fragments).strip() or None,
+                )
+                yield from self._fail(resolved, PROVIDER_SLOW, "provider_error")
+                return
+            except EmptyAnswerError:
+                log.warning("/response generation was empty for %s", request.filename)
+                self._record_generation(
+                    resolved,
+                    span,
+                    generated=None,
+                )
+                yield from self._fail(resolved, PROVIDER_SILENT, "provider_error")
+                return
+            except Exception as exc:  # noqa: BLE001 - one provider outcome
+                log.error(
+                    "/response generation failed for %s: %s",
+                    request.filename,
+                    type(exc).__name__,
+                )
+                self._record_generation(
+                    resolved,
+                    span,
+                    generated="".join(fragments).strip() or None,
+                )
+                yield from self._fail(resolved, PROVIDER_DOWN, "provider_error")
+                return
 
-        answer = "".join(fragments).strip()
+            answer = "".join(fragments).strip()
+            self._record_generation(resolved, span, generated=answer or None)
+
         if not self._still_present(request.filename):
             # The Document and its Conversation went away mid-answer, so there
             # is nothing left to store this in. Saying the answer was saved
@@ -751,11 +924,16 @@ class AnswerService:
             )
             try:
                 self.conversations.cancel_turn(resolved.turn_id, "document deleted")
-            except Exception:
+            except Exception as exc:
                 log.exception(
                     "/response could not cancel turn for deleted document %s",
                     request.filename,
                 )
+                resolved.trace.fail(PERSISTENCE, error_category(exc))
+            resolved.trace.identify(outcome=CANCELLED)
+            resolved.trace.persistence(
+                CANCELLED, turn_id=resolved.turn_id, reason="document deleted"
+            )
             yield AnswerEvent("cancelled", {"reason": "document deleted"})
             return
         citations = self._check_citations(resolved, answer)
@@ -770,8 +948,9 @@ class AnswerService:
                 resolved.sources,
                 claims=[claim.to_dict() for claim in citations.citations.claims],
             )
-        except Exception:
+        except Exception as exc:
             log.exception("failed to persist answer for %s", request.filename)
+            resolved.trace.persistence(PERSISTENCE_ERROR, turn_id=resolved.turn_id)
             yield from self._fail(resolved, UNSAVED, "persistence_error")
             return
         if not completed:
@@ -782,9 +961,31 @@ class AnswerService:
                 resolved.turn_id,
                 request.filename,
             )
+            resolved.trace.persistence(
+                PERSISTENCE_ERROR,
+                turn_id=resolved.turn_id,
+                reason="turn already ended",
+            )
             yield from self._fail(resolved, UNSAVED, "persistence_error")
             return
+        resolved.trace.persistence(ANSWERED, turn_id=resolved.turn_id)
         yield self._done(resolved, citations, stored)
+
+    def _record_generation(
+        self, resolved: ResolvedTurn, span: Any, *, generated: str | None
+    ) -> None:
+        """Record what the one model call wrote, whether or not it answered."""
+        reason = getattr(resolved.request.provider, "last_finish_reason", None)
+        resolved.trace.generated(
+            span,
+            query=resolved.request.query,
+            context=resolved.context,
+            prior_turns=resolved.prior_turns,
+            generated=generated,
+            finish_reason=reason,
+            attempts=int(getattr(resolved.request.provider, "last_attempts", 0) or 0),
+            truncated=reason not in resolved.request.model.complete_finish_reasons,
+        )
 
 
 def deletion_block_refusal(file_record: dict[str, Any] | None) -> Refusal:

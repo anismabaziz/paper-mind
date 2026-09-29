@@ -39,6 +39,7 @@ from settings import (
     RerankSettings,
     Settings,
     StorageSettings,
+    TelemetrySettings,
     UploadSettings,
     VectorSettings,
 )
@@ -160,6 +161,10 @@ def full_stack_app(migrated_database, tmp_path):
         parsing=ParsingSettings(use_docling="false"),
         auth=AuthSettings(app_secret="full-stack-test-secret"),
         upload=UploadSettings(),
+        # Traces stay inside the test's own directory, not the repo's data dir.
+        telemetry=TelemetrySettings(
+            local_export_path=tmp_path / "traces" / "answer-traces.jsonl"
+        ),
         frontend=FrontendSettings(frontend_origin="http://localhost:5173"),
     )
     session_factory = sessionmaker(

@@ -29,6 +29,7 @@ from services.retrieval.base import VectorStore
 from services.retrieval.qdrant_store import QdrantIndexAdapter
 from services.retrieval.reranker import Reranker
 from services.retrieval.vector_service import VectorService
+from services.telemetry.factory import tracer_for
 from settings import Settings
 from storage import LocalStorage
 
@@ -419,6 +420,7 @@ def build_application(
         vector_service=VectorService(vector_store, reranker),
         chat_provider_factory=chat,
         api_key_verifier=chat.verify,
+        tracer=tracer_for(app_settings),
     )
     application = create_app(app_settings, services=services)
 

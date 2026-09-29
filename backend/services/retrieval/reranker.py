@@ -48,6 +48,11 @@ class RerankerService(Reranker):
         self._model = model
         self._lock = threading.Lock()
 
+    @property
+    def model_name(self) -> str:
+        """Return the cross-encoder this reranker scores with."""
+        return self._model_name
+
     def _get_model(self):
         """
         Lazy-load the cross-encoder. Thread-safe double-checked locking.

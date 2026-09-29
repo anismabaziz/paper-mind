@@ -257,16 +257,13 @@ def cost_for(
     """
     Return what one case cost, in USD, at the catalog's published prices.
 
-    The token counts are the app's own estimates, so this is an estimate too:
-    it is exact arithmetic over estimated usage, not a provider invoice. A case
-    with no measured usage has no cost rather than a cost of zero.
+    The arithmetic lives in the telemetry module, where the answer path uses
+    the same one for its traces: a report and a trace cannot disagree about
+    what one call cost.
     """
-    if input_tokens is None or output_tokens is None:
-        return None
-    return (
-        input_tokens / 1_000_000 * model.input_cost_per_million_usd
-        + output_tokens / 1_000_000 * model.output_cost_per_million_usd
-    )
+    from services.telemetry.cost import cost_usd
+
+    return cost_usd(input_tokens, output_tokens, model)
 
 
 @dataclass

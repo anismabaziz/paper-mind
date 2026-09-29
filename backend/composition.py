@@ -1,7 +1,7 @@
 """Production dependency graph for the Flask application."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from providers import get_vector_index
 from repositories import Repositories, build_repositories
@@ -12,6 +12,8 @@ from services.llm.factory import build_chat_provider
 from services.parsing.document_parser import DocumentIngestor
 from services.retrieval.reranker import RerankerService
 from services.retrieval.vector_service import VectorService
+from services.telemetry.factory import tracer_for
+from services.telemetry.spans import Tracer
 from settings import Settings
 from storage import LocalStorage, get_storage
 
@@ -31,6 +33,10 @@ class Services:
     vector_service: VectorService
     chat_provider_factory: CredentialsCallable
     api_key_verifier: VerifyCallable
+    #: Where each answer request's trace goes. It is a dependency rather than
+    #: something a route builds, so a deployment configures observability in
+    #: settings and a test can read what the application would have exported.
+    tracer: Tracer = field(default_factory=Tracer)
 
     @classmethod
     def from_settings(cls, app_settings: Settings) -> "Services":
@@ -56,4 +62,5 @@ class Services:
             ),
             chat_provider_factory=build_chat_provider,
             api_key_verifier=verify_api_key,
+            tracer=tracer_for(app_settings),
         )
