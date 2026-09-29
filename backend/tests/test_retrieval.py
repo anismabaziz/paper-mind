@@ -499,9 +499,7 @@ class TestRetrievalCandidateRanks:
         assert result.method == "dense"
         assert result.candidates[0].fused_rank is None
 
-    def test_a_reranked_query_reports_the_rerank_result(
-        self, service_factory
-    ):
+    def test_a_reranked_query_reports_the_rerank_result(self, service_factory):
         """Reranking is a reorder, and the trace shows the move it made."""
         service, _ = service_factory(
             [self.match("first", 0.90, 0), self.match("second", 0.80, 1)]
@@ -559,7 +557,10 @@ class _ReversingReranker(Reranker):
     def maybe_rerank(self, query, sources, enabled=None):
         """Return the candidates last, with the reranker's own score."""
         return [
-            {**source, "score": 1.0 - position / 10, "rerank_score": 1.0 - position / 10}
+            {
+                **source,
+                "score": 1.0 - position / 10,
+                "rerank_score": 1.0 - position / 10,
+            }
             for position, source in enumerate(reversed(sources))
         ]
-

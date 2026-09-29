@@ -704,6 +704,33 @@ def _answer_table(results: Sequence[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _failures(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Return the questions this result did not get right, and why not.
+
+    A failure is a case that ended as anything but an answer, or an answer one
+    of the deterministic graders would not accept. The rows name the questions;
+    the per-question file beside the summary holds the rest.
+    """
+    failed = []
+    for case in result.get("cases", []):
+        grades = case.get("grades", {})
+        failed_graders = sorted(
+            name
+            for name, grade in grades.items()
+            if isinstance(grade, dict) and grade.get("outcome") == "failed"
+        )
+        if case.get("outcome") != "answered" or failed_graders:
+            row: dict[str, Any] = {"id": case["id"], "outcome": case["outcome"]}
+            if failed_graders:
+                row["failed"] = ",".join(failed_graders)
+            for verdict in ("verdict", "correctness_verdict"):
+                if case.get(verdict) not in (None, "correct", "faithful"):
+                    row[verdict] = case.get(verdict)
+            failed.append(row)
+    return failed
+
+
 def _moved(results: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return every question that moved, with the move and the direction."""
     moved = []
@@ -762,10 +789,10 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
             f" at `{models['embedding']['revision']}`"
             if models["embedding"]["revision"]
             else ""
-        )
-        + _model_line(models["generator"], "Generating model")
-        + _model_line(models["judge"], "Judging model")
-        + (
+        ),
+        _model_line(models["generator"], "Generating model") or "No model generated.",
+        _model_line(models["judge"], "Judging model") or "No model judged.",
+        (
             ""
             if mode == ANSWER_MODE
             else f"Reranker `{models['reranker']['id']}`"
@@ -797,6 +824,38 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
             )
     if mode == ANSWER_MODE:
         lines += [""] + _answer_table(results)
+        rows = [row for result in results for row in _failures(result)]
+        lines += ["", "## Cases that failed", ""]
+        if rows:
+            lines += [
+                "| Question | Outcome | Failed graders | Judge | Correctness |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+            lines += [
+                f"| `{row['id']}` | {row['outcome']} | "
+                f"{row.get('failed', '-')} | {row.get('verdict', '-')} | "
+                f"{row.get('correctness_verdict', '-')} |"
+                for row in rows
+            ]
+        else:
+            lines.append("Every question ended as an accepted answer.")
+    if mode == ANSWER_MODE:
+        lines += [
+            "",
+            "## Reproducing this report",
+            "",
+            "```",
+            "docker compose up db qdrant",
+            "export PAPERMIND_EVAL_GENERATOR_API_KEY=...",
+            "export PAPERMIND_EVAL_JUDGE_API_KEY=...",
+            "uv run python -m evaluation.cli --live \\",
+            _generation_command(manifest["models"]),
+            "  --report <directory>",
+            "```",
+            "",
+        ]
+        lines += _closing_lines()
+        return "\n".join(lines)
     lines += [
         "",
         "## Experiments",
@@ -844,12 +903,40 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         "",
         "```",
         "docker compose up db qdrant",
-        "uv run python -m evaluation.cli --live --report <directory>"
-        + (" --ablate" if mode != ANSWER_MODE else ""),
+        "uv run python -m evaluation.cli --live --report <directory> --ablate",
         "uv run python -m evaluation.cli --live --report <directory> --compare-report "
         "<published directory>",
         "```",
         "",
+    ]
+    lines += _closing_lines()
+    return "\n".join(lines)
+
+
+def _generation_command(models: dict[str, Any]) -> str:
+    """
+    Return the flags that run this report's generator and judge again.
+
+    The manifest names the models that produced the numbers, and a command
+    that does not name them is not the command the report was measured with.
+    """
+    generator = models.get("generator") or {}
+    judged = models.get("judge") or {}
+    lines = [
+        f"  --provider {generator.get('provider', '')} "
+        f"--model {generator.get('id', '')} \\"
+    ]
+    if judged:
+        lines.append(
+            f"  --judge-provider {judged.get('provider', '')} "
+            f"--judge-model {judged.get('id', '')} \\"
+        )
+    return "\n".join(lines)
+
+
+def _closing_lines() -> list[str]:
+    """Return what every report says about being checked and re-run."""
+    return [
         "The manifest holds the revision, the case set, the document hashes, the "
         "prompts, the models, the settings, and the environment; each result "
         "beside it holds the index manifest and generation of every document, "
@@ -864,4 +951,3 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         "a difference smaller than the reported movement as no difference.",
         "",
     ]
-    return "\n".join(lines)

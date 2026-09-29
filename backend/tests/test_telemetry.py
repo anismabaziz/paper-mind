@@ -48,9 +48,7 @@ STORED_SETTINGS = ("groq", "openai/gpt-oss-120b")
 
 def ask(client, filename, query="what is the retention policy?"):
     """Ask one question and return the parsed event stream."""
-    response = client.post(
-        "/response", json={"query": query, "filename": filename}
-    )
+    response = client.post("/response", json={"query": query, "filename": filename})
     assert response.mimetype == "text/event-stream"
     return parse_sse(response.get_data(as_text=True))
 
@@ -64,9 +62,7 @@ def span(trace, name):
 
 CLAIMED_ANSWER = (
     "The answer ",
-    "is 42.\n<claims>\n"
-    '{"claim": "The answer is 42.", "sources": ["S1"]}\n'
-    "</claims>",
+    'is 42.\n<claims>\n{"claim": "The answer is 42.", "sources": ["S1"]}\n</claims>',
 )
 
 
@@ -192,9 +188,7 @@ class TestRetrievalSpan:
             recorded.attributes["candidates"]
         )
 
-    def test_it_reports_the_rerank_where_one_ran(
-        self, client, app, recorded_traces
-    ):
+    def test_it_reports_the_rerank_where_one_ran(self, client, app, recorded_traces):
         """Whether the reranker ran, and whether it moved anything, is on the record."""
         filename = indexed_document(client, app)
 
@@ -252,9 +246,7 @@ class TestGenerationSpan:
             "grounded-claims-v1"
         )
 
-    def test_it_reports_tokens_and_what_they_cost(
-        self, client, app, recorded_traces
-    ):
+    def test_it_reports_tokens_and_what_they_cost(self, client, app, recorded_traces):
         """A trace with no cost cannot say whether a change to the prompt paid."""
         filename = indexed_document(client, app)
 
@@ -265,9 +257,11 @@ class TestGenerationSpan:
         assert recorded.attributes["input_tokens"] > 0
         assert recorded.attributes["output_tokens"] > 0
         expected = (
-            recorded.attributes["input_tokens"] / 1_000_000
+            recorded.attributes["input_tokens"]
+            / 1_000_000
             * model.input_cost_per_million_usd
-            + recorded.attributes["output_tokens"] / 1_000_000
+            + recorded.attributes["output_tokens"]
+            / 1_000_000
             * model.output_cost_per_million_usd
         )
         assert recorded.attributes["cost_usd"] == pytest.approx(expected)
@@ -298,8 +292,9 @@ class TestGenerationSpan:
         recorded = span(recorded_traces.traces[0], "generation")
 
         assert recorded.attributes["time_to_first_token_ms"] >= 0
-        assert recorded.attributes["total_latency_ms"] >= (
-            recorded.attributes["time_to_first_token_ms"]
+        assert (
+            recorded.attributes["total_latency_ms"]
+            >= (recorded.attributes["time_to_first_token_ms"])
         )
 
     def test_it_reports_the_attempts_a_retried_call_took(
@@ -523,9 +518,7 @@ class TestRedaction:
         assert "The answer is 42" not in written
         assert "It is 42" not in written
 
-    def test_the_document_text_is_not_in_the_trace(
-        self, client, app, recorded_traces
-    ):
+    def test_the_document_text_is_not_in_the_trace(self, client, app, recorded_traces):
         """The Passage the model read is not copied into a trace."""
         filename = indexed_document(client, app)
 
@@ -554,9 +547,7 @@ class TestRedaction:
 
         ask(client, filename)
 
-        assert "sk-test-chat-key" not in json.dumps(
-            recorded_traces.traces[0].to_dict()
-        )
+        assert "sk-test-chat-key" not in json.dumps(recorded_traces.traces[0].to_dict())
 
 
 class TestLocalExport:
@@ -569,9 +560,7 @@ class TestLocalExport:
         from services.telemetry.spans import Sink, Tracer
 
         path = tmp_path / "traces" / "answer-traces.jsonl"
-        tracer = Tracer(
-            [Sink(exporter=JsonlFileExporter(path), redactor=Redactor())]
-        )
+        tracer = Tracer([Sink(exporter=JsonlFileExporter(path), redactor=Redactor())])
         for _ in range(2):
             trace = tracer.start()
             trace.identify(document_id="doc-1")
@@ -603,9 +592,7 @@ class TestLocalExport:
         from settings import TelemetrySettings
 
         path = tmp_path / "answer-traces.jsonl"
-        tracer = build_tracer(
-            TelemetrySettings(enabled=False, local_export_path=path)
-        )
+        tracer = build_tracer(TelemetrySettings(enabled=False, local_export_path=path))
         trace = tracer.start()
         trace.identify(document_id="doc-1")
 
@@ -688,9 +675,7 @@ class TestOtlpExport:
 
         span = sent["payload"]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
         query = next(
-            attribute
-            for attribute in span["attributes"]
-            if attribute["key"] == "query"
+            attribute for attribute in span["attributes"] if attribute["key"] == "query"
         )
         assert query["value"]["kvlistValue"]["values"][0] == {
             "key": "redacted",
