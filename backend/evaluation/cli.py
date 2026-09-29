@@ -47,6 +47,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -91,6 +92,13 @@ DEFAULT_PACE_SECONDS = 6.0
 
 #: The pause this process is running with, which ``--pace`` sets.
 PROVIDER_PACE_SECONDS = DEFAULT_PACE_SECONDS
+
+#: How many output tokens the judge may use. A reasoning model spends its
+#: budget thinking through the rubric before it answers, and an empty reply is
+#: what a budget that ran out looks like. The verdict the judge is asked for is
+#: one word, but the answer has to fit beside the thinking that produced it, so
+#: the judge runs under a bigger budget than the app's answers do.
+JUDGE_MAX_OUTPUT_TOKENS = 4096
 
 #: How long to wait before asking the judge again, and how many times to ask.
 #: A judge is three calls per case on a rate-limited account, and a throttle is
@@ -145,7 +153,10 @@ def _judge_provider(provider: str, model: str, api_key: str):
             model=model,
             api_key=api_key,
             verification_timeout_seconds=model_definition.timeout_seconds,
-            budget=model_definition.chat_budget(),
+            budget=replace(
+                model_definition.chat_budget(),
+                max_output_tokens=JUDGE_MAX_OUTPUT_TOKENS,
+            ),
         ),
         use_cache=False,
     )
