@@ -290,4 +290,12 @@ asks for everything at once spends it and then reports the cases it could not
 afford as provider failures — a number about the account, not about the
 application. `--pace 0` removes the wait for a paid account. A judged run over
 the reported half costs roughly 70k generator tokens and 120k judge tokens, so
-on a free daily allowance it is about one run per model per day.
+on a free daily allowance it is about one run per model per day. The two
+allowances are separate: the generator's key and the judge's key each get their
+own budget, which is why the run configures them apart.
+
+Reasoning models spend their output budget thinking before they answer, and an
+empty reply is what a budget that ran out looks like. The judge runs under a
+4k output budget for exactly this reason, while the app's own answers keep the
+catalog's 1k; a judge verdict that never arrives is reported Unknown, never
+scored as a zero.
