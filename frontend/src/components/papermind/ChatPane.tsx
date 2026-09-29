@@ -86,7 +86,7 @@ function StaleIndexNotice({ index }: { index: DocumentIndex }) {
   const file = usePdfStore((s) => s.file);
   const reindex = useReindex();
   return (
-    <div role="status" className="rounded-sm border border-destructive/30 bg-destructive/5 p-5">
+    <div role="status" className="rounded-sm border border-destructive/30 bg-destructive/5 p-5" data-testid="stale-index-notice">
       <div className="flex items-center gap-2">
         <RefreshCw className="size-3.5 text-destructive" />
         <h4 className="font-mono text-[0.68rem] font-semibold uppercase tracking-widest text-destructive">
@@ -122,6 +122,7 @@ function StaleIndexNotice({ index }: { index: DocumentIndex }) {
         onClick={() => file && reindex.mutate(file.name)}
         disabled={reindex.isPending || !file}
         className="mt-3 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90 disabled:opacity-40"
+        data-testid="chat-reindex"
       >
         {reindex.isPending ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
         {reindex.isPending ? "Queueing reindex…" : "Reindex this paper"}
@@ -145,6 +146,7 @@ function ClaimCitation({ source }: { source: ISource }) {
           ? `Open page ${source.page} for citation ${source.source_id}`
           : `Citation ${source.source_id}, no page to open`
       }
+      data-testid={`citation-${source.source_id}`}
       className={cn(
         "font-mono text-[0.62rem] tracking-wide",
         hasPage ? "cursor-pointer text-marker hover:underline" : "text-ink-faint",
@@ -215,6 +217,7 @@ function SourceList({ sources, retrieval }: { sources: ISource[]; retrieval?: IR
                 <button
                   type="button"
                   disabled={!hasPage}
+                  data-testid={`source-jump-${s.source_id}`}
                   onClick={() => {
                     if (hasPage) setCitationTarget(s.page);
                   }}
@@ -467,7 +470,7 @@ export function ChatPane() {
   const inputDisabled = !file || !isProcessed || isIndexing || isStaleIndex;
 
   return (
-    <section className="flex w-[26rem] shrink-0 flex-col border-l border-rule bg-background">
+    <section className="flex w-full min-w-0 shrink-0 flex-col border-l border-rule bg-background lg:w-[26rem]" data-testid="chat-pane">
       <header className="flex h-14 items-center border-b border-rule px-5">
         <div>
           <p className="text-[0.82rem] font-medium">Reading companion</p>
@@ -477,6 +480,7 @@ export function ChatPane() {
 
       <div
         ref={scrollContainerRef}
+        data-testid="chat-messages"
         onScroll={() => {
           const el = scrollContainerRef.current;
           if (!el) return;
@@ -535,11 +539,11 @@ export function ChatPane() {
         {messages.map((m) => {
           const outcome = describe(m);
           return m.sender === "user" ? (
-            <div key={m.id} className="rise-in flex justify-end">
+            <div key={m.id} className="rise-in flex justify-end" data-testid="chat-message" data-sender="user">
               <p className="max-w-[85%] rounded-lg rounded-br-[2px] bg-ink px-3.5 py-2.5 text-[0.85rem] leading-snug text-paper">{m.text}</p>
             </div>
           ) : (
-            <div key={m.id} className="rise-in" data-outcome={outcome.outcome}>
+            <div key={m.id} className="rise-in" data-outcome={outcome.outcome} data-testid="chat-message" data-sender="bot">
               <p className="label-meta mb-2">Synthesis · {outcome.label}</p>
               {m.cancelled && !m.text && (
                 <p className="font-serif text-xs italic text-ink-faint">
@@ -634,6 +638,7 @@ export function ChatPane() {
           <textarea
             ref={inputRef}
             rows={2}
+            data-testid="chat-input"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
@@ -664,6 +669,7 @@ export function ChatPane() {
               disabled={!value.trim() || thinking || inputDisabled}
               className="flex size-7 items-center justify-center rounded-sm bg-ink text-paper transition-opacity disabled:opacity-25"
               aria-label="Send"
+              data-testid="chat-send"
             >
               <ArrowUp className="size-3.5" />
             </button>

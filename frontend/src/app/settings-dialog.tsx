@@ -198,6 +198,7 @@ function SettingsDialogContent() {
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
         className="w-full max-w-md border border-rule bg-paper shadow-sheet p-6 relative"
+        data-testid="settings-dialog"
       >
         <button
           ref={closeRef}
@@ -232,6 +233,7 @@ function SettingsDialogContent() {
                     setModel("");
                   }}
                   className={selectClass}
+                  data-testid="settings-provider"
                 >
                   <option value="">Select a provider…</option>
                   {allProviders.map((p) => (
@@ -249,6 +251,7 @@ function SettingsDialogContent() {
                   onChange={(e) => setModel(e.target.value)}
                   disabled={!provider}
                   className={selectClass}
+                  data-testid="settings-model"
                 >
                   <option value="">Select a model…</option>
                   {models.map((m) => (
@@ -321,6 +324,7 @@ function SettingsDialogContent() {
                   onChange={(e) => setApiKey(e.target.value)}
                   className="h-10 bg-paper border-rule text-xs focus-visible:border-ink focus-visible:ring-0"
                   autoComplete="off"
+                  data-testid="settings-api-key"
                 />
               </label>
 
@@ -343,6 +347,7 @@ function SettingsDialogContent() {
                   onClick={handleSave}
                    disabled={!provider || !model || !apiKey || saving || testing}
                   className="flex-1 h-10 bg-ink text-paper text-xs hover:bg-ink/90"
+                  data-testid="settings-save"
                 >
                   {saving && <Loader2 size={14} className="animate-spin" />}
                   Save
@@ -352,6 +357,7 @@ function SettingsDialogContent() {
                   disabled={saving || testing}
                   variant="outline"
                   className="flex-1 h-10 text-xs border-rule bg-paper hover:bg-canvas text-ink"
+                  data-testid="settings-test"
                 >
                   {testing && <Loader2 size={14} className="animate-spin" />}
                   Test connection
@@ -368,6 +374,7 @@ function SettingsDialogContent() {
 function FormFeedback({ kind, text }: { kind: "success" | "error"; text: string }) {
   return (
     <p
+      data-testid="settings-feedback"
       className={cn(
         "rounded-sm border px-3 py-2 font-mono text-xs",
         kind === "success"

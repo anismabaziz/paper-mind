@@ -144,10 +144,11 @@ export function LibraryRail() {
           className="grid size-8 place-items-center border border-rule text-ink-soft hover:border-marker hover:text-marker disabled:opacity-40"
           aria-label="Upload paper"
           title="Upload paper"
+          data-testid="upload-paper"
         >
           {uploadMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
         </button>
-        <input ref={fileInputRef} type="file" hidden accept=".pdf" onChange={handleFileChange} />
+        <input ref={fileInputRef} type="file" hidden accept=".pdf" onChange={handleFileChange} data-testid="file-input" />
       </header>
 
       <div className="border-b border-rule p-4">
@@ -158,6 +159,7 @@ export function LibraryRail() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search library"
             className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-ink-faint"
+            data-testid="library-search"
           />
         </label>
       </div>
@@ -274,7 +276,7 @@ export function LibraryRail() {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="mx-1 rounded-sm border border-dashed border-rule bg-paper/40 px-4 py-8 text-center">
+          <div className="mx-1 rounded-sm border border-dashed border-rule bg-paper/40 px-4 py-8 text-center" data-testid="library-empty">
             <div className="mx-auto grid size-8 place-items-center border border-rule bg-paper text-ink-faint">
               <File className="size-3.5" />
             </div>
@@ -300,7 +302,7 @@ export function LibraryRail() {
             )}
           </div>
         ) : (
-          <ul className="min-w-0 max-w-full space-y-px overflow-hidden">
+          <ul className="min-w-0 max-w-full space-y-px overflow-hidden" data-testid="library-list">
             {filtered.map((item, index) => {
               const active = selectedFile?.id === item.id;
               const isRemoving = deleteMutation.isPending && (deleteMutation.variables as DbFile | undefined)?.id === item.id;
@@ -317,7 +319,7 @@ export function LibraryRail() {
               const isDeleteFailed = item.deletion_state === "delete_failed";
 
               return (
-                <li key={item.id} className="min-w-0 max-w-full overflow-hidden">
+                <li key={item.id} className="min-w-0 max-w-full overflow-hidden" data-testid={`library-item-${item.name}`}>
                   <div
                       className={cn(
                         "group relative flex min-w-0 max-w-full items-center gap-0 overflow-hidden border-l-2 text-left transition-colors",
@@ -407,6 +409,7 @@ export function LibraryRail() {
                           disabled={isReindexing}
                           title={item.index?.change_details.map((c) => c.label).join(", ") ?? "Reindex"}
                           aria-label={`Reindex ${displayTitle(item)}`}
+                          data-testid={`reindex-${item.name}`}
                           className="mr-1 inline-flex items-center gap-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
                         >
                           {isReindexing ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
@@ -419,6 +422,7 @@ export function LibraryRail() {
                           disabled={isRetrying}
                           title={job?.error_message ?? "Retry indexing"}
                           aria-label={`Retry indexing ${displayTitle(item)}`}
+                          data-testid={`retry-${item.name}`}
                           className="mr-1 inline-flex items-center gap-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
                         >
                           {isRetrying ? <Loader2 className="size-3 animate-spin" /> : <RotateCw className="size-3" />}
@@ -448,9 +452,9 @@ export function LibraryRail() {
                         </>
                        ) : !isRemoving && !isDeleting ? (
                          <DropdownMenu>
-                           <DropdownMenuTrigger asChild>
-                             <button
-
+                            <DropdownMenuTrigger asChild>
+                              <button
+                              data-testid={`document-menu-${item.name}`}
                               type="button"
                               onClick={(e) => e.stopPropagation()}
                               className={cn(
@@ -465,6 +469,7 @@ export function LibraryRail() {
                             <DropdownMenuItem
                               className="flex items-center gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive"
                               onClick={() => deleteMutation.mutate(item)}
+                              data-testid={`delete-paper-${item.name}`}
                             >
                               <Trash2 className="size-3.5" /> Remove Paper
                             </DropdownMenuItem>

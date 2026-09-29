@@ -102,3 +102,58 @@ jobs:
 
       - name: Test
         run: ./run-full-stack-tests.sh
+
+  browser:
+    name: Browser (Playwright + Postgres + Qdrant)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Start Postgres and Qdrant
+        run: docker compose -f ../backend/compose.test.yaml up -d --wait
+        # The Playwright webServer starts the deterministic browser backend
+        # and the Vite dev server itself; only the backing services are
+        # needed up front.
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: uv sync --dev
+        working-directory: backend
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Test
+        run: npm run test:e2e
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e112508b939b8d59410638fdb16b1d # v4.6.2
+        with:
+          name: playwright-results
+          path: frontend/test-results/
+          retention-days: 7
+
+      - name: Stop services
+        if: always()
+        run: docker compose -f ../backend/compose.test.yaml down --volumes
