@@ -2,6 +2,7 @@
 
 import hashlib
 import math
+import os
 import re
 import shutil
 import threading
@@ -35,6 +36,20 @@ from storage import LocalStorage
 
 _EMBEDDING_SIZE = 1024
 _HOLD_TIMEOUT_SECONDS = 15
+
+#: Disposable test database, started by run-full-stack-tests.sh on loopback. It
+#: carries its own ephemeral POSTGRES_TEST_* password, never the development
+#: credentials in backend/.infra.env. Overridable for an already-running pair
+#: of containers.
+DEFAULT_ADMIN_DATABASE_URL = (
+    "postgresql+psycopg://papermind_test:papermind_test@127.0.0.1:55432/papermind_test"
+)
+DEFAULT_QDRANT_URL = "http://127.0.0.1:56333"
+
+
+def admin_database_url() -> str:
+    """Return the disposable test database URL these tests administer."""
+    return os.getenv("FULL_STACK_DATABASE_URL", DEFAULT_ADMIN_DATABASE_URL)
 
 
 class InjectedFailure(RuntimeError):
@@ -397,7 +412,11 @@ def build_application(
 ) -> ApplicationHarness:
     """Serve the production app with real infrastructure and local adapters."""
     settings_module.set_settings(app_settings)
-    qdrant = QdrantClient(url=app_settings.vector.qdrant_url, timeout=30)
+    from providers import build_qdrant_client
+
+    qdrant = build_qdrant_client(
+        app_settings.vector.qdrant_url, app_settings.vector.qdrant_api_key, timeout=30
+    )
     storage = ControlledStorage(app_settings.storage.storage_dir)
     repositories = build_repositories(session_factory)
     controlled_repositories = ControlledRepositories(

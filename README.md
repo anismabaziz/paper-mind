@@ -28,7 +28,9 @@ and stores one global set of provider settings.
 ## Quick start
 
 ```bash
-# Start infra (Postgres + Qdrant) — backend is not a compose service
+# Generate local-only secrets once (random Postgres password, gitignored),
+# then start infra (Postgres + Qdrant, loopback-only) — backend is not a compose service
+backend/scripts/bootstrap-local.sh
 docker compose -f backend/compose.yaml up -d
 # Run backend locally
 cd backend
@@ -49,8 +51,11 @@ Then open the printed localhost URL. Environment variables for the frontend
 are documented in [frontend/.env.example](frontend/.env.example), and the
 backend's in [backend/.env.example](backend/.env.example).
 
-Required env vars: `DATABASE_URL` (e.g. `postgresql+psycopg://papermind:papermind@localhost:5432/papermind`)
-and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional: `APP_SECRET`
+Required env vars: `DATABASE_URL` (written by `backend/scripts/bootstrap-local.sh`
+from a per-machine random password in gitignored `backend/.infra.env`)
+and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional: `QDRANT_API_KEY`
+— empty for loopback development, required before any remote Qdrant address —
+and `APP_SECRET`
 — the Fernet root that encrypts the stored provider key. Set it in any
 persistent deployment; changing it invalidates previously stored keys. With no
 `APP_SECRET`, a warning is printed and stored keys cannot be encrypted or
@@ -90,7 +95,10 @@ All free-path knobs live in `backend/.env.example`:
 of those marks already indexed documents stale and asks for a reindex. The
 `CHAT_*` knobs shape a request, not an index, so they take effect immediately.
 
-The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only).
+The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only,
+both bound to `127.0.0.1` with credentials outside source control — see
+[backend/README.md](backend/README.md) for the threat model and the steps
+required before any remote exposure).
 Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backend/README.md).
 
 ## Screenshots

@@ -42,15 +42,16 @@ from settings import (  # noqa: E402
     UploadSettings,
     VectorSettings,
 )
-from tests.fullstack_support import build_application  # noqa: E402
+from tests.fullstack_support import (  # noqa: E402
+    DEFAULT_QDRANT_URL,
+    admin_database_url,
+    build_application,
+)
 
 log = logging.getLogger("browser_server")
 
-ADMIN_DATABASE_URL = os.getenv(
-    "FULL_STACK_DATABASE_URL",
-    "postgresql+psycopg://papermind:papermind@127.0.0.1:55432/papermind",
-)
-QDRANT_URL = os.getenv("FULL_STACK_QDRANT_URL", "http://127.0.0.1:56333")
+ADMIN_DATABASE_URL = admin_database_url()
+QDRANT_URL = os.getenv("FULL_STACK_QDRANT_URL", DEFAULT_QDRANT_URL)
 PORT = int(os.getenv("BROWSER_BACKEND_PORT", "38201"))
 FRONTEND_ORIGIN = os.getenv(
     "BROWSER_FRONTEND_ORIGIN", "http://127.0.0.1:5180,http://localhost:5180"

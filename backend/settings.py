@@ -16,6 +16,7 @@ name the variable to set.
 
 import sys
 import threading
+import urllib.parse
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -71,7 +72,27 @@ class VectorSettings(BaseSettings):
     qdrant_url: str = Field(
         default="http://localhost:6333", validation_alias="QDRANT_URL"
     )
+    # Optional API key sent to Qdrant. Empty for loopback development;
+    # required before any non-loopback Qdrant address is accepted.
+    qdrant_api_key: str | None = Field(default=None, validation_alias="QDRANT_API_KEY")
     index_name: str = "pdf-index"
+
+
+#: Hosts that keep traffic on the local machine. Anything else — including
+#: "0.0.0.0", "::", a LAN address, a compose service name, or an
+#: unparseable value — is treated as remote and fails closed.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def url_is_loopback(url: str) -> bool:
+    """Return True only when a Qdrant URL clearly targets this machine."""
+    try:
+        host = urllib.parse.urlsplit(url.strip()).hostname
+    except ValueError:
+        return False
+    if not host:
+        return False
+    return host.lower() in LOOPBACK_HOSTS
 
 
 class EmbeddingSettings(BaseSettings):
@@ -371,6 +392,27 @@ def validate(settings: Settings | None = None) -> None:
         print(
             "\nFix: copy backend/.env.example to backend/.env and fill in the "
             "values above, then start the app again.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if (
+        not url_is_loopback(settings.vector.qdrant_url)
+        and not (settings.vector.qdrant_api_key or "").strip()
+    ):
+        print(
+            "PaperMind backend refuses a remote Qdrant address without an API key:",
+            file=sys.stderr,
+        )
+        print(
+            f"  - QDRANT_URL={settings.vector.qdrant_url!r} is not loopback, "
+            "but QDRANT_API_KEY is unset.",
+            file=sys.stderr,
+        )
+        print(
+            "Fix: keep QDRANT_URL on http://localhost:6333 for local use, or set "
+            "QDRANT_API_KEY to the same value as the Qdrant server's API key "
+            "before exposing it beyond loopback (see backend/README.md).",
             file=sys.stderr,
         )
         sys.exit(1)

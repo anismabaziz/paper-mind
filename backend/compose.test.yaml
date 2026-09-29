@@ -1,14 +1,17 @@
 services:
   db:
     image: postgres:17.5-alpine
+    # Isolated test credentials: ephemeral per run, exported by
+    # run-full-stack-tests.sh as POSTGRES_TEST_* so a development export can
+    # never become the test password (and vice versa).
     environment:
-      POSTGRES_USER: papermind
-      POSTGRES_PASSWORD: papermind
-      POSTGRES_DB: papermind
+      POSTGRES_USER: ${POSTGRES_TEST_USER:-papermind_test}
+      POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-papermind_test}
     ports:
       - "127.0.0.1:55432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U papermind -d papermind"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_TEST_USER:-papermind_test} -d $${POSTGRES_TEST_DB:-papermind_test}"]
       interval: 2s
       timeout: 3s
       retries: 30
