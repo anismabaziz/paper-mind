@@ -53,7 +53,7 @@ export default defineConfig({
           "http://127.0.0.1:5180,http://localhost:5180",
         FULL_STACK_DATABASE_URL:
           process.env.FULL_STACK_DATABASE_URL ??
-          "postgresql+psycopg://papermind:papermind@127.0.0.1:55432/papermind",
+          "postgresql+psycopg://papermind_test:papermind_test@127.0.0.1:55432/papermind_test",
         FULL_STACK_QDRANT_URL:
           process.env.FULL_STACK_QDRANT_URL ?? "http://127.0.0.1:56333",
       },

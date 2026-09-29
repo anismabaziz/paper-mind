@@ -198,7 +198,7 @@ def test_providers_stay_lazy_until_first_use(monkeypatch):
     constructed = []
 
     class FakeQdrantClient:
-        def __init__(self, url):
+        def __init__(self, url, api_key=None, **kwargs):
             constructed.append(url)
 
     monkeypatch.setattr("qdrant_client.QdrantClient", FakeQdrantClient)
@@ -218,8 +218,9 @@ def test_provider_client_is_built_once_from_settings(monkeypatch):
     built = []
 
     class FakeQdrantClient:
-        def __init__(self, url):
+        def __init__(self, url, api_key=None, **kwargs):
             self.url = url
+            self.api_key = api_key
             built.append(self)
 
     monkeypatch.setattr("qdrant_client.QdrantClient", FakeQdrantClient)

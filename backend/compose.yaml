@@ -1,16 +1,21 @@
 services:
   db:
     image: postgres:17-alpine
+    # Credentials come from backend/.infra.env (gitignored, created by
+    # backend/scripts/bootstrap-local.sh). Nothing secret lives in this file,
+    # so a clone never starts with a shared default password.
+    env_file:
+      - path: .infra.env
+        required: true
     environment:
-      POSTGRES_USER: papermind
-      POSTGRES_PASSWORD: papermind
       POSTGRES_DB: papermind
     ports:
-      - "5432:5432"
+      # Loopback only: the database is reachable from this machine, never the LAN.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U papermind"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-papermind}"]
       interval: 2s
       timeout: 3s
       retries: 15
@@ -18,13 +23,18 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      # Loopback only: document vectors stay on this machine by default.
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
     environment:
       # Exposed on localhost:6333 for host runs and on qdrant:6333 inside compose.
       QDRANT__SERVICE__GRPC_PORT: 6334
+      # No API key is set here on purpose: an empty value would still switch
+      # Qdrant into auth-required mode and lock out keyless local clients.
+      # Remote deployments add `-f compose.qdrant-auth.yaml` with QDRANT_API_KEY
+      # exported; the backend refuses a remote QDRANT_URL without that key.
 
 volumes:
   pgdata:

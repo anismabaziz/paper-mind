@@ -44,16 +44,18 @@ from settings import (
     VectorSettings,
 )
 from storage import LocalStorage
-from tests.fullstack_support import ApplicationHarness, build_application
+from tests.fullstack_support import (
+    ApplicationHarness,
+    DEFAULT_QDRANT_URL,
+    admin_database_url,
+    build_application,
+)
 from tests.sse import parse_sse
 
 BACKEND_DIR = pathlib.Path(__file__).resolve().parent.parent
 SAMPLE_PDF = BACKEND_DIR / "evaluation" / "sample_docs" / "papermind-rag-primer.pdf"
-ADMIN_DATABASE_URL = os.getenv(
-    "FULL_STACK_DATABASE_URL",
-    "postgresql+psycopg://papermind:papermind@127.0.0.1:55432/papermind",
-)
-QDRANT_URL = os.getenv("FULL_STACK_QDRANT_URL", "http://127.0.0.1:56333")
+ADMIN_DATABASE_URL = admin_database_url()
+QDRANT_URL = os.getenv("FULL_STACK_QDRANT_URL", DEFAULT_QDRANT_URL)
 PRE_TURN_REVISION = "c3d7e1f4a9b2"
 CURRENT_REVISION = "c7d4e91a5b02"
 

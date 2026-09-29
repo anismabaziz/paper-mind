@@ -24,7 +24,8 @@ Same table as the top-level README (kept here so env docs stay local):
 ## Setup (one command, from a clean clone)
 
 ```bash
-# from the repo root — start infra
+# from the repo root — generate local-only secrets once, then start infra
+backend/scripts/bootstrap-local.sh
 docker compose -f backend/compose.yaml up -d
 # then run backend locally
 cd backend
@@ -33,8 +34,16 @@ uv run alembic upgrade head
 uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
 ```
 
-The only required env vars are `DATABASE_URL` and `QDRANT_URL` (defaults to
-`http://localhost:6333`). Optional: `APP_SECRET` — the Fernet root that
+`bootstrap-local.sh` is idempotent: it creates gitignored
+`backend/.infra.env` with a random Postgres password and writes a matching
+`DATABASE_URL` into `backend/.env`. No step edits a published port — every
+service binds `127.0.0.1` by default, so the database and the vector store
+are reachable from your machine and invisible to the LAN.
+
+The only required env vars are `DATABASE_URL` (written by the bootstrap
+script) and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional:
+`QDRANT_API_KEY` (empty for loopback development; required before any remote
+address) and `APP_SECRET` — the Fernet root that
 encrypts the stored provider key. Set it in any persistent deployment;
 changing it invalidates previously stored keys. With no `APP_SECRET`, a
 warning is printed and stored keys cannot be encrypted or decrypted. After boot, open
@@ -80,7 +89,43 @@ uv run alembic upgrade head
 
 On boot the app validates its environment: any missing required variable
 is named on stderr with a pointer to `.env.example`, instead of a library
-traceback.
+traceback. A remote `QDRANT_URL` without `QDRANT_API_KEY` is also refused at
+boot with the same readable error.
+
+## Local network and secrets
+
+PaperMind is a single-user local app. The threat model is simple: your PDFs,
+their vectors, and the database credentials that guard them must never reach
+another machine on the network unless you explicitly allow it.
+
+- Postgres (`5432`), Qdrant HTTP (`6333`), and Qdrant gRPC (`6334`) publish
+  on `127.0.0.1` only, in both `compose.yaml` and `compose.test.yaml`.
+- The Postgres password is generated per machine by
+  `backend/scripts/bootstrap-local.sh` into gitignored `backend/.infra.env`
+  — no fixed default ships in source control.
+- Qdrant runs without an API key on loopback. The backend refuses to start
+  against a non-loopback `QDRANT_URL` unless `QDRANT_API_KEY` is set, and
+  `compose.qdrant-auth.yaml` is the compose path that turns the key on for the
+  server. It is an overlay rather than a line in `compose.yaml` because even an
+  empty `QDRANT__SERVICE__API_KEY` switches Qdrant into auth-required mode and
+  would lock out keyless local clients.
+- Development and test credentials are isolated: the full-stack suite mints
+  an ephemeral `POSTGRES_TEST_*` password per run and never reads
+  `backend/.infra.env`.
+- `tests/test_local_network.py` proves the effective published addresses (both
+  the compose file and `docker compose config`), the remote-without-key refusal,
+  and what the bootstrap script generates.
+
+Before exposing anything beyond loopback:
+
+```bash
+export QDRANT_API_KEY='<strong unique value>'
+docker compose -f backend/compose.yaml -f backend/compose.qdrant-auth.yaml up -d
+```
+
+Put the same value in `backend/.env`, front the service with TLS, use a strong
+unique Postgres password, and confirm the rendered bindings with
+`docker compose -f backend/compose.yaml config` — no line may show `0.0.0.0`.
 
 ## Run
 

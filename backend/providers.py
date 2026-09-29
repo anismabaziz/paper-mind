@@ -17,15 +17,28 @@ _qdrant_lock = threading.RLock()
 _qdrant_index_lock = threading.RLock()
 
 
+def build_qdrant_client(
+    qdrant_url: str, qdrant_api_key: str | None = None, timeout: int | None = None
+):
+    """Build a Qdrant client from an explicit URL and optional API key."""
+    from qdrant_client import QdrantClient
+
+    kwargs: dict = {"url": qdrant_url, "api_key": qdrant_api_key or None}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    return QdrantClient(**kwargs)
+
+
 def get_qdrant_client():
     """Do get qdrant client."""
     global _qdrant_client
     if _qdrant_client is None:
         with _qdrant_lock:
             if _qdrant_client is None:
-                from qdrant_client import QdrantClient
-
-                _qdrant_client = QdrantClient(url=get_settings().vector.qdrant_url)
+                vector = get_settings().vector
+                _qdrant_client = build_qdrant_client(
+                    vector.qdrant_url, vector.qdrant_api_key
+                )
     return _qdrant_client
 
 

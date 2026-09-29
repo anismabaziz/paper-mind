@@ -4,4 +4,6 @@ __pycache__
 data
 tests
 .env
+.infra.env
+.infra.env.example
 .pytest_cache

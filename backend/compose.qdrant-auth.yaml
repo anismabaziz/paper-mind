@@ -1,0 +1,16 @@
+# Qdrant authentication overlay for non-loopback deployments.
+#
+# Usage (only when exposing Qdrant beyond 127.0.0.1):
+#   export QDRANT_API_KEY='<strong unique value>'
+#   docker compose -f backend/compose.yaml -f backend/compose.qdrant-auth.yaml up -d
+#
+# and set the same value as QDRANT_API_KEY in backend/.env. The backend
+# refuses to start against a remote QDRANT_URL without that key, and this
+# overlay is the only compose path that configures the server side of it.
+# Kept separate from compose.yaml because even an empty
+# QDRANT__SERVICE__API_KEY switches Qdrant into auth-required mode and would
+# lock out keyless loopback development.
+services:
+  qdrant:
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY to a strong unique value before exposing Qdrant beyond loopback}
