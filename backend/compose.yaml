@@ -1,6 +1,13 @@
 services:
   db:
-    image: postgres:17-alpine
+    # Pinned by digest, not just tag. The tag is the human-readable label;
+    # the digest is what decides which bytes run, so a re-pushed tag cannot
+    # change the database under an existing volume. The digest is the
+    # multi-architecture index, so one pin covers Apple silicon and CI alike.
+    # To move forward: change the tag, resolve the new index digest with
+    # `docker buildx imagetools inspect <tag>`, and update both here and in
+    # compose.test.yaml.
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     # Credentials come from backend/.infra.env (gitignored, created by
     # backend/scripts/bootstrap-local.sh). Nothing secret lives in this file,
     # so a clone never starts with a shared default password.
@@ -21,7 +28,11 @@ services:
       retries: 15
 
   qdrant:
-    image: qdrant/qdrant:latest
+    # The same version and digest the test stack runs, so a failure in CI
+    # reproduces locally. It used to be `latest`, which meant a Qdrant
+    # release could break ingestion on someone's machine with no commit to
+    # point at.
+    image: qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc
     ports:
       # Loopback only: document vectors stay on this machine by default.
       - "127.0.0.1:6333:6333"

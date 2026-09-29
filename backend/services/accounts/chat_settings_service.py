@@ -207,11 +207,13 @@ SUPPORTED_MODEL_DEFINITIONS = {
 
 def _published(model: ModelCapabilities) -> dict[str, object]:
     """Return one model's capabilities in a JSON-serializable shape."""
-    published = asdict(model)
+    published: dict[str, object] = asdict(model)
     # The finish-reason contract is a set; the wire format is a sorted list so
-    # two identical models always publish the same bytes.
+    # two identical models always publish the same bytes. Read from the
+    # dataclass rather than the copy asdict made, because the copy widens the
+    # element type to object and sorted() then has nothing to compare.
     for key in ("finish_reasons", "complete_finish_reasons"):
-        published[key] = sorted(published[key])  # type: ignore[index, call-overload]
+        published[key] = sorted(getattr(model, key))
     return published
 
 

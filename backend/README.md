@@ -8,7 +8,7 @@ Flask API for RAG chat over uploaded PDFs. Single-instance, no auth — one
 Same table as the top-level README (kept here so env docs stay local):
 
 - Qdrant on `http://localhost:6333` (compose `qdrant` service), no API key
-- Embeddings: `BAAI/bge-m3` 1024d via `sentence-transformers`, CPU, no API key
+- Embeddings: `BAAI/bge-m3` 1024d via `sentence-transformers`, CPU, no API key. Loads at the commit recorded in `services/models.py`, and runs no code from the model repository.
 - Retrieval: named dense vectors plus hashed term-frequency sparse vectors with Qdrant IDF, fused by one query using `RRF(k=60)` and 50 candidates
 - `RERANK=false` (default) / `true` — local cross-encoder over 50→5 (`cross-encoder/ms-marco-MiniLM-L-6-v2` 22M fast default, or `BAAI/bge-reranker-v2-m3`)
 - `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` via `tiktoken cl100k_base`, per-page, with `page_no` + `content_hash`
@@ -164,6 +164,49 @@ The full-stack suite serves the Flask app over HTTP, starts pinned disposable Po
 ```
 
 Its embedding, reranking, and chat providers are deterministic and local. The test uploads and parses the sample PDF, indexes it in Qdrant, streams an answer, inspects Postgres and Qdrant state, injects service failures, and removes all test data and containers on exit. No model API key is required.
+
+## Auditing dependencies and models
+
+`audit/` answers two questions CI asks on a schedule, and one it asks on every
+pull request:
+
+```bash
+uv run python -m audit.cli python      # locked Python dependencies vs the advisory database
+uv run python -m audit.cli node        # locked Node tree vs the advisory database
+uv run python -m audit.cli revisions   # every pinned local model revision still exists upstream
+uv run python -m audit.cli all         # all of the above
+```
+
+`uv run python -m audit.cli comparison --changed <paths>` says which of a
+change's files can move a published measurement — a resolved version, a model
+revision, a container digest — and prints the evaluator command to produce the
+comparison. It does not fail the build: a security patch should not need a paid
+live run before it can merge, so the omission is caught in review, by the
+checked pull-request item.
+
+A vulnerable *direct* dependency exits non-zero; a transitive one is reported
+and does not block, because the fix is somebody else's release. An advisory the
+project accepts is recorded with its reason in `audit/accepted.json`, and a
+recorded acceptance that no longer matches any finding is flagged so it can be
+removed.
+
+The model catalogue moves on its own, so it is checked separately and needs a
+key. Keys are read from the environment, never from an argument:
+
+```bash
+PAPERMIND_CHECK_GOOGLE_API_KEY=... PAPERMIND_CHECK_GROQ_API_KEY=... \
+  uv run python -m audit.cli models
+```
+
+Each catalogue entry is asked whether its provider still serves it. One that is
+unavailable exits non-zero, naming the entry and the file to delete it from. The
+deletion is left to a person on purpose: a provider that is briefly unreachable
+or rate-limiting answers exactly like one that has retired a model, and a job
+that edited the catalogue in response would strip it during an outage.
+
+Installing with a stale lockfile is itself a risk, so CI uses `uv sync --frozen`
+and `npm ci`: both install the committed lockfile and fail when it disagrees with
+its manifest, rather than quietly resolving newer versions.
 
 ## Evaluation
 

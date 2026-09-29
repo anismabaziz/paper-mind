@@ -48,6 +48,7 @@ markers = [
 python_version = "3.11"
 files = [
     "app.py",
+    "audit",
     "composition.py",
     "db.py",
     "evaluation/dataset.py",
@@ -60,8 +61,13 @@ files = [
     "services/chat_context.py",
     "services/citations.py",
     "services/deletion.py",
+    "services/accounts/chat_settings_service.py",
+    "services/accounts/model_availability.py",
+    "services/embeddings",
     "services/indexing",
     "services/ingestion",
+    "services/llm",
+    "services/models.py",
     "services/retrieval",
     "services/telemetry",
     "services/titles.py",

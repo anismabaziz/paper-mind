@@ -9,8 +9,39 @@ All branches use fakes injected through constructors: the cross-encoder is a
 fake model object, the index a fake store, so pytest stays fast and offline.
 """
 
+import sys
+import types
+
+from services.models import PINNED_MODEL_REVISIONS
 from services.retrieval.reranker import Reranker, RerankerService
 from services.retrieval.vector_service import VectorService
+
+
+def _load_kwargs(reranker):
+    """
+    Run the real lazy load against a stand-in for sentence-transformers.
+
+    Returns the keyword arguments the loader would hand the library, without
+    downloading weights: the point is the arguments, not the model.
+    """
+    recorded = {}
+
+    def _cross_encoder(model_name, **kwargs):
+        recorded.update(kwargs)
+        return IdentityModel()
+
+    module = types.ModuleType("sentence_transformers")
+    module.CrossEncoder = _cross_encoder  # type: ignore[attr-defined]
+    original = sys.modules.get("sentence_transformers")
+    sys.modules["sentence_transformers"] = module
+    try:
+        reranker._get_model()
+    finally:
+        if original is None:
+            del sys.modules["sentence_transformers"]
+        else:
+            sys.modules["sentence_transformers"] = original
+    return recorded
 
 
 class FakeIndex:
@@ -161,6 +192,7 @@ class TestRerankerGate:
         assert deduped[0]["score"] == 0.9
 
     def test_explicit_rerank_param_overrides_flag(self):
+        """Do test explicit rerank param overrides flag."""
         # Flag says true but explicit False preserves legacy
         """Do test explicit rerank param overrides flag."""
         service = make_service(
@@ -198,6 +230,7 @@ class TestRerankerGate:
         assert calls == []
 
     def test_entirely_local_cpu_no_api(self):
+        """Do test entirely local cpu no api."""
         # Ensure rerank path does not hit network: the fake model is the only
         # provider touched
         """Do test entirely local cpu no api."""
@@ -232,3 +265,40 @@ class TestRerankerGate:
         sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="q").sources
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
         assert "degraded" in capsys.readouterr().out.lower()
+
+
+class TestModelLoad:
+    """The cross-encoder the reranker asks sentence-transformers for."""
+
+    def test_it_loads_the_revision_its_settings_name(self):
+        """Do test it loads the revision its settings name."""
+        kwargs = _load_kwargs(
+            RerankerService("cross-encoder/ms-marco-MiniLM-L6-v2", True)
+        )
+
+        assert (
+            kwargs["revision"]
+            == PINNED_MODEL_REVISIONS["cross-encoder/ms-marco-MiniLM-L6-v2"]
+        )
+
+    def test_a_configured_revision_reaches_the_loader(self):
+        """Do test a configured revision reaches the loader."""
+        kwargs = _load_kwargs(
+            RerankerService(
+                "cross-encoder/ms-marco-MiniLM-L6-v2", True, revision="a" * 40
+            )
+        )
+
+        assert kwargs["revision"] == "a" * 40
+
+    def test_it_does_not_execute_code_from_the_model_repository(self):
+        """The MiniLM cross-encoder is a stock BERT architecture."""
+        kwargs = _load_kwargs(
+            RerankerService("cross-encoder/ms-marco-MiniLM-L6-v2", True)
+        )
+
+        assert kwargs["trust_remote_code"] is False
+
+    def test_an_unpinned_model_loads_no_revision_at_all(self):
+        """Do test an unpinned model loads no revision at all."""
+        assert "revision" not in _load_kwargs(RerankerService("acme/unknown", True))

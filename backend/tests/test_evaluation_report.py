@@ -21,6 +21,7 @@ from evaluation import ablations, cli, experiments, evaluator, report
 from evaluation.dataset import TUNING, load_dataset
 from evaluation.harness import SAMPLE_DOCS_DIR, remove_documents
 from services.accounts.chat_settings_service import model_for
+from services.models import PINNED_MODEL_REVISIONS, model_source
 from tests.evaluation_support import (
     ScriptedChatFactory,
     build_environment_for,
@@ -603,7 +604,13 @@ class TestRunningItAgain:
 
         assert outcome["reproduced"] is False
         assert outcome["model_revisions_changed"] == [
-            {"field": "models.reranker.revision", "before": "", "after": "ccc333"}
+            {
+                "field": "models.reranker.revision",
+                "before": model_source(
+                    settings_obj.rerank.rerank_model, settings_obj.rerank.revision
+                ).revision,
+                "after": "ccc333",
+            }
         ]
 
     def test_a_changed_revision_is_named_separately_from_a_changed_model(
@@ -652,3 +659,27 @@ class TestAMeasurementFeedsTheReport:
         assert stored["retrieval"]["questions"] == len(cases)
         assert stored["dataset"] == dataset.version
         assert report.reproduction(written, written)["reproduced"] is True
+
+
+class TestResolvedModelRevisions:
+    """A report compares two runs, so it must name the commits that ran."""
+
+    def test_the_report_names_the_pinned_commit_not_the_empty_setting(
+        self, dataset, settings_obj
+    ):
+        """With the setting unset, "" would compare equal to any commit."""
+        assert settings_obj.embedding.revision == ""
+
+        manifest = a_manifest(dataset, settings_obj, [a_result()])
+
+        assert (
+            manifest["models"]["embedding"]["revision"]
+            == PINNED_MODEL_REVISIONS["BAAI/bge-m3"]
+        )
+        assert (
+            manifest["models"]["reranker"]["revision"]
+            == model_source(
+                settings_obj.rerank.rerank_model, settings_obj.rerank.revision
+            ).revision
+        )
+        assert manifest["models"]["reranker"]["revision"] != ""

@@ -1,0 +1,10 @@
+{
+  "_comment": [
+    "Risk decisions for dependency advisories that are not being fixed yet.",
+    "Key: the advisory id (GHSA-... or PYSEC-...). Value: why it stays.",
+    "An entry stops blocking as soon as the advisory no longer applies; the",
+    "report names stale entries so they can be removed from this file.",
+    "Nothing is listed: every direct dependency currently audits clean."
+  ],
+  "accepted": {}
+}

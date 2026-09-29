@@ -109,7 +109,22 @@ class EmbeddingSettings(BaseSettings):
     )
     # Pinned immutable revision (a commit sha) of the embedding model. Changing
     # it makes every stored vector incompatible and marks documents stale.
+    # Empty means the commit recorded in ``services.models`` for this
+    # repository is loaded, which is every shipped default.
     revision: str = Field(default="", validation_alias="LOCAL_EMBEDDING_REVISION")
+    # Whether the model may execute Python from its own repository. Off by
+    # default: BAAI/bge-m3 loads through stock transformers classes, so turning
+    # it on adds risk without adding capability. Only a commit recorded in
+    # ``services.models.REVIEWED_REMOTE_CODE_MODELS`` is accepted, so the
+    # question is never whether to trust a moving branch.
+    trust_remote_code: bool = Field(
+        default=False, validation_alias="LOCAL_EMBEDDING_TRUST_REMOTE_CODE"
+    )
+
+    @field_validator("trust_remote_code", mode="before")
+    @classmethod
+    def _coerce_remote_code(cls, value):
+        return _parse_bool(value)
 
 
 class ChunkingSettings(BaseSettings):
@@ -144,9 +159,15 @@ class RerankSettings(BaseSettings):
     enabled: bool = Field(default=False, validation_alias="RERANK")
     # Pinned immutable revision (a commit sha) of the reranker model. Changing
     # it makes every stored rerank order incompatible and marks documents stale.
+    # Empty means the commit recorded in ``services.models`` for this
+    # repository is loaded, which is every shipped default.
     revision: str = Field(default="", validation_alias="RERANK_REVISION")
+    # See ``EmbeddingSettings.trust_remote_code``; the reasoning is identical.
+    trust_remote_code: bool = Field(
+        default=False, validation_alias="RERANK_TRUST_REMOTE_CODE"
+    )
 
-    @field_validator("enabled", mode="before")
+    @field_validator("enabled", "trust_remote_code", mode="before")
     @classmethod
     def _coerce(cls, value):
         return _parse_bool(value)

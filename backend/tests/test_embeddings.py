@@ -8,10 +8,41 @@ batching and input-shaping contract of ``embed_texts`` and the truncation
 contract of the local service itself.
 """
 
+import sys
+import types
+
 import numpy as np
 import pytest
 
 from services.embeddings.local_embeddings import EmbeddingService, LocalEmbeddingService
+from services.models import PINNED_MODEL_REVISIONS
+
+
+def _load_kwargs(service):
+    """
+    Run the real lazy load against a stand-in for sentence-transformers.
+
+    Returns the keyword arguments the loader would hand the library, without
+    downloading weights: the point is the arguments, not the model.
+    """
+    recorded = {}
+
+    def _sentence_transformer(model_name, **kwargs):
+        recorded.update(kwargs)
+        return _RecordingModel()
+
+    module = types.ModuleType("sentence_transformers")
+    module.SentenceTransformer = _sentence_transformer  # type: ignore[attr-defined]
+    original = sys.modules.get("sentence_transformers")
+    sys.modules["sentence_transformers"] = module
+    try:
+        service._get_model()
+    finally:
+        if original is None:
+            del sys.modules["sentence_transformers"]
+        else:
+            sys.modules["sentence_transformers"] = original
+    return recorded
 
 
 class _RecordingModel:
@@ -86,3 +117,34 @@ def test_embed_batch_slices_past_1024_dims_on_old_transformers():
     assert len(vectors) == 1
     assert len(vectors[0]) == 1024
     assert vectors[0][:3] == [3.0, 4.0, 99.0]
+
+
+class TestModelLoad:
+    """The weights the service asks sentence-transformers for."""
+
+    def test_it_loads_the_revision_its_settings_name(self, monkeypatch):
+        """Do test it loads the revision its settings name."""
+        kwargs = _load_kwargs(LocalEmbeddingService(model_name="BAAI/bge-m3"))
+
+        assert kwargs["revision"] == PINNED_MODEL_REVISIONS["BAAI/bge-m3"]
+
+    def test_a_configured_revision_reaches_the_loader(self):
+        """Do test a configured revision reaches the loader."""
+        kwargs = _load_kwargs(
+            LocalEmbeddingService(model_name="BAAI/bge-m3", revision="a" * 40)
+        )
+
+        assert kwargs["revision"] == "a" * 40
+
+    def test_it_does_not_execute_code_from_the_model_repository(self):
+        """BGE-M3 is a standard architecture; the load runs transformers code."""
+        kwargs = _load_kwargs(LocalEmbeddingService(model_name="BAAI/bge-m3"))
+
+        assert kwargs["trust_remote_code"] is False
+        assert kwargs["revision"] == PINNED_MODEL_REVISIONS["BAAI/bge-m3"]
+
+    def test_an_unpinned_model_loads_no_revision_at_all(self):
+        """Do test an unpinned model loads no revision at all."""
+        assert "revision" not in _load_kwargs(
+            LocalEmbeddingService(model_name="acme/unknown")
+        )

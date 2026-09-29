@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from queue import Empty, Full, Queue
 from threading import Thread
-from typing import Callable, Iterator, TypeVar, cast
+from typing import Callable, Generator, Iterator, TypeVar, cast
 
 #: Bound for verify round-trips so a hung provider cannot hang the route.
 VERIFY_TIMEOUT_SECONDS = 15.0
@@ -387,8 +387,15 @@ class LLMProvider(ABC):
         Thread(target=self._drain, args=(fragments, queue), daemon=True).start()
 
     @staticmethod
-    def _drain(fragments: Iterator[str], queue: Queue[object]) -> None:
-        """Push one provider's fragments onto the queue, then close it out."""
+    def _drain(fragments: Generator[str, None, None], queue: Queue[object]) -> None:
+        """
+        Push one provider's fragments onto the queue, then close it out.
+
+        Typed as a generator rather than an iterator because the stream is
+        closed on the way out: an iterator the provider returned may have no
+        ``close`` at all, and abandoning it would leave the underlying HTTP
+        response unclosed.
+        """
         try:
             for fragment in fragments:
                 try:
