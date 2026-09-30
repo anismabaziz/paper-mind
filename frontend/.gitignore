@@ -27,3 +27,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Vendored pdf.js runtime assets (character maps, standard fonts) copied from
+# pdfjs-dist by scripts/vendor-pdf-assets.mjs on predev/prebuild.
+public/cmaps/
+public/standard_fonts/

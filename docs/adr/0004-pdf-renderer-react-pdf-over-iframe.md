@@ -1,5 +1,14 @@
 # PDF renderer: react-pdf thin wrapper over iframe
 
+> Amendment: the reader is split into two lazy chunks (`ReaderDocument` for
+> the sheet, `PageStrip` for the thumbnail row) so the initial route ships
+> without the pdf.js engine (~185kB gz initial JS). The strip is virtualized
+> to a bounded window (see `lib/page-strip-window`) and each viewer owns one
+> buffer clone (see `lib/pdf-buffer`). Character maps and standard fonts are
+> vendored from `pdfjs-dist` into `public/cmaps` and `public/standard_fonts`
+> at build time (`scripts/vendor-pdf-assets.mjs`), so reading never touches a
+> third-party network.
+
 Chosen: `react-pdf@10` as a thin wrapper over `pdfjs-dist@6`, loaded lazily in
 a single `ReaderDocument.tsx` module. The worker is set via
 `pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url)`
@@ -9,10 +18,11 @@ editorial-owned (`paper-grain`, `shadow-sheet`, `rule`, `marker`,
 `marker-soft`, `canvas`, `paper`). The PDF is fetched as `ArrayBuffer`
 (`fetch(file.url) → Uint8Array → <Document file={{data}}>`) and `GET
 /storage/<path>` is an open endpoint. `cMapUrl` and `standardFontDataUrl`
-point at `unpkg.com/pdfjs-dist@${version}` with `cMapPacked:true` for
-embedded fonts. `ReaderDocument` is `React.lazy` and only mounted when
-`store/pdf-state` `file != null`, keeping the ~130kB gz pdfjs + ~700kB worker
-off the initial page. Virtualization renders `±2` pages around the viewport
+point at the vendored `/cmaps/` and `/standard_fonts/` paths with
+`cMapPacked:true` for
+embedded fonts. `ReaderDocument` and `PageStrip` are `React.lazy` and only
+mounted when `store/pdf-state` `file != null`, keeping the pdf.js engine
+off the initial page. Sheet virtualization renders `±2` pages around the viewport
 (react-pdf has no built-in virtualizer) so 100+ page papers mount ~5 canvases;
 placeholders preserve scroll height and `IntersectionObserver` tracks the
 active `Page`.

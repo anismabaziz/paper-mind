@@ -4,17 +4,12 @@ import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import type { File as FileType } from "@/types/db";
 import { cn } from "@/lib/utils";
+import { clonePdfData } from "@/lib/pdf-buffer";
+import { pdfDocumentOptions, pdfWorkerSrc } from "@/lib/pdf-assets";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc();
 
-const options = {
-  cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-  cMapPacked: true,
-  standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
-};
+const options = pdfDocumentOptions();
 
 // Pages kept mounted behind / ahead of the active page. Everything else
 // renders as a sized placeholder so a 200-page document mounts a handful of
@@ -68,16 +63,17 @@ export default function ReaderDocument({
 
   const data = externalData !== undefined ? externalData : internalData;
 
-  // Copy before handing to pdf.js: it transfers the buffer to the worker and
-  // detaches it. State initializer runs on every mount (including StrictMode
-  // remounts), so each Document gets a fresh buffer instead of reusing one
-  // the worker already detached.
-  const [fileData, setFileData] = useState<{ data: Uint8Array } | null>(() =>
-    data ? { data: data.slice() } : null,
-  );
+  // Each Document owns exactly one clone: pdf.js transfers the buffer to its
+  // worker and detaches it, so the fetched source is never handed over
+  // directly. Remounting (including StrictMode remounts) clones again.
+  const [fileData, setFileData] = useState<{ data: Uint8Array } | null>(() => clonePdfData(data));
   useEffect(() => {
-    setFileData(data ? { data: data.slice() } : null);
-  }, [data]);
+    try {
+      setFileData(clonePdfData(data));
+    } catch {
+      setFileData(null);
+    }
+  }, [data, file.id]);
 
   useEffect(() => {
     if (externalData !== undefined) return;
