@@ -14,9 +14,10 @@ import {
   RotateCw,
   Square,
 } from "lucide-react";
-import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
 import useMobileUi from "@/store/mobile-ui";
+import { usePdfFileData } from "@/hooks/usePdfFileData";
+import { isDetached } from "@/lib/bytes";
 import {
   useFileStatus,
   useFileMeta,
@@ -25,7 +26,6 @@ import {
   useCancelIngestion,
 } from "@/hooks/useFiles";
 import { cn } from "@/lib/utils";
-import { isDetached } from "@/lib/bytes";
 import { displayTitle, ingestionStageLabel, isIngestionActive, isIngestionCancellable, isIngestionRetryable } from "@/types/db";
 import {
   DropdownMenu,
@@ -33,89 +33,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-
-// Ensure worker is configured even before lazy ReaderDocument loads (for thumbnails)
-if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-}
-
-const thumbnailOptions = {
-  cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-  cMapPacked: true,
-  standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
-};
-
-// Page strip sizing: fixed strip height, horizontal scroll with snap
-const STRIP_THUMB_WIDTH = 84;
-const CLAMP = "box-border max-w-full min-w-0 overflow-hidden";
+import { ThumbnailPlaceholder } from "./PageStripPlaceholder";
 
 const ReaderDocument = lazy(() => import("./ReaderDocument"));
-
-function FakePageBars() {
-  return (
-    <span className="flex h-full flex-col gap-[3px]">
-      {Array.from({ length: 11 }).map((_, i) => (
-        <span key={i} className="block h-[2px] rounded-full bg-ink/15" style={{ width: `${55 + ((i * 37) % 45)}%` }} />
-      ))}
-    </span>
-  );
-}
-
-function ThumbnailPlaceholder({ count }: { count: number }) {
-  return (
-    <div className="flex gap-2 overflow-hidden">
-      {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
-        <div key={n} className={`relative h-28 shrink-0 aspect-[3/4] rounded-[2px] border border-rule bg-paper p-1.5 opacity-40 ${CLAMP}`}>
-          <FakePageBars />
-          <span className="absolute right-1 bottom-1 font-mono text-[0.55rem] text-ink-faint">{n}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function usePdfFileData(file: { url: string } | null) {
-  const [data, setData] = useState<Uint8Array | null>(null);
-  const [generation, setGeneration] = useState(0);
-  const fileUrl = file?.url ?? null;
-
-  useEffect(() => {
-    if (!fileUrl) {
-      setData(null);
-      return;
-    }
-    const url = fileUrl;
-    let cancelled = false;
-    const controller = new AbortController();
-    async function load() {
-      setData(null);
-      try {
-        const res = await fetch(url, { signal: controller.signal });
-        if (!res.ok) throw new Error(`Failed to load PDF (${res.status})`);
-        const buf = await res.arrayBuffer();
-        if (!cancelled) setData(new Uint8Array(buf));
-      } catch {
-        if (!cancelled) setData(null);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [fileUrl, generation]);
-
-  // Refetch fresh bytes after pdf.js detached the shared buffer (e.g. the
-  // thumbnail strip remounts when reopened). Stable across renders.
-  const reload = useCallback(() => setGeneration((g) => g + 1), []);
-
-  return { data, reload };
-}
+const PageStrip = lazy(() => import("./PageStrip"));
 
 export function ReaderPane() {
   const { file, citationTarget, setFile } = usePdfStore();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const stripRef = useRef<HTMLDivElement>(null);
   const outlineStripRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(100);
   const [showOutline, setShowOutline] = useState(true);
@@ -127,21 +52,14 @@ export function ReaderPane() {
   // A citation jump that arrived before its page mounted. Retried until the
   // page element exists instead of being dropped mid-render.
   const [pendingCitation, setPendingCitation] = useState<{ page: number; key: number } | null>(null);
+  // Single owner of the fetched bytes. Each lazy Renderer (sheet, strip) clones
+  // its own copy; unmounting a Renderer releases its clone and switching
+  // Documents drops the source, so previous buffers are never retained.
   const { data: fileData, reload: reloadFileData } = usePdfFileData(file);
 
-  // Each pdf.js Document transfers its buffer to the worker, detaching it.
-  // State initializer runs on every mount, so the strip gets a fresh copy
-  // instead of reusing a buffer the sheet's worker already detached.
-  const [thumbnailFileData, setThumbnailFileData] = useState<{ data: Uint8Array } | null>(() =>
-    fileData ? { data: fileData.slice() } : null,
-  );
-  useEffect(() => {
-    setThumbnailFileData(fileData ? { data: fileData.slice() } : null);
-  }, [fileData]);
-
   // Reopening the strip remounts its Document. If the worker already
-  // detached the shared buffer, refetch fresh bytes so thumbnails reload
-  // instead of rendering from a dead view.
+  // detached the source, refetch fresh bytes so thumbnails reload instead of
+  // rendering from a dead view.
   useEffect(() => {
     if (showOutline && fileData && isDetached(fileData)) reloadFileData();
   }, [showOutline, fileData, reloadFileData]);
@@ -191,40 +109,15 @@ export function ReaderPane() {
   }, []);
 
   useEffect(() => {
-    // reset page when file changes
+    // reset page when file changes; the strip remounts on file id so its
+    // scroll resets without holding the previous Document's scroll node.
     setPage(1);
     setNumPages(null);
     setProgress(0);
     setPendingCitation(null);
     setFlashedPage(null);
-    if (stripRef.current) stripRef.current.scrollLeft = 0;
     if (outlineStripRef.current) outlineStripRef.current.scrollLeft = 0;
   }, [file?.id]);
-
-  useEffect(() => {
-    if (stripRef.current) stripRef.current.scrollLeft = 0;
-  }, [numPages]);
-
-  // Keep the active page thumbnail visible as the sheet scrolls, with breathing room at the edges
-  useEffect(() => {
-    const container = stripRef.current;
-    if (!container || numPages == null) return;
-    const target = container.querySelector<HTMLElement>(`[data-strip-page="${page}"]`);
-    if (!target) return;
-    const PADDING = 16;
-    const containerRect = container.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    const isFullyVisible = targetRect.left >= containerRect.left + PADDING && targetRect.right <= containerRect.right - PADDING;
-    if (!isFullyVisible) {
-      const offsetLeft = target.offsetLeft;
-      const targetWidth = target.offsetWidth;
-      const containerWidth = container.clientWidth;
-      const desired = offsetLeft - containerWidth / 2 + targetWidth / 2;
-      const maxScroll = container.scrollWidth - containerWidth;
-      const clamped = Math.max(0, Math.min(maxScroll, desired));
-      container.scrollTo({ left: clamped, behavior: "smooth" });
-    }
-  }, [page, numPages]);
 
   useEffect(() => {
     if (numPages && page > numPages) setPage(numPages);
@@ -408,8 +301,8 @@ export function ReaderPane() {
                 showOutline ? "border-ink bg-ink text-paper" : "border-rule text-ink-soft hover:border-ink",
               )}
               aria-pressed={showOutline}
-              aria-label={showOutline ? "Hide pages overview" : "Show pages overview"}
-              title={showOutline ? "Hide pages overview" : "Show pages overview"}
+              aria-label={showOutline ? "Hide page strip" : "Show page strip"}
+              title={showOutline ? "Hide page strip" : "Show page strip"}
             >
               <List className="size-3.5" />
             </button>
@@ -513,55 +406,20 @@ export function ReaderPane() {
             </div>
           </div>
 
-          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-px-4" data-testid="page-strip">
-            <span className="label-meta shrink-0 pr-1">Pages</span>
-            {(() => {
-              const stripCount = metaPageCount ?? numPages;
-              if (!thumbnailFileData || stripCount == null) {
-                return <ThumbnailPlaceholder count={stripCount ?? 4} />;
-              }
-              return (
-                <Document
-                  key={`${file.id}-thumbs`}
-                  file={thumbnailFileData}
-                  options={thumbnailOptions}
-                  loading={<ThumbnailPlaceholder count={stripCount} />}
-                  error={<ThumbnailPlaceholder count={stripCount} />}
-                >
-                  <div className="flex gap-2">
-                    {Array.from({ length: stripCount }, (_, i) => i + 1).map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      data-strip-page={n}
-                      onClick={() => {
-                        setPage(n);
-                        scrollToPage(n);
-                      }}
-                      aria-label={`Go to page ${n}`}
-                      aria-current={page === n ? "true" : undefined}
-                      className={cn(
-                        "group relative flex h-28 shrink-0 aspect-[3/4] items-center justify-center overflow-hidden rounded-[2px] border bg-paper transition-all",
-                        page === n ? "border-marker shadow-sheet" : "border-rule opacity-70 hover:opacity-100",
-                      )}
-                    >
-                      <Page
-                        width={STRIP_THUMB_WIDTH}
-                        pageNumber={n}
-                        renderTextLayer={false}
-                        renderAnnotationLayer={false}
-                        className="bg-paper [&_canvas]:mx-auto [&_canvas]:block [&_canvas]:max-w-full"
-                      />
-                      <span className="pointer-events-none absolute right-1 bottom-1 rounded-sm bg-paper/80 px-0.5 font-mono text-[0.55rem] text-ink-faint">
-                        {n}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                </Document>
-              );
-            })()}
-          </div>
+          <Suspense fallback={<div className="px-4 py-3"><ThumbnailPlaceholder count={metaPageCount ?? numPages ?? 4} /></div>}>
+            <PageStrip
+              key={`${file.id}-strip`}
+              fileId={file.id}
+              source={fileData}
+              pageCount={metaPageCount ?? numPages ?? 0}
+              activePage={page}
+              onSelect={(n) => {
+                setPage(n);
+                scrollToPage(n);
+              }}
+              onBufferDetached={reloadFileData}
+            />
+          </Suspense>
         </div>
       )}
 
