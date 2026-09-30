@@ -158,6 +158,7 @@ export function LibraryRail() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search library"
+            aria-label="Search library"
             className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-ink-faint"
             data-testid="library-search"
           />
@@ -171,6 +172,7 @@ export function LibraryRail() {
             <button
               type="button"
               onClick={() => setTab("library")}
+              aria-pressed={tab === "library"}
               className={cn(
                 "flex w-full items-center gap-2.5 px-2 py-2 text-left text-xs",
                 tab === "library" ? "bg-marker-soft font-medium text-marker" : "text-ink-soft hover:bg-canvas",
@@ -185,6 +187,7 @@ export function LibraryRail() {
             <button
               type="button"
               onClick={() => setTab("recent")}
+              aria-pressed={tab === "recent"}
               className={cn(
                 "flex w-full items-center gap-2.5 px-2 py-2 text-left text-xs",
                 tab === "recent" ? "bg-marker-soft font-medium text-marker" : "text-ink-soft hover:bg-canvas",
@@ -334,6 +337,8 @@ export function LibraryRail() {
                         // reader stays reachable to inspect and retry it.
                         if (!isJobActive) selectFile(item);
                       }}
+                      aria-disabled={isJobActive}
+                      aria-label={isJobActive ? `${displayTitle(item)}, indexing` : undefined}
                       className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isJobActive && "cursor-default")}
                     >
                       <span className="flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden font-mono text-[0.58rem] text-ink-faint">
@@ -456,6 +461,8 @@ export function LibraryRail() {
                               <button
                               data-testid={`document-menu-${item.name}`}
                               type="button"
+                              aria-label={`Actions for ${displayTitle(item)}`}
+                              aria-haspopup="menu"
                               onClick={(e) => e.stopPropagation()}
                               className={cn(
                                 "grid size-7 place-items-center border border-transparent text-ink-faint hover:border-rule hover:bg-paper hover:text-ink",

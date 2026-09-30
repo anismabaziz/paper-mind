@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useEscapeKey } from "@/hooks/useEscape";
 import useSettingsUi from "@/store/settings-ui";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 type Feedback = { kind: "success" | "error"; text: string } | null;
 
@@ -36,9 +37,11 @@ function SettingsDialogContent() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  const savingRef = useRef(false);
+  savingRef.current = saving;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -50,6 +53,9 @@ function SettingsDialogContent() {
   }, []);
 
   const closeSettings = useCallback(() => {
+    // A save writes server state, so closing mid-save would leave the
+    // outcome ambiguous. Verification is read-only and aborts cleanly.
+    if (requestControllerRef.current && savingRef.current) return;
     requestControllerRef.current?.abort();
     requestControllerRef.current = null;
     setApiKey("");
@@ -79,16 +85,10 @@ function SettingsDialogContent() {
     ? errorMessage(settingsQuery.error, "Could not load settings.")
     : null;
 
-  // Move focus into the dialog on open, restore it on close.
-  useEffect(() => {
-    if (!isOpen) return;
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
-    return () => {
-      restoreFocusRef.current?.focus();
-    };
-  }, [isOpen]);
-  useEscapeKey(isOpen, closeSettings);
+  // Trap focus while open and restore it to the invoking control on close.
+  useFocusTrap(isOpen, dialogRef, closeRef);
+  // Escape aborts a read-only verification but never interrupts a save.
+  useEscapeKey(isOpen && !saving, closeSettings);
 
   useEffect(() => {
     if (settings) {
@@ -192,19 +192,29 @@ function SettingsDialogContent() {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm"
+      data-testid="settings-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) closeSettings();
+      }}
+    >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
-        className="w-full max-w-md border border-rule bg-paper shadow-sheet p-6 relative"
+        aria-busy={saving || testing}
+        className="w-full max-w-md border border-rule bg-paper shadow-sheet p-6 relative focus:outline-none"
         data-testid="settings-dialog"
       >
         <button
           ref={closeRef}
           onClick={closeSettings}
+          disabled={saving}
           aria-label="Close settings"
-          className="absolute right-4 top-4 text-ink-faint hover:text-ink cursor-pointer"
+          className="absolute right-4 top-4 grid size-11 place-items-center text-ink-faint hover:text-ink cursor-pointer disabled:opacity-40"
         >
           <X size={16} />
         </button>
@@ -216,13 +226,20 @@ function SettingsDialogContent() {
         </div>
         <div className="space-y-3">
           {settingsQuery.isLoading ? (
-            <div className="flex justify-center py-6">
-              <Loader2 size={18} className="animate-spin text-ink-faint" />
+            <div className="flex justify-center py-6" role="status" aria-label="Loading settings">
+              <Loader2 size={18} className="animate-spin text-ink-faint motion-reduce:animate-none" aria-hidden="true" />
+              <span className="sr-only">Loading settings…</span>
             </div>
           ) : settingsQuery.isError && !canRecoverFromLoadError ? (
             <FormFeedback kind="error" text={loadErrorText ?? "Could not load settings."} />
           ) : (
-            <>
+            <form
+              className="space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleSave();
+              }}
+            >
               {loadErrorText && <FormFeedback kind="error" text={loadErrorText} />}
               <label className="block">
                 <span className="label-meta">Provider</span>
@@ -322,7 +339,7 @@ function SettingsDialogContent() {
                     : "Paste your API key"}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  className="h-10 bg-paper border-rule text-xs focus-visible:border-ink focus-visible:ring-0"
+                  className="h-11 min-h-[44px] bg-paper border-rule text-xs focus-visible:border-ink focus-visible:ring-0"
                   autoComplete="off"
                   data-testid="settings-api-key"
                 />
@@ -344,26 +361,27 @@ function SettingsDialogContent() {
 
               <div className="flex gap-2 pt-1">
                 <Button
-                  onClick={handleSave}
+                  type="submit"
                    disabled={!provider || !model || !apiKey || saving || testing}
-                  className="flex-1 h-10 bg-ink text-paper text-xs hover:bg-ink/90"
+                  className="flex-1 h-11 min-h-[44px] bg-ink text-paper text-xs hover:bg-ink/90"
                   data-testid="settings-save"
                 >
-                  {saving && <Loader2 size={14} className="animate-spin" />}
-                  Save
+                  {saving && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                  {saving ? "Saving…" : "Save"}
                 </Button>
                 <Button
+                  type="button"
                   onClick={handleTest}
                   disabled={saving || testing}
                   variant="outline"
-                  className="flex-1 h-10 text-xs border-rule bg-paper hover:bg-canvas text-ink"
+                  className="flex-1 h-11 min-h-[44px] text-xs border-rule bg-paper hover:bg-canvas text-ink"
                   data-testid="settings-test"
                 >
-                  {testing && <Loader2 size={14} className="animate-spin" />}
-                  Test connection
+                  {testing && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+                  {testing ? "Testing…" : "Test connection"}
                 </Button>
               </div>
-            </>
+            </form>
           )}
         </div>
       </div>
@@ -375,6 +393,7 @@ function FormFeedback({ kind, text }: { kind: "success" | "error"; text: string 
   return (
     <p
       data-testid="settings-feedback"
+      role={kind === "error" ? "alert" : "status"}
       className={cn(
         "rounded-sm border px-3 py-2 font-mono text-xs",
         kind === "success"
@@ -409,4 +428,4 @@ function formatUsd(value: number): string {
 }
 
 const selectClass =
-  "h-10 w-full rounded-sm border border-rule bg-paper px-3 text-xs text-ink focus:outline-none focus:border-ink disabled:bg-canvas disabled:text-ink-faint font-mono";
+  "h-11 min-h-[44px] w-full rounded-sm border border-rule bg-paper px-3 text-xs text-ink focus:outline-none focus:border-ink disabled:bg-canvas disabled:text-ink-faint font-mono";

@@ -176,6 +176,44 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
+
+  /* One visible keyboard indicator for both palettes. The ring token is
+     defined per palette above, so this stays clear on paper and on dark. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+/* Primary controls meet a 44px touch target on touch devices. Desktop keeps
+   its denser sizes; coarse pointers get the floor instead. */
+@media (pointer: coarse) {
+  button,
+  select,
+  input,
+  textarea,
+  [role="button"] {
+    min-height: 44px;
+  }
+
+  button,
+  [role="button"] {
+    min-width: 44px;
+  }
+}
+
+/* Reduced motion: nonessential animation goes away, but loading, progress,
+   and terminal states keep their text so nothing becomes ambiguous. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Small-caps meta label used across the chrome */

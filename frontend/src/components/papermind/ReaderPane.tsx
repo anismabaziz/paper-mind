@@ -382,8 +382,9 @@ export function ReaderPane() {
                 <button
                   type="button"
                   className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink"
-                  aria-label="Delete document"
-                  title="Delete document"
+                  aria-label="Document actions"
+                  aria-haspopup="menu"
+                  title="Document actions"
                 >
                   <MoreHorizontal className="size-3.5" />
                 </button>
@@ -406,6 +407,7 @@ export function ReaderPane() {
                 "flex size-7 items-center justify-center rounded-sm border transition-colors",
                 showOutline ? "border-ink bg-ink text-paper" : "border-rule text-ink-soft hover:border-ink",
               )}
+              aria-pressed={showOutline}
               aria-label={showOutline ? "Hide pages overview" : "Show pages overview"}
               title={showOutline ? "Hide pages overview" : "Show pages overview"}
             >
