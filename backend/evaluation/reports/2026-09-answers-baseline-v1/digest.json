@@ -1,0 +1,223 @@
+{
+  "configurations": [],
+  "cost": {
+    "local": {
+      "billed_usd": 0.0,
+      "device": "cpu",
+      "documents": 4,
+      "embedding_model": "BAAI/bge-m3",
+      "indexed_seconds": 70.965852,
+      "rerank_applied": false,
+      "rerank_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "seconds_per_document": 17.741463
+    },
+    "provider": {
+      "input_cost_per_million_usd": 0.8,
+      "input_tokens": 65374,
+      "model": "qwen/qwen3.8-27b",
+      "output_cost_per_million_usd": 4.0,
+      "output_tokens": 5013,
+      "per_case_usd": 0.002128,
+      "priced_cases": 34,
+      "usd": 0.072351
+    },
+    "traces": {
+      "input_tokens": 291134,
+      "model": "qwen/qwen3.8-27b",
+      "output_tokens": 19741,
+      "per_trace_usd": 0.002092,
+      "priced_calls": 129,
+      "traces": 158,
+      "usd": 0.269881
+    }
+  },
+  "performance": {
+    "evaluation": {
+      "cold_start": {
+        "first_token_seconds": {
+          "p50": 0.917829,
+          "p95": 0.917829,
+          "samples": 1
+        },
+        "retrieval_seconds": {
+          "p50": 4.374333082989324,
+          "p95": 4.374333082989324,
+          "samples": 1
+        },
+        "total_seconds": {
+          "p50": 1.130355,
+          "p95": 1.130355,
+          "samples": 1
+        }
+      },
+      "steady_state": {
+        "first_token_seconds": {
+          "p50": 0.5253395000000001,
+          "p95": 1.44978175,
+          "samples": 36
+        },
+        "retrieval_seconds": {
+          "p50": 4.031285145989386,
+          "p95": 4.508227958249336,
+          "samples": 36
+        },
+        "total_seconds": {
+          "p50": 0.961292,
+          "p95": 2.13289675,
+          "samples": 36
+        }
+      }
+    },
+    "traces": {
+      "cost": {
+        "model": "qwen/qwen3.8-27b",
+        "per_trace_usd": 0.002092,
+        "priced_calls": 129,
+        "usd": 0.269881
+      },
+      "latency": {
+        "first_token_seconds": {
+          "p50": 0.529017,
+          "p95": 1.103757,
+          "samples": 129
+        },
+        "retrieval_seconds": {
+          "p50": 4.262575,
+          "p95": 6.619247,
+          "samples": 158
+        },
+        "total_seconds": {
+          "p50": 0.83499,
+          "p95": 2.024891,
+          "samples": 158
+        }
+      },
+      "outcomes": {
+        "answered": 122,
+        "citation_error": 7,
+        "provider_error": 29
+      },
+      "throughput": {
+        "traces_per_minute": 0.099,
+        "window_seconds": 95991.990455
+      },
+      "tokens": {
+        "input": 291134,
+        "output": 19741
+      },
+      "traces": 158
+    }
+  },
+  "provenance": {
+    "citation_prompt": "grounded-claims-v1",
+    "configurations": [
+      "baseline"
+    ],
+    "dataset": "2026-09-labeled-cases-v1",
+    "dirty": true,
+    "embedding": {
+      "id": "BAAI/bge-m3",
+      "revision": "5617a9f61b028005a4858fdac845db406aefb181"
+    },
+    "generator": {
+      "id": "qwen/qwen3.8-27b",
+      "provider": "groq"
+    },
+    "index": {
+      "bruening-2018-wearable-jump-monitor-figure-skating.pdf": 1,
+      "papermind-eval-methods.pdf": 1,
+      "papermind-rag-primer.pdf": 1,
+      "papermind-team-notes.pdf": 1
+    },
+    "judge": {
+      "id": "openai/gpt-oss-20b",
+      "provider": "groq",
+      "rubric": "faithfulness-rubric-v2"
+    },
+    "judge_rubric": "faithfulness-rubric-v2",
+    "questions": 37,
+    "reranker": {
+      "id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a"
+    },
+    "revision": "f49885ce36c4f9484d9856197c792808e6c1df2c",
+    "split": "validation",
+    "subject": "feat: Keep PDF reading within browser limits"
+  },
+  "quality": {
+    "abstention": {
+      "failed": 3,
+      "graded": 37,
+      "mean": 0.90625,
+      "passed": 29,
+      "scored": 32,
+      "unknown": 5
+    },
+    "answers": {
+      "correctness": {
+        "failed": 7,
+        "graded": 37,
+        "mean": 0.7941176470588235,
+        "passed": 27,
+        "scored": 34,
+        "unknown": 3
+      },
+      "faithfulness": {
+        "failed": 2,
+        "graded": 37,
+        "mean": 0.9558823529411765,
+        "passed": 32,
+        "scored": 34,
+        "unknown": 3
+      }
+    },
+    "citations": {
+      "citation_precision": {
+        "failed": 1,
+        "graded": 37,
+        "mean": 0.9935897435897435,
+        "passed": 25,
+        "scored": 26,
+        "unknown": 11
+      },
+      "citation_recall": {
+        "failed": 0,
+        "graded": 37,
+        "mean": 1.0,
+        "passed": 26,
+        "scored": 26,
+        "unknown": 11
+      }
+    },
+    "failures": {
+      "cases": [
+        "skating-isolated-jumps",
+        "skating-errors",
+        "skating-rotation-threshold",
+        "skating-table-successful-pps",
+        "eval-sparse-paradox",
+        "eval-what-cannot-be-generated",
+        "eval-report-alongside",
+        "notes-injection-not-agreed",
+        "skating-rotation-speed"
+      ],
+      "graders": {
+        "exact_evidence": 6,
+        "provider_status": 3,
+        "required_abstention": 3
+      },
+      "outcomes": {
+        "answered": 34,
+        "citation_error": 3
+      }
+    },
+    "retrieval": {
+      "hit_rate": 0.7297297297297297,
+      "mrr": 0.6675675675675675,
+      "ndcg": 0.6286005293880209,
+      "questions": 37,
+      "recall": 0.7297297297297297
+    },
+    "unmeasured": {}
+  }
+}
