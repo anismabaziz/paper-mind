@@ -319,23 +319,34 @@ Live runs are opt-in (`--live`); `--split tuning` runs the other half, and
 once with it on, and reports both. See [backend/README.md](backend/README.md) for free local live
 instructions (`http://localhost:6333` with `--no-judge` needs no chat key).
 
-**A published report backs the retrieval claims.**
-[`backend/evaluation/reports/2026-09-retrieval-baseline-v1/`](backend/evaluation/reports/2026-09-retrieval-baseline-v1/)
-is a checked-in run of the reported half of the case set against real
-documents, real local embeddings, and real Qdrant, with
-[`2026-09-retrieval-tuning-v1`](backend/evaluation/reports/2026-09-retrieval-tuning-v1/)
-beside it covering the half the variants were chosen on. It compares the shipped
-configuration with dense-only, sparse-only, hybrid-only, reranked, two
-candidate depths, two query-expansion policies, and two chunking policies, all
-chosen on the tuning half, and reports retrieval quality, retrieval latency, and
-the per-question rows behind every difference. It is retrieval only: no model
-was called, so the report carries no answer, citation, abstention, token, or
-dollar figure, and says so. The manifest beside the numbers names the revision,
-the case set, every document's hash and index manifest, the prompts, the
-models, and the environment, and `--compare-report` says whether a re-run
-reproduced it. A run with generation and judging writes a report of the same
-shape with those sections filled in, and is what the answer-quality claims
-should be quoted from.
+**Three published reports back the retrieval and answer claims.**
+
+The two retrieval reports — [`2026-09-retrieval-baseline-v1`](backend/evaluation/reports/2026-09-retrieval-baseline-v1/)
+for the reported half and [`2026-09-retrieval-tuning-v1`](backend/evaluation/reports/2026-09-retrieval-tuning-v1/)
+for the tuning half — run eleven retrieval configurations over the same
+case set against real documents, real local embeddings, and real Qdrant: the
+shipped one, dense-only, sparse-only, hybrid-only, reranked, two candidate
+depths, two query-expansion policies, and two chunking policies, every value
+chosen on the tuning half. They report retrieval quality, retrieval latency,
+and the per-question row behind every difference. They are retrieval only: no
+model was called, so neither carries an answer, citation, abstention, token, or
+dollar figure, and each says so. Retrieval is measured against an approximate
+index, so a difference smaller than a run's own movement is not a difference.
+
+[`2026-09-answers-baseline-v1`](backend/evaluation/reports/2026-09-answers-baseline-v1/)
+asks the same 37 reported questions through the answer path with a live
+generator and a separately configured model judge. It reports answer
+correctness, faithfulness, citation precision and recall, abstention accuracy,
+which questions failed and which grader rejected them, p50 and p95 retrieval
+latency, time to first token, total latency, tokens, and the cost estimated at
+the model's published prices. It also records how often the judge agreed with a
+person on a hand-labelled set, which is what tells a reader how much weight its
+verdicts carry.
+
+The manifest beside each set of numbers names the revision, the case set,
+every document's hash and index manifest, the prompts, the models, and the
+environment, and `--compare-report` says whether a re-run reproduced it or which
+field moved.
 
 ## Keeping dependencies and models current
 

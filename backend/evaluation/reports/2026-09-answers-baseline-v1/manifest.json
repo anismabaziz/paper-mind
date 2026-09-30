@@ -1,0 +1,191 @@
+{
+  "dataset": {
+    "cases": 37,
+    "held_back": [
+      "eval-failure-citation",
+      "notes-failure-provider",
+      "skating-failure-citation"
+    ],
+    "reviewed_on": "2026-09-27",
+    "split": "validation",
+    "version": "2026-09-labeled-cases-v1"
+  },
+  "documents": [
+    {
+      "filename": "papermind-rag-primer.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e",
+      "version": "2"
+    },
+    {
+      "filename": "papermind-eval-methods.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae",
+      "version": "1"
+    },
+    {
+      "filename": "papermind-team-notes.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6",
+      "version": "1"
+    },
+    {
+      "filename": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "license": "CC BY 4.0",
+      "origin": "Bruening et al., PLOS ONE, 2018, doi:10.1371/journal.pone.0206162",
+      "sha256": "11349a78036284774230762bdcafa9f38ee19ec4a7115a46acb4d47ab9ddbf46",
+      "version": "1"
+    }
+  ],
+  "environment": {
+    "machine": "arm64",
+    "packages": {
+      "qdrant-client": "1.19.0",
+      "sentence-transformers": "6.0.1",
+      "sqlalchemy": "2.0.52",
+      "tiktoken": "0.14.0"
+    },
+    "platform": "macOS-26.3-arm64-arm-64bit",
+    "python": "3.11.13",
+    "retrieval": {
+      "candidate_depth": 50,
+      "collection_schema": "named-dense-sparse-v1",
+      "context_sources": 5,
+      "rrf_k": 60,
+      "sparse_tokenizer": "lowercase-regex-stopwords-v1"
+    }
+  },
+  "evidence": {
+    "abstention": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    },
+    "answers": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    },
+    "citations": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    },
+    "cost": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    },
+    "deterministic": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    },
+    "human_calibration": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    },
+    "model_graded": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    },
+    "provider_failures": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    },
+    "tokens": {
+      "measured": true,
+      "measured_in": [
+        "baseline"
+      ],
+      "not_measured": []
+    }
+  },
+  "experiments": [
+    {
+      "changes": {},
+      "decided_on": "tuning",
+      "family": "baseline",
+      "id": "baseline",
+      "question": "What does the shipped configuration do?"
+    }
+  ],
+  "measurements_digest": "9cd9e067be647ebcf29ef0085db1bc9fce763ae0b63edc5cb35a5d2ef1ee046d",
+  "mode": "answer-path",
+  "models": {
+    "embedding": {
+      "id": "BAAI/bge-m3",
+      "revision": "5617a9f61b028005a4858fdac845db406aefb181"
+    },
+    "generator": {
+      "id": "qwen/qwen3.8-27b",
+      "provider": "groq"
+    },
+    "judge": {
+      "id": "openai/gpt-oss-20b",
+      "provider": "groq",
+      "rubric": "faithfulness-rubric-v2"
+    },
+    "reranker": {
+      "id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a"
+    }
+  },
+  "prompts": {
+    "citation": "grounded-claims-v1",
+    "judge_rubric": "faithfulness-rubric-v2"
+  },
+  "report_version": "1",
+  "results": [
+    {
+      "experiment": "baseline",
+      "family": "baseline",
+      "questions": 37,
+      "split": "validation"
+    }
+  ],
+  "retrieval_methods": [
+    "hybrid"
+  ],
+  "revision": {
+    "dirty": true,
+    "files_changed": 14,
+    "revision": "f49885ce36c4f9484d9856197c792808e6c1df2c",
+    "subject": "feat: Keep PDF reading within browser limits"
+  },
+  "settings": {
+    "chunk_overlap_tokens": 50,
+    "chunk_size_tokens": 512,
+    "context_token_budget": 6000,
+    "embedding_model": "BAAI/bge-m3",
+    "index_name": "pdf-index",
+    "max_expansion_chars": 2000,
+    "prior_turns_token_budget": 1200,
+    "query_rewrite": false,
+    "recent_turns": 4,
+    "rerank_enabled": false,
+    "rerank_model": "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  }
+}
