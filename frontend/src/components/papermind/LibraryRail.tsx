@@ -3,6 +3,7 @@ import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2,
 import { useQueryClient } from "@tanstack/react-query";
 import { useFiles, useUploadFile, useDeleteFile, useRetryIngestion, useCancelIngestion, useReindex, useTouchFileOpened } from "@/hooks/useFiles";
 import { formatFileSize } from "@/lib/format";
+import { FailureNotice } from "./FailureNotice";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
 import useMobileUi from "@/store/mobile-ui";
@@ -213,34 +214,29 @@ export function LibraryRail() {
           )}
         </div>
 
-        {(uploadError || retryError || cancelError || reindexError) && (
-          <div role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2">
-            <p className="text-xs font-medium text-destructive">
-              {reindexError
-                ? "Reindex failed"
-                : cancelError
-                  ? "Cancellation failed"
-                  : retryError
-                    ? "Retry failed"
-                    : "Upload failed"}
-            </p>
-            <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-soft">
-              {reindexError ?? cancelError ?? retryError ?? uploadError}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setUploadError(null);
-                retryMutation.reset();
-                cancelMutation.reset();
-                reindexMutation.reset();
-              }}
-              className="mt-2 border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
+        {/* Each failure keeps its own heading and its own dismissal: collapsing
+            them into one priority chain hid an upload failure behind an
+            unrelated reindex error, so neither read as what it was. */}
+        {[
+          { key: "upload", heading: "Upload failed", detail: uploadError, reset: () => setUploadError(null) },
+          { key: "retry", heading: "Retry failed", detail: retryError, reset: () => retryMutation.reset() },
+          { key: "cancel", heading: "Cancellation failed", detail: cancelError, reset: () => cancelMutation.reset() },
+          { key: "reindex", heading: "Reindex failed", detail: reindexError, reset: () => reindexMutation.reset() },
+        ]
+          .filter((failure) => failure.detail)
+          .map((failure) => (
+            <div key={failure.key} role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2" data-testid={`library-${failure.key}-error`}>
+              <p className="text-xs font-medium text-destructive">{failure.heading}</p>
+              <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-soft">{failure.detail}</p>
+              <button
+                type="button"
+                onClick={failure.reset}
+                className="mt-2 border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
 
         {deleteMutation.isError && (
           <div role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2">
@@ -278,6 +274,14 @@ export function LibraryRail() {
               <div key={i} className="h-[76px] w-full animate-pulse rounded-sm border border-rule bg-paper/60" />
             ))}
           </div>
+        ) : filesQuery.isError ? (
+          <FailureNotice
+            testId="library-error"
+            title="Could not load your library"
+            message={`${filesQuery.error instanceof Error ? filesQuery.error.message : "The library request failed."} Nothing was deleted — this is a loading failure, not an empty library.`}
+            actionLabel="Retry library load"
+            onAction={() => filesQuery.refetch()}
+          />
         ) : filtered.length === 0 ? (
           <div className="mx-1 rounded-sm border border-dashed border-rule bg-paper/40 px-4 py-8 text-center" data-testid="library-empty">
             <div className="mx-auto grid size-8 place-items-center border border-rule bg-paper text-ink-faint">

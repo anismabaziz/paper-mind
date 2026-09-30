@@ -114,6 +114,74 @@ export type ChatFailureCategory =
   | "citations";
 
 /**
+ * A connection or stream that ended without an answer.
+ *
+ * The server never sends these as event categories: they classify a rejected
+ * `fetch` or a stream that broke its contract (EOF without a terminal event).
+ * Kept separate from {@link ChatFailureCategory} so SSE validation stays
+ * pinned to what the backend actually emits.
+ */
+export type ChatTransportFailure = "retrieval_unavailable" | "interrupted";
+
+/** Any failed chat outcome the pane can render, SSE or transport. */
+export type ChatOutcomeFailure =
+  | ChatFailureCategory
+  | ChatTransportFailure
+  | "persistence"
+  | "settings";
+
+/** Retrieval never ran: the vector store, embeddings, or reranker failed. */
+const RETRIEVAL_UNAVAILABLE_PATTERNS = [
+  "Vector store is unavailable",
+  "vector_store_unavailable",
+  "Vector store configuration is invalid",
+  "vector_dimension_mismatch",
+  "/response retrieval failed",
+];
+
+/** The question never reached a model because App Settings cannot serve it. */
+const SETTINGS_ERROR_PATTERNS = [
+  "No chat provider configured",
+  "Re-save your provider settings",
+];
+
+/** Whether a streamed failure text means App Settings is what is wrong. */
+export function isSettingsFailureMessage(message: string): boolean {
+  return SETTINGS_ERROR_PATTERNS.some((p) => message.includes(p));
+}
+
+/**
+ * Sort a rejected chat request into a renderable failure.
+ *
+ * A missing provider, a dead search, and a broken stream each read
+ * differently and each recover differently: none of them is an empty
+ * answer, and retrying one of them unchanged would fail identically.
+ *
+ * The patterns are the refusal reasons the answer path names, not the word
+ * "retrieval": a provider error that merely mentions retrieval must not be
+ * filed as a dead search.
+ */
+export function classifyChatRequestError(error: unknown): {
+  failure: ChatOutcomeFailure;
+  message: string;
+  needsSettings: boolean;
+} {
+  const message =
+    error instanceof Error && error.message
+      ? error.message
+      : "The connection closed before the answer could be read.";
+  if (error instanceof StreamProtocolError)
+    return { failure: "interrupted", message, needsSettings: false };
+  if (SETTINGS_ERROR_PATTERNS.some((p) => message.includes(p))) {
+    return { failure: "settings", message, needsSettings: true };
+  }
+  if (RETRIEVAL_UNAVAILABLE_PATTERNS.some((p) => message.includes(p))) {
+    return { failure: "retrieval_unavailable", message, needsSettings: false };
+  }
+  return { failure: "interrupted", message, needsSettings: false };
+}
+
+/**
  * Why the app answered without asking a model.
  *
  * An empty index and a result that cannot be cited are different problems, and

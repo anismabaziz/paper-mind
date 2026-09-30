@@ -231,7 +231,21 @@ function SettingsDialogContent() {
               <span className="sr-only">Loading settings…</span>
             </div>
           ) : settingsQuery.isError && !canRecoverFromLoadError ? (
-            <FormFeedback kind="error" text={loadErrorText ?? "Could not load settings."} />
+            <div className="space-y-3">
+              <FormFeedback kind="error" text={loadErrorText ?? "Could not load settings."} />
+              <p className="text-xs leading-5 text-ink-soft">
+                Saved settings were left unchanged. Retrying reloads them — nothing you typed is restored from the server.
+              </p>
+              <Button
+                type="button"
+                onClick={() => settingsQuery.refetch()}
+                variant="outline"
+                className="h-11 min-h-[44px] w-full text-xs border-rule bg-paper hover:bg-canvas text-ink"
+                data-testid="settings-retry"
+              >
+                Retry loading settings
+              </Button>
+            </div>
           ) : (
             <form
               className="space-y-3"
@@ -240,7 +254,19 @@ function SettingsDialogContent() {
                 void handleSave();
               }}
             >
-              {loadErrorText && <FormFeedback kind="error" text={loadErrorText} />}
+              {loadErrorText && (
+                <div className="space-y-2">
+                  <FormFeedback kind="error" text={loadErrorText} />
+                  <button
+                    type="button"
+                    onClick={() => settingsQuery.refetch()}
+                    className="font-mono text-[0.65rem] text-ink-soft underline underline-offset-2 hover:text-ink"
+                    data-testid="settings-retry"
+                  >
+                    Retry loading saved settings
+                  </button>
+                </div>
+              )}
               <label className="block">
                 <span className="label-meta">Provider</span>
                 <select
