@@ -194,16 +194,24 @@ const METHOD_LABELS: Record<IRetrievalResult["method"], string> = {
 function SourceList({ sources, retrieval }: { sources: ISource[]; retrieval?: IRetrievalResult }) {
   const [open, setOpen] = useState(true);
   const setCitationTarget = usePdfStore((s) => s.setCitationTarget);
+  const listId = `source-list-${sources[0]?.source_id ?? "empty"}`;
   return (
     <div className="mt-4 border-t border-rule pt-3">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between text-ink-faint hover:text-ink">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-label={`${open ? "Hide" : "Show"} ${sources.length} cited passages`}
+        className="flex w-full items-center justify-between text-ink-faint hover:text-ink"
+      >
         <span className="label-meta">
           {sources.length} passages{retrieval ? ` · ${METHOD_LABELS[retrieval.method]}` : ""}
         </span>
         <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <ol className="mt-3 space-y-3">
+        <ol id={listId} className="mt-3 space-y-3">
           {sources.map((s, idx) => {
             const hasPage = s.page != null;
             const citationButton = (
@@ -639,6 +647,7 @@ export function ChatPane() {
             ref={inputRef}
             rows={2}
             data-testid="chat-input"
+            aria-label="Ask this paper a question"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
