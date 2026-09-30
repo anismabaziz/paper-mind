@@ -52,6 +52,8 @@ files = [
     "composition.py",
     "db.py",
     "evaluation/dataset.py",
+    "evaluation/digest.py",
+    "evaluation/traces.py",
     "evaluation/evaluator.py",
     "evaluation/harness.py",
     "evaluation/outcomes.py",

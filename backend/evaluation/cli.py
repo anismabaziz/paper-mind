@@ -37,6 +37,15 @@ experiments against the same labeled cases instead of asking a model, so it
 needs no key; ``--compare-report`` says whether this run reproduces a
 published one and names the field that moved.
 
+``--render`` re-reads a report that is already on disk and writes the digest
+beside it: quality, latency, and cost in one document, with the recorded traces
+of real requests as its other half. It asks no model, holds no key, and starts
+no index, so a reviewer or a CI job can re-derive the digest from the committed
+report alone. ``--traces`` names the export files to read; whatever they
+summarize is stored in the report directory, because the raw traces are an
+operator's file and the summary is the report's. ``--check`` compares the digest
+against bounds somebody wrote down and exits non-zero when one is crossed.
+
 Qdrant local URL is ``http://localhost:6333`` on the host
 (``http://qdrant:6333`` inside compose, via ``QDRANT_URL``).
 """
@@ -65,7 +74,7 @@ from services.llm.factory import build_chat_provider
 from settings import Settings
 from storage import get_storage
 
-from evaluation import ablations, experiments, report
+from evaluation import ablations, digest, experiments, report, traces
 from evaluation.dataset import REPORTED, SPLITS, load_dataset
 from evaluation.evaluator import DEFAULT_K, evaluate
 from evaluation.harness import build_environment, remove_documents
@@ -92,6 +101,11 @@ DEFAULT_PACE_SECONDS = 6.0
 
 #: The pause this process is running with, which ``--pace`` sets.
 PROVIDER_PACE_SECONDS = DEFAULT_PACE_SECONDS
+
+#: What a render stores beside the report: the summary of the recorded requests
+#: the digest's runtime half was read from. Named separately from the digest's
+#: own files because it is the input, and re-rendering reads it back.
+TRACE_SUMMARY_NAME = "traces-summary.json"
 
 #: How many output tokens the judge may use. A reasoning model spends its
 #: budget thinking through the rubric before it answers, and an empty reply is
@@ -718,6 +732,32 @@ def main(argv=None):
         metavar="DIRECTORY",
         help="say whether this run reproduces the report in DIRECTORY, and what moved",
     )
+    parser.add_argument(
+        "--render",
+        metavar="DIRECTORY",
+        help=(
+            "write the quality, latency, and cost digest for the report in "
+            "DIRECTORY, reading it rather than measuring it again"
+        ),
+    )
+    parser.add_argument(
+        "--traces",
+        metavar="FILE",
+        action="append",
+        default=[],
+        help=(
+            "a file of recorded answer traces to read the runtime half from; "
+            "may be given more than once"
+        ),
+    )
+    parser.add_argument(
+        "--check",
+        metavar="FILE",
+        help=(
+            "exit non-zero when the rendered digest crosses a bound declared in "
+            "FILE; the digest is written either way"
+        ),
+    )
     args = parser.parse_args(argv)
     for provider, model in (
         (args.provider, args.model),
@@ -736,6 +776,8 @@ def main(argv=None):
         rerank = False
 
     PROVIDER_PACE_SECONDS = max(args.pace, 0.0)
+    if args.render:
+        return _render_main(args)
     if args.ablate:
         return _ablation_main(args)
     run_report = run(
@@ -758,6 +800,73 @@ def main(argv=None):
         print(json.dumps(run_report, indent=2))
         return
     _print(run_report)
+
+
+def _render_main(args) -> None:
+    """
+    Re-read a report from disk, write its digest, and hold it to its thresholds.
+
+    Nothing is measured here, which is the point: a report a reviewer has to
+    pay a provider to look at again is a report nobody looks at again. The
+    trace summary the digest's runtime half is built from is stored in the
+    report directory, so a second render of the same report produces the same
+    digest without the raw export files being anywhere near it.
+    """
+    directory = Path(args.render)
+    if args.traces:
+        # Read the export files and keep the summary: the raw traces are the
+        # operator's local record, and the summary is what the report can hold.
+        (directory / TRACE_SUMMARY_NAME).write_text(
+            json.dumps(traces.summarize(args.traces), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    measured = digest.digest(
+        report.load_manifest(directory),
+        list(report.load_results(directory).values()),
+        traces=args.traces or None,
+        trace_summary=_stored_trace_summary(directory),
+    )
+    digest.write(directory, measured)
+    print(f"Digest written to {directory}")
+    if args.check:
+        _check_thresholds(measured, Path(args.check))
+
+
+def _stored_trace_summary(directory: Path) -> dict | None:
+    """
+    Return the trace summary a previous render stored, or None when there is none.
+
+    The export files are the operator's and are not committed; the summary is
+    what the report needs, so it lives in the report. Reading it back is what
+    makes a second render reproduce the first.
+    """
+    stored = directory / TRACE_SUMMARY_NAME
+    if not stored.exists():
+        return None
+    return json.loads(stored.read_text(encoding="utf-8"))
+
+
+def _check_thresholds(measured: dict, thresholds: Path) -> None:
+    """
+    Hold the digest to its declared bounds, and say which ones it crossed.
+
+    The digest is already written by the time this runs, deliberately: the
+    artifact is what a person opens when the gate fails, and a gate that threw
+    it away would leave them with an error message and nothing to look at.
+
+    A bound over a number this run did not measure is reported as such and
+    fails the run, because a check that passes what it cannot read is not a
+    check. Nothing else fails: an undeclared number is nobody's business.
+    """
+    bounds = json.loads(thresholds.read_text(encoding="utf-8"))
+    crossed = digest.regressions(measured, bounds)
+    if not crossed:
+        print(f"Inside every threshold in {thresholds}")
+        return
+    print(f"Crossed {len(crossed)} threshold(s) in {thresholds}:")
+    for row in crossed:
+        print(f"  {row['threshold']}: {row['reason']}")
+    sys.exit(1)
 
 
 def _ablation_main(args) -> None:

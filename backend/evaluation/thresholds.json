@@ -1,0 +1,11 @@
+{
+  "quality.retrieval.hit_rate": {"min": 0.70},
+  "quality.retrieval.ndcg": {"min": 0.60},
+  "quality.answers.correctness.mean": {"min": 0.75},
+  "quality.answers.faithfulness.mean": {"min": 0.90},
+  "quality.citations.citation_precision.mean": {"min": 0.95},
+  "quality.abstention.mean": {"min": 0.85},
+  "performance.evaluation.steady_state.first_token_seconds.p95": {"max": 3.0},
+  "performance.evaluation.steady_state.total_seconds.p95": {"max": 5.0},
+  "cost.provider.per_case_usd": {"max": 0.01}
+}

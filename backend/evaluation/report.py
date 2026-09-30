@@ -615,13 +615,36 @@ class Column:
     p95: float | None
 
 
-def _number(value: Any, places: int = 3) -> str:
-    """Return a number for a table cell, or a dash when there is none."""
+def number_cell(value: Any, places: int = 3) -> str:
+    """
+    Return a number for a table cell, or a dash when there is none.
+
+    Shared with the digest rather than written again there, because a dash means
+    the same thing in both documents: the run did not measure that cell. A table
+    that spelled a missing measurement differently in each half would read as two
+    findings about the same absence.
+    """
     if value is None:
         return "-"
     if isinstance(value, (int, float)):
         return f"{value:.{places}f}"
     return str(value)
+
+
+def failed_graders(case: dict[str, Any]) -> list[str]:
+    """
+    Return the graders that rejected one case, in the order the report prints them.
+
+    Shared with the digest, which counts the same rejections per grader instead of
+    naming them. Two implementations of "which graders said no" would eventually
+    disagree, and the digest is the document a reader checks when the report's
+    failure table and its numbers seem to contradict each other.
+    """
+    return sorted(
+        name
+        for name, grade in (case.get("grades") or {}).items()
+        if isinstance(grade, dict) and grade.get("outcome") == "failed"
+    )
 
 
 def columns(results: Iterable[dict[str, Any]]) -> list[Column]:
@@ -685,7 +708,7 @@ def _answer_table(results: Sequence[dict[str, Any]]) -> list[str]:
             if metric is None:
                 continue
             lines.append(
-                f"| {label} | {_number(metric['mean'])} | "
+                f"| {label} | {number_cell(metric['mean'])} | "
                 f"{metric['scored']}/{metric['graded']} | {metric['unknown']} | "
                 f"{metric['failed']} |"
             )
@@ -725,16 +748,11 @@ def _failures(result: dict[str, Any]) -> list[dict[str, Any]]:
     """
     failed = []
     for case in result.get("cases", []):
-        grades = case.get("grades", {})
-        failed_graders = sorted(
-            name
-            for name, grade in grades.items()
-            if isinstance(grade, dict) and grade.get("outcome") == "failed"
-        )
-        if case.get("outcome") != "answered" or failed_graders:
+        rejected = failed_graders(case)
+        if case.get("outcome") != "answered" or rejected:
             row: dict[str, Any] = {"id": case["id"], "outcome": case["outcome"]}
-            if failed_graders:
-                row["failed"] = ",".join(failed_graders)
+            if rejected:
+                row["failed"] = ",".join(rejected)
             for verdict in ("verdict", "correctness_verdict"):
                 if case.get(verdict) not in (None, "correct", "faithful"):
                     row[verdict] = case.get(verdict)
@@ -890,9 +908,9 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         changed = ", ".join(f"{name}={value}" for name, value in changes.items()) or "-"
         lines.append(
             f"| `{column.id}` | {column.family} | {changed} | "
-            f"{_number(column.hit_rate)} | {_number(column.recall)} | "
-            f"{_number(column.mrr)} | {_number(column.ndcg)} | "
-            f"{_number(column.p50, 4)} | {_number(column.p95, 4)} |"
+            f"{number_cell(column.hit_rate)} | {number_cell(column.recall)} | "
+            f"{number_cell(column.mrr)} | {number_cell(column.ndcg)} | "
+            f"{number_cell(column.p50, 4)} | {number_cell(column.p95, 4)} |"
         )
     moved = _moved(results)
     lines += ["", "## Questions that moved", ""]
@@ -903,7 +921,7 @@ def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
         ]
         lines += [
             f"| `{row['experiment']}` | {row['direction']} | `{row['id']}` | "
-            f"{_number(row['delta'])} |"
+            f"{number_cell(row['delta'])} |"
             for row in moved
         ]
     else:

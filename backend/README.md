@@ -363,18 +363,6 @@ answer path with a live generator and judge. Read the tuning report for why a
 variant exists, the baseline report for what retrieval does, and the answers
 report for what a reader gets.
 
-Re-running says whether the run reproduced the published one:
-
-```bash
-uv run python -m evaluation.cli --live --ablate \
-  --report /tmp/rerun --compare-report evaluation/reports/2026-09-retrieval-baseline-v1
-```
-
-Timing and dollars are deliberately outside the manifest's digest, because they
-move on every run; what a reproduction is judged on is the retrieval numbers,
-the outcomes, the verdicts, and a changed model revision, which is reported on
-its own since a checkout cannot pin that.
-
 `--pace SECONDS` is the wait between provider calls, six seconds by default.
 A rate-limited account measures its allowance in tokens per day, and a run that
 asks for everything at once spends it and then reports the cases it could not
@@ -390,3 +378,62 @@ empty reply is what a budget that ran out looks like. The judge runs under a
 4k output budget for exactly this reason, while the app's own answers keep the
 catalog's 1k; a judge verdict that never arrives is reported Unknown, never
 scored as a zero.
+
+Re-running says whether the run reproduced the published one:
+
+```bash
+uv run python -m evaluation.cli --live --ablate \
+  --report /tmp/rerun --compare-report evaluation/reports/2026-09-retrieval-baseline-v1
+```
+
+Timing and dollars are deliberately outside the manifest's digest, because they
+move on every run; what a reproduction is judged on is the retrieval numbers,
+the outcomes, the verdicts, and a changed model revision, which is reported on
+its own since a checkout cannot pin that.
+
+### Quality, latency, and cost in one report
+
+Three numbers are usually three documents, and each can be flattered by the
+other two being missing: a quality report drops the cases that failed, a latency
+report drops the hard cases, a cost report drops what nobody was billed for. The
+digest puts all three in one place, from the same cases, so a configuration
+cannot look cheap by being asked fewer questions or fast by failing the slow
+ones. It breaks quality down by retrieval, answer, citation, abstention, and
+failure; reports p50 and p95 for retrieval, time to first token, and total
+latency, split into the run's cold start and its steady state; reports the
+recorded requests' own latency, throughput, tokens, and cost beside the run's;
+and states the local compute as what it is, seconds on the reader's own CPU
+rather than a bill.
+
+```bash
+# Re-read a report already on disk: no key, no provider, no index
+uv run python -m evaluation.cli --render evaluation/reports/2026-09-answers-baseline-v1
+
+# Add the recorded traces of real requests as the runtime half
+uv run python -m evaluation.cli \
+  --render evaluation/reports/2026-09-answers-baseline-v1 \
+  --traces data/traces/answer-traces.jsonl
+
+# Hold the result to declared bounds; exits non-zero only when one is crossed
+uv run python -m evaluation.cli \
+  --render evaluation/reports/2026-09-answers-baseline-v1 \
+  --check evaluation/thresholds.json
+```
+
+`--render` writes `digest.md` and `digest.json` into the report directory, and
+stores what it read out of the traces in `traces-summary.json` beside them: the
+raw export file stays an operator's local record, and the summary is what makes
+a second render reproduce the first without it. The bounds live in
+`evaluation/thresholds.json` as dotted paths with a `min` or a `max`; a bound
+over a number a run never measured fails the check, because a gate that passes
+what it cannot read is not a gate. A retrieval-only report is held to
+`evaluation/thresholds-retrieval.json` instead, which bounds retrieval quality
+and retrieval latency, the two things such a run measured.
+
+The `digest.md`, `digest.json`, and `traces-summary.json` under each published
+report directory are generated and committed. Re-render them whenever the report
+or the renderer changes and commit the result, the way the reports themselves
+are committed: the digest is what a reviewer reads, and a digest that only
+exists on the machine that produced it is not a report. CI renders all three
+again, uploads them as an artifact whether or not the bounds are crossed, and
+fails only on a crossed bound.
