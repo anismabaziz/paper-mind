@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings, AlertTriangle, RotateCw, RefreshCw, Square } from "lucide-react";
+import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings, AlertTriangle, RotateCw, RefreshCw, Square, Scale } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFiles, useUploadFile, useDeleteFile, useRetryIngestion, useCancelIngestion, useReindex, useTouchFileOpened } from "@/hooks/useFiles";
 import { formatFileSize } from "@/lib/format";
 import { FailureNotice } from "./FailureNotice";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
+import useBriefUi from "@/store/brief-ui";
 import useMobileUi from "@/store/mobile-ui";
+import { isBriefBlocked, isBriefReadable } from "@/services/research";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -44,11 +46,15 @@ export function LibraryRail() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openSettings = useSettingsUi((s) => s.open);
+  const openBrief = useBriefUi((s) => s.open);
   const setLibraryOpen = useMobileUi((s) => s.setLibraryOpen);
   const filesQuery = useFiles();
   const touchOpened = useTouchFileOpened();
 
   const files = filesQuery.data?.files ?? [];
+  // The same rule the brief dialog applies, so the control is offered exactly
+  // when a brief could actually be started rather than opening onto a refusal.
+  const briefable = files.filter((file) => isBriefReadable(file) && !isBriefBlocked(file));
 
   const recents = useMemo(() => {
     const opened = files.filter((f): f is DbFile & { last_opened_at: string } => f.last_opened_at != null);
@@ -500,7 +506,22 @@ export function LibraryRail() {
         )}
       </nav>
 
-      <footer className="flex justify-end border-t border-rule px-5 py-3">
+      <footer className="flex items-center justify-between border-t border-rule px-5 py-3">
+        <button
+          type="button"
+          onClick={openBrief}
+          disabled={briefable.length < 2}
+          aria-label="Start a research brief over two documents"
+          title={
+            briefable.length < 2
+              ? "A brief compares two indexed documents"
+              : "Compare two documents"
+          }
+          data-testid="open-research-brief"
+          className="inline-flex items-center gap-1.5 font-mono text-[0.6rem] text-ink-faint hover:text-marker disabled:opacity-40"
+        >
+          <Scale size={12} /> Brief
+        </button>
         <button
           type="button"
           onClick={openSettings}

@@ -1,23 +1,13 @@
 """HTTP routes for document chat and message history."""
 
-import json
 import logging
 from typing import TYPE_CHECKING
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
 from routes.common import traversal_check
-from services.accounts.chat_settings_service import (
-    SUPPORTED_MODELS,
-    SettingsError,
-    model_for,
-)
-from services.accounts.secrets_service import (
-    SecretsResaveRequiredError,
-    decrypt_api_key,
-)
+from routes.credentials import resolve_stored_provider
 from services.answering import AnswerRequest, AnswerService, Refusal
-from services.llm.base import ChatCredentials
 
 if TYPE_CHECKING:
     from composition import Services
@@ -51,137 +41,28 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         if guard is not None:
             return guard
 
-        try:
-            stored = app_settings_repository.get_app_settings()
-        except Exception as exc:
-            log.error("/response settings read failed: %s", type(exc).__name__)
-            return jsonify({"error": "Stored settings could not be read."}), 500
-        if not stored:
-            return jsonify(
-                {
-                    "error": (
-                        "No chat provider configured. Add a provider and API key "
-                        "in Settings."
-                    )
-                }
-            ), 400
-        try:
-            provider = stored["provider"]
-            model = stored["model"]
-            ciphertext = stored["encrypted_api_key"]
-        except (AttributeError, KeyError, TypeError):
-            return jsonify(
-                {
-                    "error": (
-                        "Saved provider settings are incomplete. Re-save your "
-                        "provider settings in Settings."
-                    )
-                }
-            ), 400
-        if (
-            not isinstance(provider, str)
-            or not provider
-            or not isinstance(model, str)
-            or not model
-            or not isinstance(ciphertext, str)
-            or not ciphertext
-        ):
-            return jsonify(
-                {
-                    "error": (
-                        "Saved provider settings are incomplete. Re-save your "
-                        "provider settings in Settings."
-                    )
-                }
-            ), 400
-        try:
-            api_key = decrypt_api_key(ciphertext)
-        except SecretsResaveRequiredError as exc:
-            log.warning("/response stale key derivation")
-            return jsonify({"error": str(exc), "needs_resave": True}), 400
-        except Exception as exc:
-            log.error("/response decrypt failed: %s", type(exc).__name__)
-            return jsonify(
-                {
-                    "error": (
-                        "Stored API key could not be decrypted. Re-save your "
-                        "provider settings, then try again."
-                    )
-                }
-            ), 500
-        if provider not in SUPPORTED_MODELS:
-            return jsonify(
-                {
-                    "error": (
-                        "Saved provider settings use an unsupported provider. "
-                        "Choose a current provider in Settings."
-                    )
-                }
-            ), 400
-        try:
-            model_definition = model_for(provider, model)
-        except SettingsError:
-            return jsonify(
-                {
-                    "error": (
-                        "Saved provider settings use an unsupported model. "
-                        "Choose a current model in Settings."
-                    )
-                }
-            ), 400
-        try:
-            credentials = ChatCredentials(
-                provider=provider,
-                model=model,
-                api_key=api_key,
-                verification_timeout_seconds=model_definition.timeout_seconds,
-                budget=model_definition.chat_budget(),
-            )
-            chat_provider = chat_provider_factory(credentials)
-        except ValueError as exc:
-            log.warning(
-                "/response provider error for %s: %s",
-                filename,
-                type(exc).__name__,
-            )
-            return jsonify(
-                {
-                    "error": (
-                        "Saved provider settings use an unsupported provider. "
-                        "Choose a current provider in Settings."
-                    )
-                }
-            ), 400
-        except Exception as exc:
-            log.error(
-                "/response provider build failed for %s: %s",
-                filename,
-                type(exc).__name__,
-            )
-            return jsonify({"error": "Internal server error"}), 500
-
-        def refusal_response(refusal: Refusal):
-            """Return the HTTP response for a question that was not answered."""
-            return jsonify(refusal.to_dict()), refusal.status
-
-        def stream_response(answer_service, resolved):
-            """Yield the answer path's events as server-sent events."""
-            for event in answer_service.stream(resolved):
-                yield (f"event: {event.name}\ndata: {json.dumps(event.payload)}\n\n")
+        binding = resolve_stored_provider(
+            app_settings_repository, chat_provider_factory
+        )
+        if isinstance(binding, Refusal):
+            return jsonify(binding.to_dict()), binding.status
 
         resolved = answer_service.resolve(
             AnswerRequest(
                 filename=filename,
                 query=query,
-                provider=chat_provider,
-                model=model_definition,
+                provider=binding.provider,
+                model=binding.model,
             )
         )
         if isinstance(resolved, Refusal):
-            return refusal_response(resolved)
+            return jsonify(resolved.to_dict()), resolved.status
 
         return Response(
-            stream_with_context(stream_response(answer_service, resolved)),
+            stream_with_context(
+                event.as_server_sent_event()
+                for event in answer_service.stream(resolved)
+            ),
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )

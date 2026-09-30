@@ -322,3 +322,54 @@ describe("LibraryRail stale index", () => {
     expect(screen.queryByRole("button", { name: /Reindex/ })).not.toBeInTheDocument();
   });
 });
+
+describe("LibraryRail research brief", () => {
+  const readyJob = makeJob({ state: "ready", stage: "ready", progress: 100 });
+  const manifest = makeManifest();
+  const readyIndex: DocumentIndex = {
+    state: "ready",
+    manifest,
+    runtime_manifest: manifest,
+    changes: [],
+    change_details: [],
+  };
+
+  function readyPaper(id: string, name: string, title: string, ingestion = readyJob): File {
+    return { ...makeFile(ingestion, readyIndex), id, name, title, is_processed: true };
+  }
+
+  it("offers a brief once two Documents could be read", async () => {
+    vi.mocked(getFiles).mockResolvedValue({
+      files: [readyPaper("f1", "a.pdf", "Paper A"), readyPaper("f2", "b.pdf", "Paper B")],
+    });
+    renderRail();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("open-research-brief")).not.toBeDisabled(),
+    );
+  });
+
+  it("does not offer a brief over a pair it would have to refuse", async () => {
+    vi.mocked(getFiles).mockResolvedValue({
+      files: [
+        readyPaper("f1", "a.pdf", "Paper A"),
+        readyPaper("f2", "b.pdf", "Paper B", makeJob()),
+      ],
+    });
+    renderRail();
+
+    await waitFor(() => expect(screen.getByTestId("open-research-brief")).toBeDisabled());
+  });
+
+  it("does not offer a brief over a Document whose index is stale", async () => {
+    vi.mocked(getFiles).mockResolvedValue({
+      files: [
+        readyPaper("f1", "a.pdf", "Paper A"),
+        { ...readyPaper("f2", "b.pdf", "Paper B"), index: makeStaleIndex() },
+      ],
+    });
+    renderRail();
+
+    await waitFor(() => expect(screen.getByTestId("open-research-brief")).toBeDisabled());
+  });
+});

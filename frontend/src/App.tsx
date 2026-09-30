@@ -4,6 +4,7 @@ import { LibraryRail } from "@/components/papermind/LibraryRail";
 import { ReaderPane } from "@/components/papermind/ReaderPane";
 import { ChatPane } from "@/components/papermind/ChatPane";
 import SettingsDialog from "./app/settings-dialog";
+import { ResearchBriefDialog } from "@/components/papermind/ResearchBriefDialog";
 import { useEscapeKey } from "@/hooks/useEscape";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import useMobileUi from "@/store/mobile-ui";
@@ -73,6 +74,7 @@ export default function App() {
       )}
 
       <SettingsDialog />
+      <ResearchBriefDialog />
     </div>
   );
 }

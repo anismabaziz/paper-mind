@@ -286,6 +286,39 @@ class IngestionSettings(BaseSettings):
     )
 
 
+class ResearchSettings(BaseSettings):
+    """
+    Spend ceilings for one Research Brief.
+
+    A brief lets a model choose what to read next, which is the property that
+    makes it able to spend without being asked. These are the bounds that keep
+    one question from becoming an unbounded bill, and they are per brief rather
+    than per session so a reader sees the same ceiling whatever they are doing.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    #: How many times the model may think before a brief is stopped.
+    max_turns: int = Field(default=6, ge=1, validation_alias="RESEARCH_MAX_TURNS")
+    #: How many tool calls one brief may make, which is what bounds retrieval.
+    max_tool_calls: int = Field(
+        default=8, ge=1, validation_alias="RESEARCH_MAX_TOOL_CALLS"
+    )
+    #: How many times one identical call may be made. A model stuck in a loop
+    #: re-asks rather than alternating, so this is what catches that.
+    max_repeated_calls: int = Field(
+        default=2, ge=1, validation_alias="RESEARCH_MAX_REPEATED_CALLS"
+    )
+    #: What one brief may bill across every turn.
+    max_tokens: int = Field(
+        default=120_000, ge=1, validation_alias="RESEARCH_MAX_TOKENS"
+    )
+    #: What a reader waits before a brief is stopped between turns.
+    max_seconds: float = Field(
+        default=120.0, ge=1.0, validation_alias="RESEARCH_MAX_SECONDS"
+    )
+
+
 class TelemetrySettings(BaseSettings):
     """
     Traces for the answer path: where they go, and what they may contain.
@@ -359,6 +392,7 @@ class Settings(BaseSettings):
     auth: AuthSettings = Field(default_factory=AuthSettings)
     upload: UploadSettings = Field(default_factory=UploadSettings)
     ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
+    research: ResearchSettings = Field(default_factory=ResearchSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     frontend: FrontendSettings = Field(default_factory=FrontendSettings)
 

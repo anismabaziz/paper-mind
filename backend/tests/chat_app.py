@@ -90,6 +90,9 @@ class _Vectors:
         """Start with one grounded match, or whatever a test scripts in."""
         self.matches: list[dict[str, Any]] = [DEFAULT_MATCH]
         self.raise_with: BaseException | None = None
+        #: Every retrieval this stand-in was asked for, so a test can assert a
+        #: refused tool never reached the store rather than inferring it.
+        self.queries: list[Any] = []
 
     def script(self, *matches: dict[str, Any]) -> None:
         """Return exactly these matches for the next questions."""
@@ -106,6 +109,7 @@ class _Vectors:
         self, embedding, filename, top_k=FETCH_K, query_text=None, **kwargs
     ):
         """Return the scripted matches, or raise what the test scripted."""
+        self.queries.append({"filename": filename, "query_text": query_text})
         if self.raise_with is not None:
             raise self.raise_with
         sources = [dict(match) for match in self.matches]
