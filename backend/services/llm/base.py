@@ -17,10 +17,18 @@ factory map.
 
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from queue import Empty, Full, Queue
 from threading import Thread
 from typing import Callable, Generator, Iterator, TypeVar, cast
+
+from services.llm.tools import (
+    ToolMessage,
+    ToolSpec,
+    ToolTurn,
+    ToolUseUnsupportedError,
+)
 
 #: Bound for verify round-trips so a hung provider cannot hang the route.
 VERIFY_TIMEOUT_SECONDS = 15.0
@@ -417,6 +425,73 @@ class LLMProvider(ABC):
             queue.put_nowait(item)
         except Full:
             pass
+
+    def complete_with_tools(
+        self,
+        messages: Sequence[ToolMessage],
+        tools: Sequence[ToolSpec],
+        *,
+        system_instruction: str = "",
+    ) -> ToolTurn:
+        """
+        Run one turn of a tool-using conversation and return what the model did.
+
+        The two ways this can end without a turn are raised rather than returned
+        so the caller can tell them apart, exactly as ``stream_response`` does:
+        ``ProviderTimeoutError`` when the model overruns its timeout, and
+        ``ToolUseUnsupportedError`` when the provider has no implementation for
+        tool calls at all. A turn that produced neither prose nor a call is
+        returned as an empty :class:`ToolTurn`, because that is a model decision
+        the caller has to see rather than an exception the SDK raised.
+
+        The call is bounded by the same deadline policy as a stream: a model that
+        stalls mid-tool-loop cannot hold the route open, and the retry the stream
+        gets before its first visible fragment is the retry this gets too, since
+        nothing has been shown to the reader when a tool turn completes.
+        """
+        deadline = time.monotonic() + self.budget.timeout_seconds
+        self.last_attempts = 0
+        for attempt in range(1, STREAM_ATTEMPTS + 1):
+            self.last_attempts = attempt
+            self.last_finish_reason = None
+            try:
+                turn = call_with_timeout(
+                    lambda: self._complete_with_tools(
+                        messages, tools, system_instruction
+                    ),
+                    max(deadline - time.monotonic(), 0.0),
+                )
+            except ToolUseUnsupportedError:
+                raise
+            except TimeoutError as error:
+                raise ProviderTimeoutError(
+                    f"{self.name} exceeded {self.budget.timeout_seconds:.1f}s"
+                ) from error
+            except Exception as error:
+                if attempt >= STREAM_ATTEMPTS or not is_transient_error(error):
+                    raise
+                continue
+            self.last_finish_reason = turn.finish_reason
+            return turn
+        raise ProviderTimeoutError(
+            f"{self.name} exceeded {self.budget.timeout_seconds:.1f}s"
+        )
+
+    def _complete_with_tools(
+        self,
+        messages: Sequence[ToolMessage],
+        tools: Sequence[ToolSpec],
+        system_instruction: str,
+    ) -> ToolTurn:
+        """
+        Run one tool-using turn via the provider SDK.
+
+        The default raises :class:`ToolUseUnsupportedError` rather than
+        NotImplementedError: a provider that has not written this yet is a
+        capability the catalog declares it does or does not have, and the caller
+        turns that into a refusal before it ever reaches a loop.
+        """
+        raise ToolUseUnsupportedError(f"{self.name} cannot run tool-using calls")
 
     @abstractmethod
     def verify(self) -> None:

@@ -93,6 +93,30 @@ class ModelCapabilities:
             complete_finish_reasons=frozenset(self.complete_finish_reasons),
         )
 
+    def research_brief_blockers(self) -> tuple[str, ...]:
+        """
+        Return which capabilities this model lacks for a Research Brief.
+
+        A brief is a model choosing which passages to read and writing a result
+        against them, so it needs tool use to choose and structured output to
+        write. Asking a model without either is not a degraded brief: without
+        tool use the loop cannot run at all, and without structured output the
+        result cannot be read back as the brief's own shape. The names are the
+        capabilities the catalog already publishes, so a refusal names what to
+        look for in Settings rather than inventing a new vocabulary.
+        """
+        missing = []
+        if not self.tool_use:
+            missing.append("tool_use")
+        if not self.structured_output:
+            missing.append("structured_output")
+        return tuple(missing)
+
+    @property
+    def supports_research_brief(self) -> bool:
+        """Report whether a Research Brief may run on this model."""
+        return not self.research_brief_blockers()
+
 
 MODEL_CATALOG = (
     ModelCapabilities(

@@ -39,6 +39,11 @@ def _sanitize(value: str) -> str:
     return value
 
 
+#: Public alias. The brief frames its own sections, and a framing that could be
+#: escaped out of is the same bug in a different prompt.
+sanitize = _sanitize
+
+
 def build_user_prompt(context: str, query: str, prior_turns: str = "") -> str:
     """
     Frame untrusted context, prior turns, and the current question.

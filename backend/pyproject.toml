@@ -60,6 +60,7 @@ files = [
     "repositories",
     "routes",
     "services/answering.py",
+    "services/brief",
     "services/chat_context.py",
     "services/citations.py",
     "services/deletion.py",

@@ -13,6 +13,11 @@ from services.indexing.manifest import (
 )
 from settings import Settings
 
+#: Job states that mean the Document's vectors are being rewritten right now.
+#: Named here so every path that judges a Document's readability agrees on which
+#: job states count as a reindex in flight.
+REINDEXING_STATES = ("queued", "running", "cancelling")
+
 # States a Document's index can be in from the reader's point of view.
 READY = "ready"
 STALE = "stale"

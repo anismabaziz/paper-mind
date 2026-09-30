@@ -18,6 +18,7 @@ the evaluator reads them as case outcomes.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable, Iterator
@@ -41,6 +42,12 @@ from services.citations import (
 )
 from services.deletion import deletion_block_payload, is_deleting_record
 from services.indexing.manifest import manifest_from_json
+from services.indexing.readiness import (
+    CHAT_REFUSAL_MESSAGES,
+    UNREADABLE_DELETING,
+    UNREADABLE_STALE,
+    document_refusal,
+)
 from services.indexing.state import index_status
 from services.llm.base import EmptyAnswerError, LLMProvider, ProviderTimeoutError
 from services.retrieval.base import (
@@ -70,9 +77,6 @@ from settings import Settings
 log = logging.getLogger(__name__)
 
 MAX_QUERY_CHARS = 8192
-
-#: Job states that mean the Document's vectors are being rewritten right now.
-REINDEXING_STATES = ("queued", "running", "cancelling")
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,17 @@ class AnswerEvent:
 
     name: str
     payload: dict[str, Any]
+
+    def as_server_sent_event(self) -> str:
+        """
+        Return this event as the one server-sent event block it is.
+
+        Both streams the application serves — a chat answer and a Research
+        Brief — write the same framing, and the client parses the same framing.
+        Encoding it here rather than in each route is what keeps the two from
+        drifting into protocols a client can read one of and not the other.
+        """
+        return f"event: {self.name}\ndata: {json.dumps(self.payload)}\n\n"
 
 
 @dataclass(frozen=True)
@@ -470,48 +485,36 @@ class AnswerService:
             resolved.trace.finish()
 
     def _refuse_unanswerable(self, request: AnswerRequest) -> Refusal | None:
-        """Return the refusal that stops a question before retrieval."""
-        file_record = self.files.get_file(request.filename)
-        if not file_record:
-            return Refusal(404, "file_not_found", "File not found")
-        if is_deleting_record(file_record):
-            return deletion_block_refusal(file_record)
-        ingestion_job = self._repositories.ingestion_jobs.get_latest(request.filename)
-        if (
-            file_record.get("is_processed")
-            and ingestion_job
-            and ingestion_job["state"] in REINDEXING_STATES
-        ):
-            return Refusal(
-                409,
-                "document_indexing",
-                "This document is being reindexed. Try again when indexing finishes.",
-                {"job": ingestion_job},
-            )
-        # A stale index still holds vectors, but they were built with a parser,
-        # model, or collection schema the app no longer serves, so querying it
-        # would answer from an incompatible index. A document that was never
-        # indexed has nothing to query either.
-        state = index_status(self.files, file_record, self._settings)
-        if state.is_stale:
+        """
+        Return the refusal that stops a question before retrieval.
+
+        Whether a Document can be read is judged in one place for every path
+        that reads Documents; what is added here is how a question about it
+        reads, since that is what this route's reader is waiting on.
+        """
+        unreadable = document_refusal(
+            self._repositories, self._settings, request.filename
+        )
+        if unreadable is None:
+            return None
+        if unreadable.category == UNREADABLE_DELETING:
+            # The deletion payload names the retry as well as the block, so it
+            # speaks for itself rather than being reworded here.
+            return deletion_block_refusal(self.files.get_file(request.filename))
+        if unreadable.category == UNREADABLE_STALE:
+            index = unreadable.detail.get("index") or {}
             log.info(
-                "chat refused for stale index %s: %s", request.filename, state.changes
+                "/response refused for stale index %s: %s",
+                request.filename,
+                index.get("changes"),
             )
-            return Refusal(
-                409,
-                "index_stale",
-                "This document's index no longer matches the current settings. "
-                "Reindex it to ask questions again.",
-                {"action": "reindex", "index": state.to_dict(self._settings)},
-            )
-        if state.state == "pending":
-            return Refusal(
-                409,
-                "index_pending",
-                "This document is not indexed yet. Index it to ask questions.",
-                {"action": "reindex", "index": state.to_dict(self._settings)},
-            )
-        return None
+        status, message = CHAT_REFUSAL_MESSAGES[unreadable.category]
+        return Refusal(
+            status,
+            unreadable.category,
+            message,
+            unreadable.detail,
+        )
 
     def _retrieve_context(
         self,
@@ -640,9 +643,7 @@ class AnswerService:
             return False
         return not is_deleting_record(current)
 
-    def _record_outcome(
-        self, filename: str, record: Callable[..., Any], *args: Any
-    ):
+    def _record_outcome(self, filename: str, record: Callable[..., Any], *args: Any):
         """Apply one terminal Turn outcome unless the Document is gone."""
         try:
             if not self._still_present(filename):
@@ -707,9 +708,7 @@ class AnswerService:
                 resolved.request.filename,
             )
             resolved.trace.fail(PERSISTENCE, error_category(exc))
-            resolved.trace.persistence(
-                PERSISTENCE_ERROR, turn_id=resolved.turn_id
-            )
+            resolved.trace.persistence(PERSISTENCE_ERROR, turn_id=resolved.turn_id)
             yield AnswerEvent(
                 "persistence_error",
                 {"error": "The answer could not be saved. Please ask again."},

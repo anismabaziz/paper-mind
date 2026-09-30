@@ -244,7 +244,7 @@ const ABSTENTION_REASONS: ChatAbstentionReason[] = ["no_evidence", "evidence_unu
 const ENDED_WITHOUT_ANSWER =
   "The answer stream ended before it finished. Please ask the question again.";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -331,6 +331,54 @@ function dispatch(
   }
 }
 
+/**
+ * Read a server-sent event body and hand each event to one dispatcher.
+ *
+ * Both streams this app serves — a chat answer and a Research Brief — are the
+ * same framing read the same way, and a reader of one that could not read the
+ * other would be a bug in the client rather than in either protocol. The
+ * dispatcher returns whether the event ended the stream, because a terminal
+ * event ends it and anything after it is not an answer.
+ */
+export async function readEventStream(
+  body: ReadableStream<Uint8Array>,
+  dispatch: (event: { name: string; data: Record<string, unknown> }) => boolean,
+  unreadable: string,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundary;
+      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (isKeepAlive(block)) continue;
+        const event = parseSSEBlock(block);
+        if (!event) {
+          throw new StreamProtocolError(unreadable);
+        }
+        if (dispatch(event)) {
+          finished = true;
+          break;
+        }
+      }
+      if (finished) break;
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+
+  if (!finished) throw new StreamProtocolError(ENDED_WITHOUT_ANSWER);
+}
+
 export async function chatStream(
   query: string,
   filename: string,
@@ -351,43 +399,15 @@ export async function chatStream(
     throw new Error(message?.error ?? `Request failed (${response.status})`);
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let finished = false;
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let boundary;
-      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
-        const block = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        if (isKeepAlive(block)) continue;
-        const event = parseSSEBlock(block);
-        if (!event) {
-          throw new StreamProtocolError("The stream sent an unreadable event.");
-        }
-        // A terminal event ends the stream; anything after it is not an answer.
-        if (dispatch(event, handlers)) {
-          finished = true;
-          break;
-        }
-      }
-      if (finished) break;
-    }
-  } finally {
-    reader.releaseLock?.();
-  }
-
-  if (!finished) throw new StreamProtocolError(ENDED_WITHOUT_ANSWER);
+  await readEventStream(
+    response.body,
+    (event) => dispatch(event, handlers),
+    "The stream sent an unreadable event.",
+  );
 }
 
 /** A block carrying only comment lines keeps the connection warm, not a message. */
-function isKeepAlive(block: string): boolean {
+export function isKeepAlive(block: string): boolean {
   const lines = block.split("\n").filter((line) => line.trim() !== "");
   return lines.length > 0 && lines.every((line) => line.startsWith(":"));
 }
