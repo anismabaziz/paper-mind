@@ -361,7 +361,102 @@ describe("ChatPane answer outcomes", () => {
     expect(
       screen.getByText("The answer stream ended before it finished."),
     ).toBeInTheDocument();
+    expect(screen.getByText("The answer was interrupted")).toBeInTheDocument();
+    expect(outcomeOf("Synthesis · failed")).toBe("interrupted");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.queryByText(/Reading passages/)).not.toBeInTheDocument();
+  });
+
+  it("names a retrieval outage as unavailable search with its own retry", async () => {
+    vi.mocked(chatStream).mockRejectedValue(new Error("Vector store is unavailable"));
+    renderPane();
+    const input = await screen.findByPlaceholderText(/Ask this paper something/);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "what?" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    expect(screen.getByText("Search is unavailable")).toBeInTheDocument();
+    expect(outcomeOf("Synthesis · failed")).toBe("retrieval_unavailable");
+    expect(screen.getByRole("button", { name: "Retry search" })).toBeInTheDocument();
+  });
+
+  it("retries a failed question as a new turn", async () => {
+    vi.mocked(chatStream).mockRejectedValueOnce(new Error("Vector store is unavailable"));
+    vi.mocked(chatStream).mockImplementationOnce(async (_query, _file, handlers) => {
+      handlers.onDone?.({ sources: [], claims: [], grounded: false, promptVersion: "grounded-claims-v1", truncated: false, finishReason: "stop" });
+    });
+    renderPane();
+    const input = await screen.findByPlaceholderText(/Ask this paper something/);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "what?" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry search" }));
+    });
+
+    await waitFor(() => expect(vi.mocked(chatStream)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(chatStream).mock.calls[1][0]).toBe("what?");
+  });
+
+  it("pauses instead of indexing when the status check fails with no confirmed state", async () => {
+    vi.mocked(checkIsProcessed).mockRejectedValue(new Error("status down"));
+    renderPane();
+
+    expect(await screen.findByTestId("chat-status-error")).toBeInTheDocument();
+    expect(screen.getByText(/Could not check this paper/)).toBeInTheDocument();
+    expect(screen.queryByText(/Indexing Document/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the last confirmed state when a status refresh fails", async () => {
+    vi.mocked(checkIsProcessed).mockResolvedValue({
+      is_processed: true,
+      ingestion: null,
+      index: { state: "ready", manifest, runtime_manifest: manifest, changes: [], change_details: [] },
+    });
+    const queryClient = renderPane();
+    expect(await screen.findByPlaceholderText(/Ask this paper something/)).toBeInTheDocument();
+    queryClient.setQueryData(["files", "doc.pdf", "is-processed"], undefined);
+    vi.mocked(checkIsProcessed).mockRejectedValueOnce(new Error("refresh down"));
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["files", "doc.pdf", "is-processed"] });
+    });
+
+    expect(await screen.findByTestId("chat-status-stale")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Ask this paper something/)).toBeEnabled();
+  });
+
+  it("offers a Conversation retry instead of an empty session when the Conversation fails", async () => {
+    vi.mocked(getMessages).mockRejectedValue(new Error("conversation down"));
+    renderPane();
+
+    expect(await screen.findByTestId("chat-conversation-error")).toBeInTheDocument();
+    expect(screen.queryByText("Session Initialized")).not.toBeInTheDocument();
+  });
+
+  it("names missing App Settings as its own outcome, not an interrupted stream", async () => {
+    vi.mocked(chatStream).mockRejectedValue(new Error("No chat provider configured."));
+    renderPane();
+    const input = await screen.findByPlaceholderText(/Ask this paper something/);
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "what?" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+
+    expect(screen.getByText("No chat provider is configured")).toBeInTheDocument();
+    expect(outcomeOf("Synthesis · failed")).toBe("settings");
+    expect(screen.getByRole("button", { name: "Open Settings" })).toBeInTheDocument();
+    expect(screen.queryByText("The answer was interrupted")).not.toBeInTheDocument();
+  });
+
+  it("withholds citations on a failed answer", async () => {
+    await ask((h) => h.onProviderError?.("The model is unavailable.", "provider"));
+
+    expect(screen.getByText("The model could not answer")).toBeInTheDocument();
+    expect(screen.queryByText(/passages/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("source-jump-S1")).not.toBeInTheDocument();
   });
 
   it("does not carry a late token into the next document", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { chatStream, StreamProtocolError } from "./files";
+import { chatStream, classifyChatRequestError, StreamProtocolError } from "./files";
 
 function sseStream(blocks: string[]): Response {
   const encoder = new TextEncoder();
@@ -371,6 +371,39 @@ describe("chatStream", () => {
 
     expect(onToken).toHaveBeenCalledWith("split");
     expect(onDone).toHaveBeenCalled();
+  });
+
+  it("classifies a vector-store failure as unavailable retrieval, not a model failure", () => {
+    expect(classifyChatRequestError(new Error("Vector store is unavailable")).failure).toBe(
+      "retrieval_unavailable",
+    );
+    expect(
+      classifyChatRequestError(new Error("vector_dimension_mismatch: 1024 != 768")).failure,
+    ).toBe("retrieval_unavailable");
+  });
+
+  it("does not file a provider failure as a dead search just for mentioning retrieval", () => {
+    expect(
+      classifyChatRequestError(
+        new Error("The provider rejected the retrieval prompt."),
+      ).failure,
+    ).toBe("interrupted");
+  });
+
+  it("classifies missing App Settings as its own outcome", () => {
+    expect(
+      classifyChatRequestError(new Error("No chat provider configured.")).failure,
+    ).toBe("settings");
+    expect(
+      classifyChatRequestError(new Error("No chat provider configured.")).needsSettings,
+    ).toBe(true);
+  });
+
+  it("classifies a broken stream as interrupted", () => {
+    expect(
+      classifyChatRequestError(new StreamProtocolError("The answer stream ended before it finished.")).failure,
+    ).toBe("interrupted");
+    expect(classifyChatRequestError(new Error("Connection lost.")).failure).toBe("interrupted");
   });
 
   it("surfaces a failed response as the message the server sent", async () => {

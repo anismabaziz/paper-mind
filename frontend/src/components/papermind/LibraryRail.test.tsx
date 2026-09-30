@@ -244,6 +244,29 @@ describe("LibraryRail ingestion state", () => {
   });
 });
 
+describe("LibraryRail library request failure", () => {
+  it("shows a retryable error instead of an empty library", async () => {
+    vi.mocked(getFiles).mockRejectedValue(new Error("library down"));
+    renderRail();
+
+    expect(await screen.findByTestId("library-error")).toBeInTheDocument();
+    expect(screen.getByText("Could not load your library")).toBeInTheDocument();
+    expect(screen.getByText(/not an empty library/)).toBeInTheDocument();
+    expect(screen.queryByTestId("library-empty")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("library-list")).not.toBeInTheDocument();
+  });
+
+  it("retries the library request", async () => {
+    vi.mocked(getFiles).mockRejectedValueOnce(new Error("library down"));
+    vi.mocked(getFiles).mockResolvedValueOnce({ files: [] });
+    renderRail();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Retry library load/ }));
+
+    await waitFor(() => expect(screen.getByTestId("library-empty")).toBeInTheDocument());
+  });
+});
+
 describe("LibraryRail stale index", () => {
   const readyJob = makeJob({ state: "ready", stage: "ready", progress: 100 });
 

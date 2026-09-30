@@ -49,4 +49,31 @@ describe("usePdfFileData buffer ownership", () => {
     act(() => result.current.reload());
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(calls));
   });
+
+  it("reports a download failure instead of an endless loader", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 500 }) as Response),
+    );
+    const { result } = renderHook(() =>
+      usePdfFileData({ id: "doc-a", url: "http://localhost/storage/a.pdf" }),
+    );
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toMatch(/Failed to load PDF \(500\)/);
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it("clears the failure so a retry fetches again", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 500 }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() =>
+      usePdfFileData({ id: "doc-a", url: "http://localhost/storage/a.pdf" }),
+    );
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    const calls = fetchMock.mock.calls.length;
+    act(() => result.current.reload());
+    expect(result.current.error).toBeNull();
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(calls));
+  });
 });

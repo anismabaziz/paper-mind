@@ -34,6 +34,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { ThumbnailPlaceholder } from "./PageStripPlaceholder";
+import { FailureNotice } from "./FailureNotice";
 
 const ReaderDocument = lazy(() => import("./ReaderDocument"));
 const PageStrip = lazy(() => import("./PageStrip"));
@@ -55,7 +56,7 @@ export function ReaderPane() {
   // Single owner of the fetched bytes. Each lazy Renderer (sheet, strip) clones
   // its own copy; unmounting a Renderer releases its clone and switching
   // Documents drops the source, so previous buffers are never retained.
-  const { data: fileData, reload: reloadFileData } = usePdfFileData(file);
+  const { data: fileData, error: fileDataError, reload: reloadFileData } = usePdfFileData(file);
 
   // Reopening the strip remounts its Document. If the worker already
   // detached the source, refetch fresh bytes so thumbnails reload instead of
@@ -224,6 +225,29 @@ export function ReaderPane() {
           </p>
         </div>
       )}
+      {file && checkProcessedQuery.isError && checkProcessedQuery.data && (
+        <div className="border-b border-rule bg-background px-5 py-2">
+          <FailureNotice
+            testId="reader-status-stale"
+            variant="stale"
+            title="Showing the last confirmed state"
+            message="This document's indexing status could not be refreshed. Nothing changed on the server."
+            actionLabel="Refresh status"
+            onAction={() => checkProcessedQuery.refetch()}
+          />
+        </div>
+      )}
+      {file && checkProcessedQuery.isError && !checkProcessedQuery.data && (
+        <div className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
+          <FailureNotice
+            testId="reader-status-error"
+            title="Could not check indexing status"
+            message={`Questions are paused, not indexing — no confirmed state is available. ${checkProcessedQuery.error instanceof Error ? checkProcessedQuery.error.message : "The status request failed."}`}
+            actionLabel="Retry status check"
+            onAction={() => checkProcessedQuery.refetch()}
+          />
+        </div>
+      )}
       {deleteMutation.isError && file && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
           <p className="text-xs font-medium text-destructive">Delete failed — the document was kept.</p>
@@ -377,9 +401,25 @@ export function ReaderPane() {
             <div ref={outlineStripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 <span className="label-meta shrink-0 pr-2">Contents</span>
                 {outline.length === 0 ? (
-                  <span className="font-mono text-[0.68rem] text-ink-faint">
-                    {metaQuery.isLoading ? "Loading outline…" : "No outline"}
-                  </span>
+                  metaQuery.isError ? (
+                    <span className="flex items-center gap-2">
+                      <span role="alert" className="font-mono text-[0.68rem] text-destructive">
+                        Outline unavailable —{" "}
+                        {metaQuery.error instanceof Error ? metaQuery.error.message : "could not load outline."}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => metaQuery.refetch()}
+                        className="border border-rule bg-paper px-2 py-0.5 font-mono text-[0.62rem] text-ink-soft hover:border-ink hover:text-ink"
+                      >
+                        Retry
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="font-mono text-[0.68rem] text-ink-faint">
+                      {metaQuery.isLoading ? "Loading outline…" : "No outline"}
+                    </span>
+                  )
                 ) : (
                   outline.map((o, idx) => (
                     <button
@@ -495,6 +535,32 @@ export function ReaderPane() {
                 </div>
                 <div className="relative bg-canvas p-3">
                   <div className="overflow-hidden border border-rule bg-white">
+                    {fileDataError ? (
+                      <div className="grid min-h-[760px] place-items-center bg-white p-6 text-center" data-testid="reader-download-error">
+                        <div>
+                          <FailureNotice
+                            title="Could not download this document"
+                            message={`${fileDataError} The document is still in your library — this is a download failure, not a missing document.`}
+                          />
+                          <div className="mt-3 flex items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => reloadFileData()}
+                              className="inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
+                            >
+                              <RotateCw className="size-3" /> Retry download
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLibraryOpen(true)}
+                              className="inline-flex items-center gap-1.5 border border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] text-ink-soft hover:border-ink hover:text-ink"
+                            >
+                              Choose another document
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
                     <Suspense
                       fallback={
                         <div className="grid h-[760px] place-items-center bg-white">
@@ -510,8 +576,10 @@ export function ReaderPane() {
                         activePage={page}
                         flashedPage={flashedPage}
                         pendingPage={pendingCitation?.page ?? null}
+                        onRenderError={reloadFileData}
                       />
                     </Suspense>
+                    )}
                   </div>
                   {(!isProcessed || isJobActive) && (
                     <div className="absolute inset-3 grid place-items-center bg-paper/70 backdrop-blur-[1px]">

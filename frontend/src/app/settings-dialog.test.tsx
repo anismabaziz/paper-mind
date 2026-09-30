@@ -165,6 +165,62 @@ describe("SettingsDialog", () => {
     });
   });
 
+  it("offers a retry when saved settings fail to load", async () => {
+    vi.mocked(getSettings).mockRejectedValue(new Error("settings down"));
+    renderDialog();
+
+    expect(await screen.findByTestId("settings-retry")).toBeInTheDocument();
+    expect(screen.getByText(/Saved settings were left unchanged/)).toBeInTheDocument();
+
+    vi.mocked(getSettings).mockResolvedValue(emptySettings);
+    fireEvent.click(screen.getByTestId("settings-retry"));
+
+    await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps the candidate typed after a failed save without restoring anything", async () => {
+    vi.mocked(saveSettings).mockRejectedValue(
+      Object.assign(new Error("Request failed"), {
+        response: { data: { error: "Settings were not changed." } },
+      }),
+    );
+    renderDialog();
+    await screen.findByRole("dialog");
+
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "google" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: model.id } });
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-rejected" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Settings were not changed.")).toBeInTheDocument();
+    // The rejected candidate stays editable so it can be corrected, and the
+    // masked key of the working configuration is never overwritten with it.
+    expect(screen.getByLabelText("API key")).toHaveValue("sk-rejected");
+    expect(screen.getByLabelText("Provider")).toHaveValue("google");
+    expect(screen.getByLabelText("Model")).toHaveValue(model.id);
+  });
+
+  it("keeps the candidate typed after a failed verification", async () => {
+    vi.mocked(verifySettings).mockRejectedValue(
+      Object.assign(new Error("Request failed"), {
+        response: { data: { error: "Could not run the connection test." } },
+      }),
+    );
+    renderDialog();
+    await screen.findByRole("dialog");
+
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "google" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: model.id } });
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-rejected" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+
+    expect(
+      await screen.findByText("Could not run the connection test."),
+    ).toBeInTheDocument();
+    expect(saveSettings).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("API key")).toHaveValue("sk-rejected");
+  });
+
   it("clears the API key and feedback when closed", async () => {
     vi.mocked(verifySettings).mockResolvedValue({
       ok: false,

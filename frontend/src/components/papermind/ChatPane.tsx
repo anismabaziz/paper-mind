@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, RefreshCw, Settings, FileText } from "lucide-react";
-import { chatStream, type ChatAbstentionReason, type ChatFailureCategory, type IClaim, type IRetrievalResult, type ISource } from "@/services/files";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUp, ChevronDown, CornerDownLeft, Loader2, RefreshCw, RotateCw, Settings, FileText } from "lucide-react";
+import { chatStream, classifyChatRequestError, isSettingsFailureMessage, type ChatAbstentionReason, type ChatOutcomeFailure, type IClaim, type IRetrievalResult, type ISource } from "@/services/files";
 import { useFileStatus, useFileMessages, useReindex } from "@/hooks/useFiles";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { FailureNotice } from "./FailureNotice";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
 import { cn } from "@/lib/utils";
@@ -26,11 +27,13 @@ type ChatMessage = {
   /** Why the answer was stopped, when the server said. */
   stopReason?: string;
   /** Which outcome ended this answer, for styling and for tests. */
-  failure?: ChatFailureCategory | "persistence";
+  failure?: ChatOutcomeFailure;
   /** The app answered without a model call: there was no evidence. */
   abstained?: boolean;
   /** Why it abstained, which decides what the reader can do next. */
   abstentionReason?: ChatAbstentionReason;
+  /** The question this answer was started for, so a failure can offer a retry. */
+  question?: string;
 };
 
 /**
@@ -68,8 +71,58 @@ function describe(m: ChatMessage): Outcome {
   return GROUNDED;
 }
 
-const SETTINGS_ERROR_PATTERNS = ["No chat provider configured", "Re-save your provider settings"];
-const isSettingsError = (message: string) => SETTINGS_ERROR_PATTERNS.some((p) => message.includes(p));
+/** Settings failures are decided once, where the refusal reasons are named. */
+const isSettingsError = isSettingsFailureMessage;
+
+/**
+ * What each failure means and what the reader can do next.
+ *
+ * Every failed answer keeps this shape: a heading the server did not write,
+ * the server's safe message, one recovery action, and no citation list. A
+ * failed answer never renders as grounded, however much text arrived first.
+ */
+const FAILURE_COPY: Record<ChatOutcomeFailure, { heading: string; hint: string; retryLabel: string }> = {
+  provider: {
+    heading: "The model could not answer",
+    hint: "The paper was searched but the model call failed. Your question is kept — try it again.",
+    retryLabel: "Ask again",
+  },
+  timeout: {
+    heading: "The answer took too long",
+    hint: "The model call was stopped before it finished. A narrower question usually completes faster.",
+    retryLabel: "Try again",
+  },
+  empty_output: {
+    heading: "The model returned nothing",
+    hint: "The model call finished with no text. Rephrase the question and try again.",
+    retryLabel: "Try again",
+  },
+  citations: {
+    heading: "The answer cited evidence it was not given",
+    hint: "The model named a passage outside what was retrieved, so the answer was withheld rather than shown ungrounded. Ask again — nothing here is cited.",
+    retryLabel: "Ask again",
+  },
+  retrieval_unavailable: {
+    heading: "Search is unavailable",
+    hint: "The paper could not be searched right now, so no model was asked. Wait a moment, then try the question again.",
+    retryLabel: "Retry search",
+  },
+  persistence: {
+    heading: "The answer could not be saved",
+    hint: "The answer arrived but storing it failed, so this Conversation does not include it. Ask the question again to store a fresh answer.",
+    retryLabel: "Ask again",
+  },
+  interrupted: {
+    heading: "The answer was interrupted",
+    hint: "The connection broke before the answer finished. What arrived is not saved as a complete answer — try the question again.",
+    retryLabel: "Try again",
+  },
+  settings: {
+    heading: "No chat provider is configured",
+    hint: "The question was never sent to a model. Verify a provider and API key in App Settings, then ask the question again.",
+    retryLabel: "Ask again",
+  },
+};
 
 const suggestedPrompts = [
   "What is the main topic?",
@@ -345,13 +398,14 @@ export function ChatPane() {
     inputRef.current?.focus();
   }, [file]);
 
-  async function send(text: string) {
+  const send = useCallback(
+    async (text: string) => {
     const body = text.trim();
     if (!body || !file || thinking || isIndexing) return;
     setValue("");
     setThinking(true);
     const botId = crypto.randomUUID();
-    setMessages((m) => [...m, { id: crypto.randomUUID(), text: body, sender: "user" }, { id: botId, text: "", sender: "bot" }]);
+    setMessages((m) => [...m, { id: crypto.randomUUID(), text: body, sender: "user" }, { id: botId, text: "", sender: "bot", question: body }]);
 
     streamControllerRef.current?.abort();
     const controller = new AbortController();
@@ -455,16 +509,14 @@ export function ChatPane() {
         setThinking(false);
         return;
       }
-      const message = e instanceof Error ? e.message : "";
+      // A rejected request is never an empty answer: classify it so a dead
+      // search, missing App Settings, and a broken stream each read
+      // differently and offer the right recovery.
+      const { failure, message, needsSettings } = classifyChatRequestError(e);
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === botId
-            ? {
-                ...msg,
-                text: message || "Connection lost. Please ensure the backend server is active.",
-                failed: true,
-                needsSettings: isSettingsError(message),
-              }
+            ? { ...msg, text: message, failed: true, failure, needsSettings }
             : msg,
         ),
       );
@@ -472,7 +524,9 @@ export function ChatPane() {
       setThinking(false);
       inputRef.current?.focus();
     }
-  }
+    },
+    [file, thinking, isIndexing],
+  );
 
   const isProcessed = checkProcessedQuery.data?.is_processed;
   const inputDisabled = !file || !isProcessed || isIndexing || isStaleIndex;
@@ -508,7 +562,28 @@ export function ChatPane() {
           </div>
         )}
 
-        {file && (!isProcessed || isIndexing) && (
+        {file && checkProcessedQuery.isError && !checkProcessedQuery.data && (
+          <FailureNotice
+            testId="chat-status-error"
+            title="Could not check this paper"
+            message={`The last confirmed state is not available, so questions are paused instead of guessing. ${checkProcessedQuery.error instanceof Error ? checkProcessedQuery.error.message : "The status request failed."}`}
+            actionLabel="Retry status check"
+            onAction={() => checkProcessedQuery.refetch()}
+          />
+        )}
+
+        {file && checkProcessedQuery.data && checkProcessedQuery.isError && (
+          <FailureNotice
+            testId="chat-status-stale"
+            variant="stale"
+            title="Showing the last confirmed state"
+            message="This paper's status could not be refreshed. Nothing changed on the server, and questions stay available."
+            actionLabel="Refresh status"
+            onAction={() => checkProcessedQuery.refetch()}
+          />
+        )}
+
+        {file && !checkProcessedQuery.isError && (!isProcessed || isIndexing) && (
           <div className="flex flex-col items-center py-16 text-center">
             <Loader2 className="size-6 animate-spin text-ink-faint" />
             <h4 className="mt-4 font-serif text-sm font-medium">
@@ -522,7 +597,17 @@ export function ChatPane() {
           <StaleIndexNotice index={documentIndex} />
         )}
 
-        {file && isProcessed && !isIndexing && !isStaleIndex && messages.length === 0 && !thinking && (
+        {file && messagesQuery.isError && (
+          <FailureNotice
+            testId="chat-conversation-error"
+            title="Could not load this Conversation"
+            message={`Past turns are unavailable right now — new questions still work. ${messagesQuery.error instanceof Error ? messagesQuery.error.message : "The request failed."}`}
+            actionLabel="Retry loading turns"
+            onAction={() => messagesQuery.refetch()}
+          />
+        )}
+
+        {file && isProcessed && !isIndexing && !isStaleIndex && !messagesQuery.isError && messages.length === 0 && !thinking && (
           <div className="rounded-sm border border-rule bg-paper p-5 text-center shadow-sm">
             <h4 className="font-mono text-[0.68rem] font-semibold uppercase tracking-widest">Session Initialized</h4>
             <p className="mx-auto mt-2 max-w-[30ch] font-serif text-xs leading-relaxed text-ink-faint">
@@ -546,6 +631,9 @@ export function ChatPane() {
 
         {messages.map((m) => {
           const outcome = describe(m);
+          // Narrowed once so the retry button never passes an undefined
+          // question to a new turn.
+          const retryQuestion = m.question;
           return m.sender === "user" ? (
             <div key={m.id} className="rise-in flex justify-end" data-testid="chat-message" data-sender="user">
               <p className="max-w-[85%] rounded-lg rounded-br-[2px] bg-ink px-3.5 py-2.5 text-[0.85rem] leading-snug text-paper">{m.text}</p>
@@ -585,7 +673,18 @@ export function ChatPane() {
                   The model hit its answer limit, so this stops mid-thought.
                 </p>
               )}
+              {m.failed && m.failure && (
+                <>
+                  <p className="font-mono text-[0.62rem] font-semibold tracking-wide text-destructive">
+                    {FAILURE_COPY[m.failure].heading}
+                  </p>
+                  <p className="mt-1 font-mono text-[0.62rem] leading-relaxed tracking-wide text-ink-soft">
+                    {FAILURE_COPY[m.failure].hint}
+                  </p>
+                </>
+              )}
               <div
+                role={m.failed ? "alert" : undefined}
                 className={cn(
                   "rounded-sm border px-3.5 py-3",
                   m.failed ? "border-destructive/30 bg-destructive/5 text-destructive" : "border-transparent bg-transparent px-0 py-0",
@@ -595,6 +694,16 @@ export function ChatPane() {
                   <>
                     <MarkdownRenderer text={m.text} />
                     {m.needsSettings && <OpenSettingsLink />}
+                    {m.failed && m.failure && retryQuestion && (
+                      <button
+                        type="button"
+                        onClick={() => send(retryQuestion)}
+                        disabled={thinking || inputDisabled}
+                        className="mt-2 inline-flex items-center gap-1.5 border border-destructive/50 bg-paper px-2.5 py-1 font-mono text-[0.62rem] text-destructive hover:border-destructive disabled:opacity-40"
+                      >
+                        <RotateCw className="size-3" /> {FAILURE_COPY[m.failure].retryLabel}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <span className="flex items-center gap-1.5 py-1">
@@ -604,10 +713,10 @@ export function ChatPane() {
                   </span>
                 )}
               </div>
-              {m.sources && m.sources.length > 0 && (
+              {!m.failed && m.sources && m.sources.length > 0 && (
                 <SourceList sources={m.sources} retrieval={m.retrieval} />
               )}
-              {m.claims && m.claims.length > 0 && m.sources && (
+              {!m.failed && m.claims && m.claims.length > 0 && m.sources && (
                 <ClaimList claims={m.claims} sources={m.sources} />
               )}
             </div>
