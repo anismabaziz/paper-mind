@@ -1,54 +1,21 @@
-# React + TypeScript + Vite
+# PaperMind frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite interface for the PaperMind workspace: library,
+reader with Page strip, streaming chat with Citation Sources, Settings
+dialog, and Research Brief. It talks to the Flask API (`VITE_API_URL`) and
+holds no Document text of its own beyond what the reader renders.
 
-Currently, two official plugins are available:
+Start it through the one-command setup in the root
+[README.md](../README.md) (`./papermind.sh up --seed`), or alone with
+`npm install` and `npm run dev` against a running backend. Environment
+variables are documented in [.env.example](.env.example).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+PDF rendering assets under `public/cmaps/` and `public/standard_fonts/` are
+vendored from `pdfjs-dist` by `scripts/vendor-pdf-assets.mjs` (runs before
+`dev` and `build`); their licenses are listed in the root
+[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config({
-  extends: [
-    // Remove ...tseslint.configs.recommended and replace with this
-    ...tseslint.configs.recommendedTypeChecked,
-    // Alternatively, use this for stricter rules
-    ...tseslint.configs.strictTypeChecked,
-    // Optionally, add this for stylistic rules
-    ...tseslint.configs.stylisticTypeChecked,
-  ],
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config({
-  plugins: {
-    // Add the react-x and react-dom plugins
-    'react-x': reactX,
-    'react-dom': reactDom,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended typescript rules
-    ...reactX.configs['recommended-typescript'].rules,
-    ...reactDom.configs.recommended.rules,
-  },
-})
-```
+Checks: `npm run lint`, `npm test -- --run`, `npm run build` (type-checks
+first). Browser workflows live in `e2e/` and need the backing services:
+`docker compose -f ../backend/compose.test.yaml up -d --wait`, then
+`npm run test:e2e`.

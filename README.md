@@ -23,7 +23,16 @@ and stores one global set of provider settings.
   → first heading) while the stable uuid filename stays on disk and in Qdrant
 - Evaluation that asks a committed labeled case set through the same answer
   path the chat route uses
+- Research Brief: one question across two Documents, answered through four
+  read-only tools under fixed ceilings — see below
 - Postgres for persistence, local filesystem for uploaded files
+
+PaperMind is [MIT licensed](LICENSE); bundled samples, fonts, and reader
+assets are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The
+moving parts are explained in [docs/architecture.md](docs/architecture.md),
+the choices that are expensive to reverse in
+[docs/adr/0010-atomic-generations-local-first-bounded-tools.md](docs/adr/0010-atomic-generations-local-first-bounded-tools.md),
+and what the project does not do in [docs/limits.md](docs/limits.md).
 
 ## Quick start
 
@@ -85,7 +94,10 @@ decrypted. After boot, open Settings in the app and paste your provider key — 
 
 There are no provider keys in the environment. Open the Settings dialog in the
 app, pick a provider (Google or Groq) and a model from the curated list, paste
-your own API key, and hit "Test connection" to verify before saving. Keys are
+your own API key, and hit "Test connection" to verify before saving. The
+catalog is five entries: `gemini-2.5-flash` and `gemini-3.5-flash` on
+Google, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, and `qwen/qwen3.8-27b`
+on Groq. Keys are
 stored encrypted in the single `app_settings` row and applied to new chats
 immediately. The app boots with no provider key present; asking a question
 before saving settings returns a clear error pointing at Settings rather than
@@ -123,7 +135,16 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 
 ## Screenshots
 
-![Main chat interface](screenshots/main.png)
+Desktop library, reader, and cited answer over the CC0 sample primer:
+
+![Desktop library, reader, and cited answer](screenshots/desktop.png)
+
+Mobile chat drawer with hybrid-retrieval citations over the CC0 team notes:
+
+![Mobile chat drawer with citations](screenshots/mobile.png)
+
+Both were captured from the shipped interface against real sample Documents
+through the deterministic browser backend (`frontend/e2e/`).
 
 ## How it works
 
@@ -288,6 +309,18 @@ read from `PAPERMIND_EVAL_GENERATOR_API_KEY` (and
 argument. Generator and judge are configured separately, so a run can generate
 with one account and grade with another.
 
+## Research Brief
+
+For a question across two Documents, the Brief searches the chosen pair
+through four read-only tools — library search, Passage retrieval, Page
+text, and evidence comparison — and returns a structured brief with claims,
+supporting Page citations, conflicting evidence, and explicit gaps. The run
+is bounded (2 Documents, 6 turns, 8 tool calls, 2 repeated calls, 120,000
+tokens, 120 seconds) and only models with structured output plus tool use
+can run it. It cannot execute code, browse sites, change settings, or
+delete Documents. Measured behaviour is in
+[`2026-09-brief-tool-use-v1`](backend/evaluation/reports/2026-09-brief-tool-use-v1/).
+
 ## Testing
 
 Run the fast suite against fakes and in-memory SQLite:
@@ -339,7 +372,7 @@ Live runs are opt-in (`--live`); `--split tuning` runs the other half, and
 once with it on, and reports both. See [backend/README.md](backend/README.md) for free local live
 instructions (`http://localhost:6333` with `--no-judge` needs no chat key).
 
-**Three published reports back the retrieval and answer claims.**
+**Four published reports back the retrieval, answer, and brief claims.**
 
 The two retrieval reports — [`2026-09-retrieval-baseline-v1`](backend/evaluation/reports/2026-09-retrieval-baseline-v1/)
 for the reported half and [`2026-09-retrieval-tuning-v1`](backend/evaluation/reports/2026-09-retrieval-tuning-v1/)
@@ -367,6 +400,16 @@ The manifest beside each set of numbers names the revision, the case set,
 every document's hash and index manifest, the prompts, the models, and the
 environment, and `--compare-report` says whether a re-run reproduced it or which
 field moved.
+
+[`2026-09-brief-tool-use-v1`](backend/evaluation/reports/2026-09-brief-tool-use-v1/)
+measures the Research Brief over 7 tasks and 24 deterministic trials: 100%
+citation precision on completed briefs, 88–100% evidence coverage and
+91–100% abstention accuracy depending on configuration, tool calls at p50
+3.5 / p95 4.0 against the ceiling of 8, and $0.1860 total cost with a 4%
+timeout rate. Coverage is graded as a set
+comparison over held evidence, so two different tool orders that reach the
+same sources grade the same — no task requires one exact tool path. Paid
+model trials run on a controlled schedule with a $5.00 per-run limit.
 
 ## Keeping dependencies and models current
 
