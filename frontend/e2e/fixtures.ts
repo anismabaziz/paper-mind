@@ -72,6 +72,31 @@ export async function beginIsolatedTest() {
   await seedWorkingSettings();
 }
 
+export async function clearLibrary() {
+  // The library is shared across specs, and the app opens the first ready
+  // Document on load, which pulls in the PDF engine. A spec that asserts on
+  // what a cold, empty library downloads has to say so itself.
+  const data = await apiGet("/files");
+  for (const file of data.files as { name: string }[]) {
+    await apiDelete(`/files/remove?path=${encodeURIComponent(file.name)}`).catch(
+      () => null,
+    );
+  }
+  await waitForLibraryEmpty();
+}
+
+export async function waitForLibraryEmpty(timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const data = await apiGet("/files");
+    if (!(data.files as unknown[]).length) return;
+    if (Date.now() > deadline) {
+      throw new Error("library never emptied");
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
 export function stagePdf(originalName: string): string {
   const dir = join(here, "..", "test-results", "staged");
   mkdirSync(dir, { recursive: true });
@@ -83,23 +108,24 @@ export function stagePdf(originalName: string): string {
 export async function uploadViaUi(page: Page, originalName: string) {
   const staged = stagePdf(originalName);
   await page.goto("/");
-  // On small screens the rail lives in a closed drawer: open it so the
-  // visible upload control can be used. Desktop keeps its inline rail.
-  const libraryVisible = await page
-    .locator('[data-testid="library-list"]:visible, [data-testid="library-empty"]:visible')
-    .first()
-    .isVisible()
+  const rail = page
+    .locator(
+      '[data-testid="library-list"]:visible, [data-testid="library-empty"]:visible',
+    )
+    .first();
+  // On small screens the rail lives in a closed drawer: open it so the visible
+  // upload control can be used. Desktop keeps its inline rail. Wait for the
+  // app to mount before deciding, because reading a still-booting page as "no
+  // rail" sends a desktop run looking for a drawer button it never renders.
+  // isVisible() answers immediately by design, so the wait has to be explicit.
+  const inlineRail = await rail
+    .waitFor({ state: "visible", timeout: 30_000 })
+    .then(() => true)
     .catch(() => false);
-  if (!libraryVisible) {
+  if (!inlineRail) {
     await page.getByRole("button", { name: "Open library" }).click();
   }
-  await expect(
-    page
-      .locator(
-        '[data-testid="library-list"]:visible, [data-testid="library-empty"]:visible',
-      )
-      .first(),
-  ).toBeVisible();
+  await expect(rail).toBeVisible();
   // The input itself is visually hidden by design; either mounted copy
   // uploads through the same mutation, so the first one is sufficient.
   await page.getByTestId("file-input").first().setInputFiles(staged);

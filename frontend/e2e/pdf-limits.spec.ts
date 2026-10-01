@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import {
   BACKEND_URL,
   beginIsolatedTest,
+  clearLibrary,
   findFileByOriginal,
   selectDocument,
   stagePdf,
@@ -73,6 +74,11 @@ async function expectWithinBudgets(p: Page, pageCount: number): Promise<PhaseMet
 // the previous buffer instead of retaining it.
 test("large PDFs stay within browser limits", async ({ page }, testInfo) => {
   await beginIsolatedTest();
+  // This spec measures what a first-time visitor downloads, so it needs the
+  // library a first-time visitor sees: empty. Specs that ran before it left
+  // Documents behind, and an app that opens the first ready Document would
+  // pull the engine in before the check below.
+  await clearLibrary();
   const thirdParty: string[] = [];
   const pdfAssetHosts = new Set<string>();
   const pdfEngineUrls: string[] = [];

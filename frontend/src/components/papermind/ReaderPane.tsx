@@ -308,6 +308,18 @@ export function ReaderPane() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="border-rule bg-paper">
                 <DropdownMenuItem
+                  className="sm:hidden"
+                  onSelect={() => setZoom((z) => Math.max(80, z - 10))}
+                >
+                  <Minus className="size-3.5" /> Zoom out
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="sm:hidden"
+                  onSelect={() => setZoom((z) => Math.min(140, z + 10))}
+                >
+                  <Plus className="size-3.5" /> Zoom in
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   className="text-destructive focus:bg-destructive/10 focus:text-destructive"
                   onClick={() => deleteMutation.mutate(file)}
                 >
@@ -332,7 +344,11 @@ export function ReaderPane() {
             </button>
           )}
 
-          <div className="flex items-center gap-1 border-l border-rule pl-2 sm:pl-4">
+          {/* Zoom lives in the actions menu below the sm breakpoint. With the
+              44px touch-target floor, eight controls need more width than a
+              phone has, and the overflowing group covered the library and chat
+              buttons and swallowed their clicks. */}
+          <div className="hidden items-center gap-1 border-l border-rule pl-2 sm:flex sm:pl-4">
             <button
               type="button"
               onClick={() => setZoom((z) => Math.max(80, z - 10))}
