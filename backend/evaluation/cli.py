@@ -758,6 +758,33 @@ def main(argv=None):
             "FILE; the digest is written either way"
         ),
     )
+    parser.add_argument(
+        "--brief-eval",
+        action="store_true",
+        help=(
+            "grade the versioned Research Brief task set deterministically "
+            "(no provider key needed)"
+        ),
+    )
+    parser.add_argument(
+        "--brief-report",
+        metavar="DIRECTORY",
+        help="write the brief tool-use report to DIRECTORY",
+    )
+    parser.add_argument(
+        "--allow-paid",
+        action="store_true",
+        help=(
+            "record new paid brief trajectories on the controlled schedule; "
+            "refused without this flag"
+        ),
+    )
+    parser.add_argument(
+        "--brief-cost-limit",
+        type=float,
+        default=5.0,
+        help="most one paid brief run may estimate before it refuses",
+    )
     args = parser.parse_args(argv)
     for provider, model in (
         (args.provider, args.model),
@@ -776,6 +803,8 @@ def main(argv=None):
         rerank = False
 
     PROVIDER_PACE_SECONDS = max(args.pace, 0.0)
+    if args.brief_eval:
+        return _brief_eval_main(args)
     if args.render:
         return _render_main(args)
     if args.ablate:
@@ -800,6 +829,67 @@ def main(argv=None):
         print(json.dumps(run_report, indent=2))
         return
     _print(run_report)
+
+
+def _brief_eval_main(args) -> None:
+    """Grade the brief task set deterministically and optionally publish it.
+
+    Deterministic checks run routinely with no key: the trajectories are
+    recorded fixtures, so grading them measures the graders rather than a
+    provider. Recording new paid trajectories needs ``--allow-paid`` and a
+    cost estimate inside ``--brief-cost-limit``; without both the schedule
+    gate refuses before the first paid call.
+    """
+    from evaluation import brief_eval
+    from evaluation.brief_tasks import load_brief_tasks
+
+    task_set = load_brief_tasks()
+    if args.allow_paid:
+        estimate = brief_eval.estimate_cost_usd(len(task_set.tasks))
+        brief_eval.check_paid_allowance(
+            allow_paid=True,
+            estimated_cost_usd=estimate,
+            limit_usd=args.brief_cost_limit,
+        )
+        print(
+            "Paid brief recording is gated to a controlled schedule; "
+            f"estimate ${estimate:.2f} inside ${args.brief_cost_limit:.2f}. "
+            "This checkout records deterministic checks only."
+        )
+    trajectories = brief_eval.demo_trajectories(task_set)
+    evaluation = brief_eval.grade_trials(task_set, trajectories)
+    if args.brief_report:
+        brief_eval.write_brief_report(
+            Path(args.brief_report),
+            task_set=task_set,
+            evaluation=evaluation,
+            trajectories=trajectories,
+        )
+        print(f"Brief report written to {args.brief_report}")
+    if args.as_json:
+        print(json.dumps(evaluation.to_dict(), indent=2))
+        return
+    _print_brief_evaluation(evaluation)
+
+
+def _print_brief_evaluation(evaluation) -> None:
+    """Print one brief evaluation as a short operator-facing summary."""
+    totals = evaluation.totals
+    print(
+        f"Brief tool use: {totals['trials']} trials, "
+        f"p50 {totals['latency_p50']}s p95 {totals['latency_p95']}s, "
+        f"${totals['cost_usd']:.4f}, timeouts {totals['timeout_rate']:.0%}"
+    )
+    for row in evaluation.configurations:
+        print(
+            f"  {row['configuration']}: {row['trials']} trials, "
+            f"coverage {row['evidence_coverage']}, correctness {row['correctness']}"
+        )
+    for task in evaluation.tasks:
+        print(
+            f"  {task.task_id}: consistency {task.outcome_consistency:.0%}, "
+            f"coverage {task.grade_pass_rate.get('evidence_coverage')}"
+        )
 
 
 def _render_main(args) -> None:
