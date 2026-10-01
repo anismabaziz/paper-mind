@@ -28,6 +28,25 @@ and stores one global set of provider settings.
 ## Quick start
 
 ```bash
+./papermind.sh up --seed
+```
+
+That is the whole setup. It checks for Docker, uv, Node, and curl, writes
+the gitignored local secrets, starts Postgres and Qdrant on loopback,
+migrates the database, and starts the worker, the API, and the Vite frontend.
+With `--seed` it also indexes two small CC0 sample PDFs and stores one
+abstained exchange, so a fresh clone has something to open without a model
+key. Then visit http://127.0.0.1:5173.
+
+```bash
+./papermind.sh status   # database, Qdrant, worker, API, frontend
+./papermind.sh smoke    # cited answer or deterministic abstention
+./papermind.sh down     # stop everything, keep volumes and uploads
+```
+
+Prefer the manual steps? They still work:
+
+```bash
 # Generate local-only secrets once (random Postgres password, gitignored),
 # then start infra (Postgres + Qdrant, loopback-only) — backend is not a compose service
 backend/scripts/bootstrap-local.sh
@@ -37,6 +56,7 @@ cd backend
 uv sync
 uv run alembic upgrade head
 uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
+uv run python worker.py # in a second terminal: ingestion jobs
 ```
 
 The frontend is a Vite app and runs separately:
