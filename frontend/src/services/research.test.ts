@@ -143,6 +143,12 @@ describe("briefStream", () => {
       evidence: EVIDENCE,
       documents: SCOPE,
       budget: BUDGET,
+      brief: expect.anything(),
+      claims: [],
+      gaps: [],
+      abstained: false,
+      promptVersion: null,
+      model: null,
     });
   });
 
@@ -263,6 +269,73 @@ describe("briefStream", () => {
     });
   });
 
+  it("reads a structured brief with claims, gaps, and model metadata", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      sse(
+        event("done", {
+          done: true,
+          status: "complete",
+          answer: "They disagree.",
+          brief: {
+            summary: "They disagree.",
+            claims: [
+              { order: 1, claim: "A keeps data.", supports: ["E1"], conflicts: [], status: "supported" },
+              { order: 2, claim: "B deletes data.", supports: [], conflicts: ["E1"], status: "contested" },
+            ],
+            gaps: ["Whether the policy changed."],
+            abstained: false,
+          },
+          claims: [
+            { order: 1, claim: "A keeps data.", supports: ["E1"], conflicts: [], status: "supported" },
+          ],
+          gaps: ["Whether the policy changed."],
+          evidence: EVIDENCE,
+          documents: SCOPE,
+          budget: BUDGET,
+          prompt_version: "brief-structured-v1",
+          model: { provider: "groq", model: "openai/gpt-oss-120b" },
+        }),
+      ),
+    );
+    const onDone = vi.fn();
+
+    await briefStream("why?", ["a.pdf", "b.pdf"], { onDone });
+
+    expect(onDone.mock.calls[0][0]).toMatchObject({
+      status: "complete",
+      claims: expect.arrayContaining([expect.objectContaining({ order: 1 })]),
+      gaps: ["Whether the policy changed."],
+      promptVersion: "brief-structured-v1",
+      model: { provider: "groq", model: "openai/gpt-oss-120b" },
+    });
+    expect(onDone.mock.calls[0][0].brief?.claims).toHaveLength(2);
+  });
+
+  it("reads an old brief without structure as a summary with no claims", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      sse(
+        event("done", {
+          done: true,
+          status: "complete",
+          answer: "They agree.",
+          evidence: EVIDENCE,
+          documents: SCOPE,
+          budget: BUDGET,
+        }),
+      ),
+    );
+    const onDone = vi.fn();
+
+    await briefStream("why?", ["a.pdf", "b.pdf"], { onDone });
+
+    expect(onDone.mock.calls[0][0]).toMatchObject({
+      answer: "They agree.",
+      claims: [],
+      gaps: [],
+      brief: expect.objectContaining({ summary: "They agree." }),
+    });
+  });
+
   it("throws rather than hanging when the stream ends without a result", async () => {
     vi.mocked(fetch).mockResolvedValue(sse(event("start", { brief_id: "b", documents: [] })));
 
@@ -373,5 +446,54 @@ describe("checkBriefScope", () => {
     const [path, options] = vi.mocked(http.get).mock.calls[0];
     expect(path).toBe("/research/scope");
     expect(options?.params).toEqual(["documents", "a.pdf", "documents", "b.pdf"]);
+  });
+});
+
+describe("saved briefs", () => {
+  it("persists a finished brief and loads it back", async () => {
+    const { saveBrief, loadBrief, clearSavedBrief } = await import("./research");
+    clearSavedBrief();
+    expect(loadBrief()).toBeNull();
+
+    const saved = {
+      question: "where do they disagree?",
+      documents: ["a.pdf", "b.pdf"],
+      run: {
+        status: "complete" as const,
+        answer: "They disagree.",
+        stoppedBy: null,
+        message: null,
+        evidence: EVIDENCE,
+        budget: BUDGET,
+        scope: SCOPE,
+        brief: {
+          summary: "They disagree.",
+          claims: [
+            { order: 1, claim: "A keeps data.", supports: ["E1"], conflicts: [], status: "supported" as const },
+          ],
+          gaps: [],
+          abstained: false,
+        },
+        claims: [
+          { order: 1, claim: "A keeps data.", supports: ["E1"], conflicts: [], status: "supported" as const },
+        ],
+        gaps: [],
+        abstained: false,
+        promptVersion: "brief-structured-v1",
+        model: { provider: "groq", model: "openai/gpt-oss-120b" },
+      },
+      savedAt: new Date().toISOString(),
+    };
+    saveBrief(saved);
+
+    expect(loadBrief()).toMatchObject({
+      question: "where do they disagree?",
+      run: expect.objectContaining({
+        status: "complete",
+        promptVersion: "brief-structured-v1",
+      }),
+    });
+    clearSavedBrief();
+    expect(loadBrief()).toBeNull();
   });
 });

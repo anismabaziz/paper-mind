@@ -97,6 +97,29 @@ export interface IBriefStart {
   limits: IBriefLimits;
 }
 
+/** One checkable statement, with the evidence on each side kept apart. */
+export interface IBriefClaim {
+  order: number;
+  claim: string;
+  supports: string[];
+  conflicts: string[];
+  status: "supported" | "contested" | "unresolved";
+}
+
+/** The structured result: summary, ordered claims, gaps, abstention. */
+export interface IBrief {
+  summary: string;
+  claims: IBriefClaim[];
+  gaps: string[];
+  abstained: boolean;
+}
+
+/** The model that ran a brief, as the terminal event reports it. */
+export interface IBriefModel {
+  provider: string;
+  model: string;
+}
+
 export interface IBriefDone {
   status: BriefStatus;
   answer: string;
@@ -107,6 +130,12 @@ export interface IBriefDone {
   evidence: IBriefEvidence[];
   documents: IBriefDocument[];
   budget: IBriefBudget;
+  brief: IBrief | null;
+  claims: IBriefClaim[];
+  gaps: string[];
+  abstained: boolean;
+  promptVersion: string | null;
+  model: IBriefModel | null;
 }
 
 /** Why a brief could not run, as a refused request or a failed turn. */
@@ -194,6 +223,91 @@ function readBudget(data: Record<string, unknown>): IBriefBudget {
   };
 }
 
+function readIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function readClaim(item: Record<string, unknown>, order: number): IBriefClaim {
+  const supports = readIds(item.supports);
+  const conflicts = readIds(item.conflicts);
+  // An explicit unresolved stays unresolved; anything else follows the
+  // evidence, so a cached claim with nothing behind it never reads supported.
+  const derived = supports.length === 0 && conflicts.length === 0 ? "unresolved" : "supported";
+  const contested = supports.length > 0 && conflicts.length > 0 ? "contested" : derived;
+  const withConflicts = conflicts.length > 0 && supports.length === 0 ? "contested" : contested;
+  const status = item.status === "unresolved" ? "unresolved" : withConflicts;
+  return {
+    order: typeof item.order === "number" ? item.order : order,
+    claim: typeof item.claim === "string" ? item.claim : "",
+    supports,
+    conflicts,
+    status,
+  };
+}
+
+function readClaims(data: Record<string, unknown>): IBriefClaim[] {
+  if (isRecord(data.brief) && Array.isArray(data.brief.claims)) {
+    return data.brief.claims
+      .filter(isRecord)
+      .map((item, index) => readClaim(item as Record<string, unknown>, index + 1))
+      .filter((claim) => claim.claim.length > 0);
+  }
+  const direct = data.claims;
+  if (Array.isArray(direct)) {
+    return direct
+      .filter(isRecord)
+      .map((item, index) => readClaim(item, index + 1))
+      .filter((claim) => claim.claim.length > 0);
+  }
+  return [];
+}
+
+function readGaps(data: Record<string, unknown>): string[] {
+  const direct = data.gaps;
+  if (Array.isArray(direct)) return direct.filter((item): item is string => typeof item === "string");
+  if (isRecord(data.brief) && Array.isArray(data.brief.gaps)) {
+    return data.brief.gaps.filter((item): item is string => typeof item === "string");
+  }
+  return [];
+}
+
+function readBrief(data: Record<string, unknown>): IBrief | null {
+  if (isRecord(data.brief)) {
+    const brief = data.brief;
+    return {
+      summary:
+        typeof brief.summary === "string"
+          ? brief.summary
+          : typeof data.answer === "string"
+            ? data.answer
+            : "",
+      claims: readClaims(data),
+      gaps: readGaps(data),
+      abstained: brief.abstained === true || data.abstained === true,
+    };
+  }
+  if (typeof data.answer === "string" || data.claims !== undefined) {
+    return {
+      summary: typeof data.answer === "string" ? data.answer : "",
+      claims: readClaims(data),
+      gaps: readGaps(data),
+      abstained: data.abstained === true,
+    };
+  }
+  return null;
+}
+
+function readModel(data: Record<string, unknown>): IBriefModel | null {
+  if (isRecord(data.model)) {
+    return {
+      provider: typeof data.model.provider === "string" ? data.model.provider : "",
+      model: typeof data.model.model === "string" ? data.model.model : "",
+    };
+  }
+  return null;
+}
+
 /**
  * Hand one event to its handler, and report whether it ended the stream.
  *
@@ -229,6 +343,13 @@ function dispatch(
         evidence: readEvidence(data),
         documents: readDocuments(data),
         budget: readBudget(data),
+        brief: readBrief(data),
+        claims: readClaims(data),
+        gaps: readGaps(data),
+        abstained: data.abstained === true,
+        promptVersion:
+          typeof data.prompt_version === "string" ? data.prompt_version : null,
+        model: readModel(data),
       });
       return true;
     }
@@ -434,6 +555,62 @@ export async function checkBriefScope(documents: string[], signal?: AbortSignal)
   const params = documents.flatMap((name) => ["documents", name]);
   const response = await client.get<IBriefScope>("/research/scope", { params, signal });
   return response.data;
+}
+
+/** A completed brief kept so it survives a reload. */
+export interface ISavedBrief {
+  question: string;
+  documents: string[];
+  run: {
+    status: "complete" | "incomplete";
+    answer: string;
+    stoppedBy: string | null;
+    message: string | null;
+    evidence: IBriefEvidence[];
+    budget: IBriefBudget;
+    scope: IBriefDocument[];
+    brief: IBrief | null;
+    claims: IBriefClaim[];
+    gaps: string[];
+    abstained: boolean;
+    promptVersion: string | null;
+    model: IBriefModel | null;
+  };
+  savedAt: string;
+}
+
+const SAVED_BRIEF_KEY = "papermind:last-brief-v1";
+
+/** Save the last finished brief so closing the dialog keeps it. */
+export function saveBrief(saved: ISavedBrief): void {
+  try {
+    localStorage.setItem(SAVED_BRIEF_KEY, JSON.stringify(saved));
+  } catch {
+    // Storage full or unavailable: the brief stays on screen, it just
+    // does not survive a reload.
+  }
+}
+
+/** Load the last finished brief, or null when nothing was saved. */
+export function loadBrief(): ISavedBrief | null {
+  try {
+    const raw = localStorage.getItem(SAVED_BRIEF_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ISavedBrief>;
+    if (!parsed || typeof parsed !== "object" || !parsed.run) return null;
+    return parsed as ISavedBrief;
+  } catch {
+    return null;
+  }
+}
+
+/** Forget the saved brief, so a new question starts clean. */
+export function clearSavedBrief(): void {
+  try {
+    localStorage.removeItem(SAVED_BRIEF_KEY);
+  } catch {
+    // Ignored: nothing to forget is also a clean start.
+  }
 }
 
 export type { DocumentIndex };

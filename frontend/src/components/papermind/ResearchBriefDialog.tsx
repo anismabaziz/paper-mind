@@ -9,9 +9,14 @@ import {
   checkBriefScope,
   isBriefBlocked,
   isBriefReadable,
+  loadBrief,
+  saveBrief,
+  type IBrief,
   type IBriefBudget,
+  type IBriefClaim,
   type IBriefDocument,
   type IBriefEvidence,
+  type IBriefModel,
 } from "@/services/research";
 import { getSettings } from "@/services/settings";
 import { useFiles } from "@/hooks/useFiles";
@@ -28,10 +33,24 @@ import useBriefUi from "@/store/brief-ui";
 /** What a run ended as, in the one word the reader reads for it. */
 const OUTCOME_LABEL: Record<string, string> = {
   complete: "complete",
+  partial: "partial",
   incomplete: "incomplete",
+  cancelled: "cancelled",
   failed: "failed",
   abstained: "abstained",
 };
+
+/** The outcome word for a finished run: cancelled, partial, and abstained are distinct. */
+function outcomeOf(
+  status: "complete" | "incomplete",
+  stoppedBy: string | null,
+  abstained: boolean,
+): string {
+  if (abstained) return OUTCOME_LABEL.abstained;
+  if (status === "complete") return OUTCOME_LABEL.complete;
+  if (stoppedBy === "cancelled") return OUTCOME_LABEL.cancelled;
+  return OUTCOME_LABEL.partial;
+}
 
 /** A budget for a run that was stopped before it could report one. */
 const NO_BUDGET: IBriefBudget = {
@@ -60,6 +79,12 @@ type Run =
       evidence: IBriefEvidence[];
       budget: IBriefBudget;
       documents: IBriefDocument[];
+      brief: IBrief | null;
+      claims: IBriefClaim[];
+      gaps: string[];
+      abstained: boolean;
+      promptVersion: string | null;
+      model: IBriefModel | null;
     }
   | {
       state: "abstained";
@@ -106,6 +131,32 @@ function ResearchBriefDialogContent() {
   useEscapeKey(!running, close);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
+
+  // Restore the last finished brief so its claims, evidence, status, prompt
+  // version, and model survive a reload. The scope is only restored when both
+  // Documents are still in the library.
+  useEffect(() => {
+    const saved = loadBrief();
+    if (!saved) return;
+    setQuestion(saved.question);
+    setSelected(saved.documents);
+    setRun({
+      state: "done",
+      status: saved.run.status,
+      answer: saved.run.answer,
+      stoppedBy: saved.run.stoppedBy,
+      message: saved.run.message,
+      evidence: saved.run.evidence ?? [],
+      budget: saved.run.budget,
+      documents: saved.run.scope ?? [],
+      brief: saved.run.brief ?? null,
+      claims: saved.run.claims ?? [],
+      gaps: saved.run.gaps ?? [],
+      abstained: saved.run.abstained ?? saved.run.brief?.abstained ?? false,
+      promptVersion: saved.run.promptVersion ?? null,
+      model: saved.run.model ?? null,
+    });
+  }, []);
 
   // A Document that left the library cannot stay in the scope: the run would
   // name a paper the reader can no longer open.
@@ -187,17 +238,45 @@ function ResearchBriefDialogContent() {
         {
           onStart: (opened) =>
             setRun({ state: "running", documents: opened.documents, briefId: opened.briefId }),
-          onDone: (done) =>
-            setRun({
-              state: "done",
+          onDone: (done) => {
+            const finished = {
+              state: "done" as const,
               status: done.status,
               answer: done.answer,
               stoppedBy: done.stoppedBy,
               message: done.message,
-              evidence: done.evidence,
+              evidence: done.evidence ?? [],
               budget: done.budget,
-              documents: done.documents,
-            }),
+              documents: done.documents ?? [],
+              brief: done.brief ?? null,
+              claims: done.claims ?? [],
+              gaps: done.gaps ?? [],
+              abstained: done.abstained ?? done.brief?.abstained ?? false,
+              promptVersion: done.promptVersion ?? null,
+              model: done.model ?? null,
+            };
+            setRun(finished);
+            saveBrief({
+              question: body,
+              documents: [...selected],
+              run: {
+                status: finished.status,
+                answer: finished.answer,
+                stoppedBy: finished.stoppedBy,
+                message: finished.message,
+                evidence: finished.evidence,
+                budget: finished.budget,
+                scope: finished.documents,
+                brief: finished.brief,
+                claims: finished.claims,
+                gaps: finished.gaps,
+                abstained: finished.abstained,
+                promptVersion: finished.promptVersion,
+                model: finished.model,
+              },
+              savedAt: new Date().toISOString(),
+            });
+          },
           onAbstained: (result) =>
             setRun({
               state: "abstained",
@@ -231,6 +310,12 @@ function ResearchBriefDialogContent() {
                 evidence: [],
                 budget: NO_BUDGET,
                 documents: current.documents,
+                brief: null,
+                claims: [],
+                gaps: [],
+                abstained: false,
+                promptVersion: null,
+                model: null,
               }
             : current,
         );
@@ -483,6 +568,7 @@ function BriefResult({ run }: { run: Run }) {
         role="alert"
         className="mt-5 rounded-sm border border-destructive/30 bg-destructive/5 p-3"
         data-testid="brief-failed"
+        data-outcome="failed"
       >
         <p className="font-mono text-xs font-semibold text-destructive">
           {OUTCOME_LABEL.failed}
@@ -500,6 +586,7 @@ function BriefResult({ run }: { run: Run }) {
         role="status"
         className="mt-5 rounded-sm border border-rule bg-canvas p-3"
         data-testid="brief-abstained"
+        data-outcome="abstained"
       >
         <p className="label-meta">{OUTCOME_LABEL.abstained}</p>
         <p className="mt-1 font-serif text-xs leading-relaxed text-ink-soft">{run.message}</p>
@@ -511,15 +598,17 @@ function BriefResult({ run }: { run: Run }) {
       </div>
     );
   }
+  const outcome = outcomeOf(run.status, run.stoppedBy, run.abstained ?? false);
   return (
     <div
       className="mt-5 border-t border-rule pt-4"
       data-testid="brief-result"
       data-status={run.status}
+      data-outcome={outcome}
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="label-meta">
-          Brief · {OUTCOME_LABEL[run.status]}
+        <p className="label-meta" data-testid="brief-outcome">
+          Brief · {outcome}
           {run.stoppedBy ? ` · ${humanize(run.stoppedBy)}` : ""}
         </p>
         <BudgetLine budget={run.budget} />
@@ -533,8 +622,128 @@ function BriefResult({ run }: { run: Run }) {
         </p>
       )}
       {run.answer && <MarkdownRenderer text={run.answer} />}
+      <ClaimList claims={run.claims} evidence={run.evidence} />
+      <GapList gaps={run.gaps} />
       <EvidenceList evidence={run.evidence} />
+      <BriefMeta promptVersion={run.promptVersion} model={run.model} />
     </div>
+  );
+}
+
+/** Open one evidence Passage in its own Document at its Page. */
+function useOpenEvidence() {
+  const setCitationTarget = usePdfStore((state) => state.setCitationTarget);
+  const setFile = usePdfStore((state) => state.setFile);
+  const closeBrief = useBriefUi((state) => state.close);
+  const filesQuery = useFiles();
+  return (item: IBriefEvidence | undefined) => {
+    if (!item || item.page == null) return;
+    const files = filesQuery.data?.files ?? [];
+    const match =
+      files.find((file) => file.id === item.document_id) ??
+      files.find((file) => file.name === item.document) ??
+      null;
+    if (match) setFile(match);
+    setCitationTarget(item.page);
+    closeBrief();
+  };
+}
+
+/** The ordered claims, with supporting and conflicting evidence kept apart. */
+function ClaimList({
+  claims,
+  evidence,
+}: {
+  claims: IBriefClaim[] | undefined;
+  evidence: IBriefEvidence[];
+}) {
+  const list = claims ?? [];
+  const openEvidence = useOpenEvidence();
+  const byId = new Map(evidence.map((item) => [item.evidence_id, item]));
+  if (list.length === 0) return null;
+  const cite = (id: string, prefix: string, order: number) => {
+    const item = byId.get(id);
+    const hasPage = item?.page != null;
+    return (
+      <button
+        key={`${prefix}-${id}`}
+        type="button"
+        disabled={!hasPage}
+        onClick={() => openEvidence(item)}
+        data-testid={`brief-claim-${order}-${prefix}-${id}`}
+        title={hasPage ? `Open ${item?.title ?? ""} page ${item?.page}` : "This passage has no page"}
+        className={hasPage ? "underline underline-offset-2 hover:text-ink" : ""}
+      >
+        [{id}]
+      </button>
+    );
+  };
+  return (
+    <ol className="mt-4 space-y-2" data-testid="brief-claims">
+      {[...list]
+        .sort((a, b) => a.order - b.order)
+        .map((claim) => (
+          <li
+            key={claim.order}
+            className="border-l-2 border-marker/60 pl-3"
+            data-testid={`brief-claim-${claim.order}`}
+            data-status={claim.status}
+          >
+            <p className="font-serif text-xs leading-relaxed text-ink">{claim.claim}</p>
+            <p className="mt-1 font-mono text-[0.6rem] text-ink-faint">
+              <span data-testid={`brief-claim-${claim.order}-status`}>{claim.status}</span>
+              {claim.supports.length > 0 && (
+                <span> · supports {claim.supports.map((id) => cite(id, "supports", claim.order))}</span>
+              )}
+              {claim.conflicts.length > 0 && (
+                <span> · conflicts {claim.conflicts.map((id) => cite(id, "conflicts", claim.order))}</span>
+              )}
+              {claim.supports.length === 0 && claim.conflicts.length === 0 && (
+                <span> · unresolved — no evidence</span>
+              )}
+            </p>
+          </li>
+        ))}
+    </ol>
+  );
+}
+
+/** The questions the Documents could not settle. */
+function GapList({ gaps }: { gaps: string[] | undefined }) {
+  const list = gaps ?? [];
+  if (list.length === 0) return null;
+  return (
+    <div className="mt-4" data-testid="brief-gaps">
+      <p className="label-meta">Unresolved gaps</p>
+      <ul className="mt-1 list-disc space-y-1 pl-5">
+        {list.map((gap, index) => (
+          <li key={index} className="font-serif text-xs leading-relaxed text-ink-soft">
+            {gap}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Prompt version and model, so a saved brief stays comparable. */
+function BriefMeta({
+  promptVersion,
+  model,
+}: {
+  promptVersion: string | null | undefined;
+  model: IBriefModel | null | undefined;
+}) {
+  if (!promptVersion && !model) return null;
+  return (
+    <p
+      className="mt-3 font-mono text-[0.6rem] text-ink-faint"
+      data-testid="brief-meta"
+    >
+      {promptVersion && <span>Prompt {promptVersion}</span>}
+      {promptVersion && model && <span> · </span>}
+      {model && <span>{model.provider}/{model.model}</span>}
+    </p>
   );
 }
 
@@ -556,7 +765,7 @@ function BudgetLine({ budget }: { budget: IBriefBudget }) {
 
 /** The Passages a brief collected, each openable at the Page it came from. */
 function EvidenceList({ evidence }: { evidence: IBriefEvidence[] }) {
-  const setCitationTarget = usePdfStore((state) => state.setCitationTarget);
+  const openEvidence = useOpenEvidence();
   const [open, setOpen] = useState(true);
   if (evidence.length === 0) return null;
   return (
@@ -577,8 +786,10 @@ function EvidenceList({ evidence }: { evidence: IBriefEvidence[] }) {
               <button
                 type="button"
                 disabled={item.page == null}
-                onClick={() => item.page != null && setCitationTarget(item.page)}
+                onClick={() => openEvidence(item)}
                 data-testid={`brief-evidence-${item.evidence_id}`}
+                data-document={item.document_id}
+                data-page={item.page ?? ""}
                 className={cn(
                   "block w-full text-left",
                   item.page != null ? "cursor-pointer hover:border-marker" : "cursor-default",

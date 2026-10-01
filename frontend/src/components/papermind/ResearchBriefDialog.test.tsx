@@ -174,7 +174,8 @@ beforeEach(() => {
   vi.mocked(checkBriefScope).mockResolvedValue({ documents: SCOPE, document_count: 2 });
   vi.mocked(cancelBrief).mockResolvedValue({ brief_id: "brief-1", cancelled: true });
   useBriefUi.setState({ isOpen: false });
-  usePdfStore.setState({ citationTarget: null });
+  usePdfStore.setState({ citationTarget: null, file: null });
+  localStorage.clear();
 });
 
 afterEach(() => {
@@ -517,5 +518,145 @@ describe("running a brief", () => {
     await waitFor(() => expect(screen.getByTestId("brief-result")).toBeInTheDocument());
     expect(screen.getByTestId("brief-result")).toHaveAttribute("data-status", "incomplete");
     expect(screen.getByTestId("brief-incomplete-note")).toHaveTextContent(/You stopped/);
+  });
+});
+
+describe("structured brief", () => {
+  const STRUCTURED = {
+    ...COMPLETE,
+    answer: "They disagree on retention.",
+    brief: {
+      summary: "They disagree on retention.",
+      claims: [
+        { order: 1, claim: "A keeps data for thirty months.", supports: ["E1"], conflicts: [], status: "supported" as const },
+        { order: 2, claim: "B deletes after a year.", supports: [], conflicts: ["E1"], status: "contested" as const },
+        { order: 3, claim: "The policy never changed.", supports: [], conflicts: [], status: "unresolved" as const },
+      ],
+      gaps: ["Whether B changed its policy since."],
+      abstained: false,
+    },
+    claims: [
+      { order: 1, claim: "A keeps data for thirty months.", supports: ["E1"], conflicts: [], status: "supported" as const },
+      { order: 2, claim: "B deletes after a year.", supports: [], conflicts: ["E1"], status: "contested" as const },
+      { order: 3, claim: "The policy never changed.", supports: [], conflicts: [], status: "unresolved" as const },
+    ],
+    gaps: ["Whether B changed its policy since."],
+    promptVersion: "brief-structured-v1",
+    model: { provider: "groq", model: "openai/gpt-oss-120b" },
+  };
+
+  it("renders ordered claims with supporting and conflicting evidence kept apart", async () => {
+    vi.mocked(briefStream).mockImplementation(async (_q, _d, handlers) => {
+      handlers.onDone(STRUCTURED);
+    });
+    renderDialog();
+
+    await chooseBothPapersAndAsk();
+    start();
+
+    await waitFor(() => expect(screen.getByTestId("brief-claims")).toBeInTheDocument());
+    expect(screen.getByTestId("brief-claim-1")).toHaveAttribute("data-status", "supported");
+    expect(screen.getByTestId("brief-claim-2")).toHaveAttribute("data-status", "contested");
+    expect(screen.getByTestId("brief-claim-2")).toHaveTextContent(/conflicts \[E1\]/);
+    expect(screen.getByTestId("brief-claim-3")).toHaveTextContent(/unresolved/);
+    expect(screen.getByTestId("brief-gaps")).toHaveTextContent(/Whether B changed/);
+  });
+
+  it("labels a cancelled brief as cancelled rather than as a partial result", async () => {
+    vi.mocked(briefStream).mockImplementation(async (_q, _d, handlers) => {
+      handlers.onDone({
+        ...COMPLETE,
+        status: "incomplete",
+        answer: "",
+        stoppedBy: "cancelled",
+        message: "Stopped.",
+        claims: [],
+        gaps: [],
+        brief: null,
+        promptVersion: "brief-structured-v1",
+        model: null,
+      });
+    });
+    renderDialog();
+
+    await chooseBothPapersAndAsk();
+    start();
+
+    await waitFor(() => expect(screen.getByTestId("brief-result")).toBeInTheDocument());
+    expect(screen.getByTestId("brief-result")).toHaveAttribute("data-outcome", "cancelled");
+    expect(screen.getByTestId("brief-outcome")).toHaveTextContent(/cancelled/);
+  });
+
+  it("labels a limit-stopped brief as partial", async () => {
+    vi.mocked(briefStream).mockImplementation(async (_q, _d, handlers) => {
+      handlers.onDone({
+        ...COMPLETE,
+        status: "incomplete",
+        stoppedBy: "turns",
+        claims: [],
+        gaps: [],
+        brief: null,
+        promptVersion: "brief-structured-v1",
+        model: null,
+      });
+    });
+    renderDialog();
+
+    await chooseBothPapersAndAsk();
+    start();
+
+    await waitFor(() => expect(screen.getByTestId("brief-result")).toBeInTheDocument());
+    expect(screen.getByTestId("brief-result")).toHaveAttribute("data-outcome", "partial");
+  });
+
+  it("opens a citation in its own Document at its Page", async () => {
+    vi.mocked(briefStream).mockImplementation(async (_q, _d, handlers) => {
+      handlers.onDone(COMPLETE);
+    });
+    renderDialog();
+
+    await chooseBothPapersAndAsk();
+    start();
+
+    await waitFor(() => expect(screen.getByTestId("brief-evidence-E1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("brief-evidence-E1"));
+
+    expect(usePdfStore.getState().file?.id).toBe("doc-1");
+    expect(usePdfStore.getState().citationTarget).toMatchObject({ page: 4 });
+  });
+
+  it("opens a claim citation at its supporting Page", async () => {
+    vi.mocked(briefStream).mockImplementation(async (_q, _d, handlers) => {
+      handlers.onDone(STRUCTURED);
+    });
+    renderDialog();
+
+    await chooseBothPapersAndAsk();
+    start();
+
+    await waitFor(() => expect(screen.getByTestId("brief-claim-1-supports-E1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("brief-claim-1-supports-E1"));
+
+    expect(usePdfStore.getState().file?.id).toBe("doc-1");
+    expect(usePdfStore.getState().citationTarget).toMatchObject({ page: 4 });
+  });
+
+  it("reloads the last finished brief with its claims and model", async () => {
+    vi.mocked(briefStream).mockImplementation(async (_q, _d, handlers) => {
+      handlers.onDone(STRUCTURED);
+    });
+    const { unmount } = renderDialog();
+
+    await chooseBothPapersAndAsk();
+    start();
+    await waitFor(() => expect(screen.getByTestId("brief-claims")).toBeInTheDocument());
+    unmount();
+    cleanup();
+
+    renderDialog();
+    await waitFor(() => expect(screen.getByTestId("brief-result")).toBeInTheDocument());
+    expect(screen.getByTestId("brief-claim-1")).toHaveTextContent(/thirty months/);
+    expect(screen.getByTestId("brief-meta")).toHaveTextContent(/brief-structured-v1/);
+    expect(screen.getByTestId("brief-meta")).toHaveTextContent(/openai\/gpt-oss-120b/);
   });
 });
