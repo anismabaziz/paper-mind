@@ -5,6 +5,9 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  # An operator can run the whole check suite on their own branch without
+  # pushing a no-op commit.
+  workflow_dispatch:
 
 permissions:
   contents: read
