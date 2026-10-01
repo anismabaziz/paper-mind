@@ -79,6 +79,11 @@ def test_smoke_terminal_parsing_reads_sse():
 def test_smoke_recognizes_the_keyless_refusal():
     """A workspace with no saved key fails closed with a known category."""
     smoke = _load("smoke_setup.py")
-    assert smoke.is_keyless_refusal(400, '{"error": "x", "category": "no_provider_configured"}') is True
+    assert (
+        smoke.is_keyless_refusal(
+            400, '{"error": "x", "category": "no_provider_configured"}'
+        )
+        is True
+    )
     assert smoke.is_keyless_refusal(400, '{"error": "x"}') is False
     assert smoke.is_keyless_refusal(500, "") is False

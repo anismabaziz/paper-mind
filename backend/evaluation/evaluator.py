@@ -299,9 +299,7 @@ def input_tokens_of(resolved: ResolvedTurn) -> int:
     """
     from services.telemetry.usage import input_tokens
 
-    return input_tokens(
-        resolved.request.query, resolved.context, resolved.prior_turns
-    )
+    return input_tokens(resolved.request.query, resolved.context, resolved.prior_turns)
 
 
 def _terminal(events: Sequence[AnswerEvent]) -> tuple[str, dict[str, Any]]:
@@ -323,8 +321,10 @@ def _streamed(environment: EvaluationEnvironment, resolved: ResolvedTurn):
     how long it took.
     """
     events = list(environment.answer_service.stream(resolved))
-    return events, resolved.trace.first_token_seconds, round(
-        resolved.trace.elapsed(), 6
+    return (
+        events,
+        resolved.trace.first_token_seconds,
+        round(resolved.trace.elapsed(), 6),
     )
 
 

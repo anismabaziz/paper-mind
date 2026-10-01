@@ -163,9 +163,7 @@ def read_page_tool(call_id: str, label: str, page: int = 1) -> BriefTurn:
 
 def compare_tool(call_id: str, *evidence_ids: str) -> BriefTurn:
     """Return a turn that asks the brief to compare evidence it already holds."""
-    return call_tool(
-        call_id, "compare_evidence", {"evidence_ids": list(evidence_ids)}
-    )
+    return call_tool(call_id, "compare_evidence", {"evidence_ids": list(evidence_ids)})
 
 
 @pytest.fixture

@@ -832,7 +832,8 @@ def main(argv=None):
 
 
 def _brief_eval_main(args) -> None:
-    """Grade the brief task set deterministically and optionally publish it.
+    """
+    Grade the brief task set deterministically and optionally publish it.
 
     Deterministic checks run routinely with no key: the trajectories are
     recorded fixtures, so grading them measures the graders rather than a

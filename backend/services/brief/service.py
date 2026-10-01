@@ -713,9 +713,7 @@ class BriefService:
             ),
         }
 
-    def _compare(
-        self, resolved: ResolvedBrief, call: Any, span: Any
-    ) -> dict[str, Any]:
+    def _compare(self, resolved: ResolvedBrief, call: Any, span: Any) -> dict[str, Any]:
         """
         Arrange held evidence side by side, collecting nothing new.
 

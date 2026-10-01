@@ -166,6 +166,21 @@ const COMPLETE: IBriefDone = {
   evidence: EVIDENCE,
   documents: SCOPE,
   budget: BUDGET,
+  brief: {
+    summary: "Retention differs between A and B.",
+    claims: [
+      { order: 1, claim: "A retains data for thirty months.", supports: ["E1"], conflicts: [], status: "supported" },
+    ],
+    gaps: [],
+    abstained: false,
+  },
+  claims: [
+    { order: 1, claim: "A retains data for thirty months.", supports: ["E1"], conflicts: [], status: "supported" },
+  ],
+  gaps: [],
+  abstained: false,
+  promptVersion: "brief-evidence-v1",
+  model: { provider: "test", model: "test-model" },
 };
 
 beforeEach(() => {
@@ -365,6 +380,12 @@ describe("running a brief", () => {
         evidence: EVIDENCE,
         documents: SCOPE,
         budget: BUDGET,
+        brief: null,
+        claims: [],
+        gaps: [],
+        abstained: false,
+        promptVersion: "brief-evidence-v1",
+        model: null,
       });
     });
     renderDialog();
@@ -467,6 +488,12 @@ describe("running a brief", () => {
             evidence: EVIDENCE,
             documents: SCOPE,
             budget: BUDGET,
+            brief: null,
+            claims: [],
+            gaps: [],
+            abstained: false,
+            promptVersion: "brief-evidence-v1",
+            model: null,
           });
           resolve();
           return { brief_id: "brief-1", cancelled: true };

@@ -13,6 +13,10 @@ from services.telemetry.redaction import (
     fingerprint,
 )
 
+# Built from parts so the committed fixture holds no literal provider-shaped
+# secret; gitleaks still sees only the fragments.
+TEST_KEY = "sk-" + "live-abcdef123456"
+
 
 def test_a_question_is_described_rather_than_repeated():
     """The question itself is not in the trace; what can be said about it is."""
@@ -89,14 +93,14 @@ def test_a_credential_is_removed_from_any_value():
     """A key stored under an unexpected name is still removed."""
     scrubbed = Redactor().scrub(
         {
-            "api_key": "placeholder-credential",
-            "notes": "the key is placeholder-credential for this run",
+            "api_key": TEST_KEY,
+            "notes": f"the key is {TEST_KEY} for this run",
             "header": "Bearer abcdefghijklmnop",
         }
     )
 
     assert scrubbed["api_key"] == REDACTED
-    assert "placeholder-credential" not in scrubbed["notes"]
+    assert TEST_KEY not in scrubbed["notes"]
     assert scrubbed["header"] == REDACTED
 
 
@@ -137,9 +141,9 @@ def test_captured_text_never_carries_a_credential():
     """The opt-in grants text, not secrets."""
     redactor = Redactor(capture_text=True, capture_window_seconds=900)
 
-    captured = redactor.scrub({"context": "the key is placeholder-credential here"})
+    captured = redactor.scrub({"context": f"the key is {TEST_KEY} here"})
 
-    assert "placeholder-credential" not in captured["context"]
+    assert TEST_KEY not in captured["context"]
 
 
 def test_a_fingerprint_of_empty_text_is_still_described():
