@@ -3,10 +3,16 @@ import { defineConfig, devices } from "@playwright/test";
 // Browser tests run against the real HTTP application (backend/tests/
 // browser_server.py) with real Postgres + Qdrant and deterministic model
 // adapters. Start the backing services first:
-//   docker compose -f ../backend/compose.test.yaml up -d --wait
+//   POSTGRES_TEST_PASSWORD=... docker compose -f ../backend/compose.test.yaml up -d --wait
 // Then: npm run test:e2e. The webServer entries below start the backend and
-// the Vite dev server automatically. Tests run serially (workers: 1) because
+// the frontend automatically. Tests run serially (workers: 1) because
 // stale-index and settings specs mutate server-wide configuration.
+//
+// The frontend is served from a production build, not the Vite dev server.
+// The bundle assertions measure what a user actually downloads: the PDF
+// engine staying out of the initial chunk, and no long task while the reader
+// mounts. Both are true of the built bundle and neither is measurable through
+// an unbundled dev server, which serves hundreds of separate modules.
 const backendUrl =
   process.env.BROWSER_BACKEND_URL ?? "http://127.0.0.1:38201";
 // Port 5180 keeps e2e runs clear of the default Vite dev port (5173), which a
@@ -62,8 +68,10 @@ export default defineConfig({
       timeout: 180_000,
     },
     {
-      command: "npm run dev -- --port 5180 --strictPort --host 127.0.0.1",
+      command: "npm run build && npm run preview -- --port 5180 --strictPort --host 127.0.0.1",
       env: {
+        // The build reads this at config time and bakes the API origin into
+        // the bundle, so the same value has to reach the build and the server.
         VITE_API_URL: backendUrl,
       },
       url: frontendUrl,
