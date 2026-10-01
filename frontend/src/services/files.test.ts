@@ -14,15 +14,19 @@ describe("parseSSEBlock", () => {
     expect(event).toEqual({ name: "error", data: { error: "model is down" } });
   });
 
-  it("parses a done event carrying sources", () => {
+  it("parses a done event carrying sources and retrieval metadata", () => {
     const sources = [
       { content: "chunk", document: "doc.pdf", chunk_index: 0, score: 0.9, page: 3 },
     ];
+    const retrieval = { method: "hybrid", outcome: "success" };
     const event = parseSSEBlock(
-      `event: done\ndata: ${JSON.stringify({ done: true, sources })}`
+      `event: done\ndata: ${JSON.stringify({ done: true, sources, retrieval })}`
     );
 
-    expect(event).toEqual({ name: "done", data: { done: true, sources } });
+    expect(event).toEqual({
+      name: "done",
+      data: { done: true, sources, retrieval },
+    });
   });
 
   it("defaults to a message event when no event line is present", () => {

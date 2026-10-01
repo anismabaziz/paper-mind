@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState, useEffect, useMemo, useCallback } from "react";
+import { lazy, Suspense, useRef, useState, useEffect, useCallback } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,103 +10,38 @@ import {
   MoreHorizontal,
   PanelLeft,
   MessageSquare,
+  Loader2,
+  RotateCw,
+  Square,
 } from "lucide-react";
-import { Document, Page, pdfjs } from "react-pdf";
 import usePdfStore from "@/store/pdf-state";
 import useMobileUi from "@/store/mobile-ui";
-import { useFileStatus, useFileMeta, useDeleteFile } from "@/hooks/useFiles";
+import { usePdfFileData } from "@/hooks/usePdfFileData";
+import { isDetached } from "@/lib/bytes";
+import {
+  useFileStatus,
+  useFileMeta,
+  useDeleteFile,
+  useRetryIngestion,
+  useCancelIngestion,
+} from "@/hooks/useFiles";
 import { cn } from "@/lib/utils";
-import { isDetached, sharedView } from "@/lib/bytes";
-import { displayTitle } from "@/types/db";
+import { displayTitle, ingestionStageLabel, isIngestionActive, isIngestionCancellable, isIngestionRetryable } from "@/types/db";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-
-// Ensure worker is configured even before lazy ReaderDocument loads (for thumbnails)
-if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-}
-
-const thumbnailOptions = {
-  cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-  cMapPacked: true,
-  standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
-};
-
-// Page strip sizing: fixed strip height, horizontal scroll with snap
-const STRIP_THUMB_WIDTH = 84;
-const CLAMP = "box-border max-w-full min-w-0 overflow-hidden";
+import { ThumbnailPlaceholder } from "./PageStripPlaceholder";
+import { FailureNotice } from "./FailureNotice";
 
 const ReaderDocument = lazy(() => import("./ReaderDocument"));
-
-function FakePageBars() {
-  return (
-    <span className="flex h-full flex-col gap-[3px]">
-      {Array.from({ length: 11 }).map((_, i) => (
-        <span key={i} className="block h-[2px] rounded-full bg-ink/15" style={{ width: `${55 + ((i * 37) % 45)}%` }} />
-      ))}
-    </span>
-  );
-}
-
-function ThumbnailPlaceholder({ count }: { count: number }) {
-  return (
-    <div className="flex gap-2 overflow-hidden">
-      {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
-        <div key={n} className={`relative h-28 shrink-0 aspect-[3/4] rounded-[2px] border border-rule bg-paper p-1.5 opacity-40 ${CLAMP}`}>
-          <FakePageBars />
-          <span className="absolute right-1 bottom-1 font-mono text-[0.55rem] text-ink-faint">{n}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function usePdfFileData(file: { url: string } | null) {
-  const [data, setData] = useState<Uint8Array | null>(null);
-  const [generation, setGeneration] = useState(0);
-  const fileUrl = file?.url ?? null;
-
-  useEffect(() => {
-    if (!fileUrl) {
-      setData(null);
-      return;
-    }
-    const url = fileUrl;
-    let cancelled = false;
-    const controller = new AbortController();
-    async function load() {
-      setData(null);
-      try {
-        const res = await fetch(url, { signal: controller.signal });
-        if (!res.ok) throw new Error(`Failed to load PDF (${res.status})`);
-        const buf = await res.arrayBuffer();
-        if (!cancelled) setData(new Uint8Array(buf));
-      } catch {
-        if (!cancelled) setData(null);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [fileUrl, generation]);
-
-  // Refetch fresh bytes after pdf.js detached the shared buffer (e.g. the
-  // thumbnail strip remounts when reopened). Stable across renders.
-  const reload = useCallback(() => setGeneration((g) => g + 1), []);
-
-  return { data, reload };
-}
+const PageStrip = lazy(() => import("./PageStrip"));
 
 export function ReaderPane() {
-  const { file, citationTarget } = usePdfStore();
+  const { file, citationTarget, setFile } = usePdfStore();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const stripRef = useRef<HTMLDivElement>(null);
   const outlineStripRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(100);
   const [showOutline, setShowOutline] = useState(true);
@@ -118,17 +53,14 @@ export function ReaderPane() {
   // A citation jump that arrived before its page mounted. Retried until the
   // page element exists instead of being dropped mid-render.
   const [pendingCitation, setPendingCitation] = useState<{ page: number; key: number } | null>(null);
-  const { data: fileData, reload: reloadFileData } = usePdfFileData(file);
-
-  // Single shared buffer for the sheet and the thumbnail strip. The strip
-  // gets a view over the same ArrayBuffer (no .slice() copy) and the memo
-  // intentionally ignores the outline toggle so opening/closing the strip
-  // never reallocates tens of megabytes.
-  const thumbnailFileData = useMemo(() => (fileData ? { data: sharedView(fileData) } : null), [fileData]);
+  // Single owner of the fetched bytes. Each lazy Renderer (sheet, strip) clones
+  // its own copy; unmounting a Renderer releases its clone and switching
+  // Documents drops the source, so previous buffers are never retained.
+  const { data: fileData, error: fileDataError, reload: reloadFileData } = usePdfFileData(file);
 
   // Reopening the strip remounts its Document. If the worker already
-  // detached the shared buffer, refetch fresh bytes so thumbnails reload
-  // instead of rendering from a dead view.
+  // detached the source, refetch fresh bytes so thumbnails reload instead of
+  // rendering from a dead view.
   useEffect(() => {
     if (showOutline && fileData && isDetached(fileData)) reloadFileData();
   }, [showOutline, fileData, reloadFileData]);
@@ -139,9 +71,23 @@ export function ReaderPane() {
 
   const metaQuery = useFileMeta(file);
 
-  const deleteMutation = useDeleteFile();
+  const deleteMutation = useDeleteFile({
+    onSuccess: (_data, variables) => {
+      if (file?.id === variables.id) setFile(null);
+    },
+  });
+  const deleteError = deleteMutation.error instanceof Error ? deleteMutation.error.message : null;
+
+  const retryIngestion = useRetryIngestion();
+  const retryError = retryIngestion.error instanceof Error ? retryIngestion.error.message : null;
+  const cancelIngestion = useCancelIngestion();
+  const cancelError = cancelIngestion.error instanceof Error ? cancelIngestion.error.message : null;
 
   const isProcessed = checkProcessedQuery.data?.is_processed ?? false;
+  const ingestionJob = checkProcessedQuery.data?.ingestion ?? null;
+  const isJobActive = isIngestionActive(ingestionJob?.state);
+  const isJobFailed = ingestionJob?.state === "failed";
+  const isJobRetryable = isIngestionRetryable(ingestionJob?.state);
   const outline = metaQuery.data?.outline ?? [];
   const metaPageCount = metaQuery.data?.pageCount ?? null;
   const { setLibraryOpen, setChatOpen } = useMobileUi();
@@ -164,40 +110,15 @@ export function ReaderPane() {
   }, []);
 
   useEffect(() => {
-    // reset page when file changes
+    // reset page when file changes; the strip remounts on file id so its
+    // scroll resets without holding the previous Document's scroll node.
     setPage(1);
     setNumPages(null);
     setProgress(0);
     setPendingCitation(null);
     setFlashedPage(null);
-    if (stripRef.current) stripRef.current.scrollLeft = 0;
     if (outlineStripRef.current) outlineStripRef.current.scrollLeft = 0;
   }, [file?.id]);
-
-  useEffect(() => {
-    if (stripRef.current) stripRef.current.scrollLeft = 0;
-  }, [numPages]);
-
-  // Keep the active page thumbnail visible as the sheet scrolls, with breathing room at the edges
-  useEffect(() => {
-    const container = stripRef.current;
-    if (!container || numPages == null) return;
-    const target = container.querySelector<HTMLElement>(`[data-strip-page="${page}"]`);
-    if (!target) return;
-    const PADDING = 16;
-    const containerRect = container.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    const isFullyVisible = targetRect.left >= containerRect.left + PADDING && targetRect.right <= containerRect.right - PADDING;
-    if (!isFullyVisible) {
-      const offsetLeft = target.offsetLeft;
-      const targetWidth = target.offsetWidth;
-      const containerWidth = container.clientWidth;
-      const desired = offsetLeft - containerWidth / 2 + targetWidth / 2;
-      const maxScroll = container.scrollWidth - containerWidth;
-      const clamped = Math.max(0, Math.min(maxScroll, desired));
-      container.scrollTo({ left: clamped, behavior: "smooth" });
-    }
-  }, [page, numPages]);
 
   useEffect(() => {
     if (numPages && page > numPages) setPage(numPages);
@@ -287,7 +208,69 @@ export function ReaderPane() {
   }, []);
 
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas" data-testid="reader">
+      {retryIngestion.isError && file && (
+        <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
+          <p className="text-xs font-medium text-destructive">Retry failed</p>
+          <p className="mt-0.5 text-[0.65rem] text-ink-soft">
+            {retryError ?? "The document could not be queued for indexing again."}
+          </p>
+        </div>
+      )}
+      {cancelIngestion.isError && file && (
+        <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
+          <p className="text-xs font-medium text-destructive">Cancellation failed</p>
+          <p className="mt-0.5 text-[0.65rem] text-ink-soft">
+            {cancelError ?? "The indexing job could not be cancelled."}
+          </p>
+        </div>
+      )}
+      {file && checkProcessedQuery.isError && checkProcessedQuery.data && (
+        <div className="border-b border-rule bg-background px-5 py-2">
+          <FailureNotice
+            testId="reader-status-stale"
+            variant="stale"
+            title="Showing the last confirmed state"
+            message="This document's indexing status could not be refreshed. Nothing changed on the server."
+            actionLabel="Refresh status"
+            onAction={() => checkProcessedQuery.refetch()}
+          />
+        </div>
+      )}
+      {file && checkProcessedQuery.isError && !checkProcessedQuery.data && (
+        <div className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
+          <FailureNotice
+            testId="reader-status-error"
+            title="Could not check indexing status"
+            message={`Questions are paused, not indexing — no confirmed state is available. ${checkProcessedQuery.error instanceof Error ? checkProcessedQuery.error.message : "The status request failed."}`}
+            actionLabel="Retry status check"
+            onAction={() => checkProcessedQuery.refetch()}
+          />
+        </div>
+      )}
+      {deleteMutation.isError && file && (
+        <div role="alert" className="border-b border-destructive/40 bg-destructive/5 px-5 py-2">
+          <p className="text-xs font-medium text-destructive">Delete failed — the document was kept.</p>
+          <p className="mt-0.5 text-[0.65rem] text-ink-soft">{deleteError ?? "Retry deletion."}</p>
+          <div className="mt-1.5 flex gap-2">
+            <button
+              type="button"
+              onClick={() => deleteMutation.mutate(file)}
+              disabled={deleteMutation.isPending}
+              className="border border-ink bg-ink px-2 py-1 font-mono text-[0.6rem] text-paper hover:bg-ink/90 disabled:opacity-40"
+            >
+              Retry delete
+            </button>
+            <button
+              type="button"
+              onClick={() => deleteMutation.reset()}
+              className="border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       {/* Toolbar */}
       <header className="flex h-14 items-center justify-between gap-2 sm:gap-4 border-b border-rule bg-background/80 px-3 sm:px-5 backdrop-blur">
         <div className="flex min-w-0 items-center gap-3">
@@ -304,7 +287,7 @@ export function ReaderPane() {
               {file ? displayTitle(file) : "Document Viewer"}
             </p>
             <p className="label-meta truncate">
-              {file ? `${file.metadata.content_type} · ${isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
+              {file ? `${file.metadata.content_type} · ${file.deletion_state === "deleting" ? "Deleting" : file.deletion_state === "delete_failed" ? "Delete failed" : isJobActive ? `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} ${ingestionJob?.progress ?? 0}%` : isJobRetryable ? (isJobFailed ? "Indexing failed" : "Indexing cancelled") : isProcessed ? "Indexed" : "Indexing"}` : "No document selected"}
             </p>
           </div>
         </div>
@@ -316,13 +299,26 @@ export function ReaderPane() {
                 <button
                   type="button"
                   className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink"
-                  aria-label="Delete document"
-                  title="Delete document"
+                  aria-label="Document actions"
+                  aria-haspopup="menu"
+                  title="Document actions"
                 >
                   <MoreHorizontal className="size-3.5" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="border-rule bg-paper">
+                <DropdownMenuItem
+                  className="sm:hidden"
+                  onSelect={() => setZoom((z) => Math.max(80, z - 10))}
+                >
+                  <Minus className="size-3.5" /> Zoom out
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="sm:hidden"
+                  onSelect={() => setZoom((z) => Math.min(140, z + 10))}
+                >
+                  <Plus className="size-3.5" /> Zoom in
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   className="text-destructive focus:bg-destructive/10 focus:text-destructive"
                   onClick={() => deleteMutation.mutate(file)}
@@ -340,14 +336,19 @@ export function ReaderPane() {
                 "flex size-7 items-center justify-center rounded-sm border transition-colors",
                 showOutline ? "border-ink bg-ink text-paper" : "border-rule text-ink-soft hover:border-ink",
               )}
-              aria-label={showOutline ? "Hide pages overview" : "Show pages overview"}
-              title={showOutline ? "Hide pages overview" : "Show pages overview"}
+              aria-pressed={showOutline}
+              aria-label={showOutline ? "Hide page strip" : "Show page strip"}
+              title={showOutline ? "Hide page strip" : "Show page strip"}
             >
               <List className="size-3.5" />
             </button>
           )}
 
-          <div className="flex items-center gap-1 border-l border-rule pl-2 sm:pl-4">
+          {/* Zoom lives in the actions menu below the sm breakpoint. With the
+              44px touch-target floor, eight controls need more width than a
+              phone has, and the overflowing group covered the library and chat
+              buttons and swallowed their clicks. */}
+          <div className="hidden items-center gap-1 border-l border-rule pl-2 sm:flex sm:pl-4">
             <button
               type="button"
               onClick={() => setZoom((z) => Math.max(80, z - 10))}
@@ -377,10 +378,11 @@ export function ReaderPane() {
               }}
               className="flex size-6 items-center justify-center text-ink-soft hover:text-ink"
               aria-label="Previous page"
+              data-testid="page-prev"
             >
               <ChevronLeft className="size-3.5" />
             </button>
-            <span className="font-mono text-[0.68rem] text-ink-soft">
+            <span className="font-mono text-[0.68rem] text-ink-soft" data-testid="page-indicator">
               {String(page).padStart(2, "0")} / {String(numPages ?? 0).padStart(2, "0")}
             </span>
             <button
@@ -392,6 +394,7 @@ export function ReaderPane() {
               }}
               className="flex size-6 items-center justify-center text-ink-soft hover:text-ink"
               aria-label="Next page"
+              data-testid="page-next"
             >
               <ChevronRight className="size-3.5" />
             </button>
@@ -414,9 +417,25 @@ export function ReaderPane() {
             <div ref={outlineStripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 <span className="label-meta shrink-0 pr-2">Contents</span>
                 {outline.length === 0 ? (
-                  <span className="font-mono text-[0.68rem] text-ink-faint">
-                    {metaQuery.isLoading ? "Loading outline…" : "No outline"}
-                  </span>
+                  metaQuery.isError ? (
+                    <span className="flex items-center gap-2">
+                      <span role="alert" className="font-mono text-[0.68rem] text-destructive">
+                        Outline unavailable —{" "}
+                        {metaQuery.error instanceof Error ? metaQuery.error.message : "could not load outline."}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => metaQuery.refetch()}
+                        className="border border-rule bg-paper px-2 py-0.5 font-mono text-[0.62rem] text-ink-soft hover:border-ink hover:text-ink"
+                      >
+                        Retry
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="font-mono text-[0.68rem] text-ink-faint">
+                      {metaQuery.isLoading ? "Loading outline…" : "No outline"}
+                    </span>
+                  )
                 ) : (
                   outline.map((o, idx) => (
                     <button
@@ -443,55 +462,20 @@ export function ReaderPane() {
             </div>
           </div>
 
-          <div ref={stripRef} className="flex items-center gap-2 overflow-x-auto px-4 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-px-4">
-            <span className="label-meta shrink-0 pr-1">Pages</span>
-            {(() => {
-              const stripCount = metaPageCount ?? numPages;
-              if (!thumbnailFileData || stripCount == null) {
-                return <ThumbnailPlaceholder count={stripCount ?? 4} />;
-              }
-              return (
-                <Document
-                  key={`${file.id}-thumbs`}
-                  file={thumbnailFileData}
-                  options={thumbnailOptions}
-                  loading={<ThumbnailPlaceholder count={stripCount} />}
-                  error={<ThumbnailPlaceholder count={stripCount} />}
-                >
-                  <div className="flex gap-2">
-                    {Array.from({ length: stripCount }, (_, i) => i + 1).map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      data-strip-page={n}
-                      onClick={() => {
-                        setPage(n);
-                        scrollToPage(n);
-                      }}
-                      aria-label={`Go to page ${n}`}
-                      aria-current={page === n ? "true" : undefined}
-                      className={cn(
-                        "group relative flex h-28 shrink-0 aspect-[3/4] items-center justify-center overflow-hidden rounded-[2px] border bg-paper transition-all",
-                        page === n ? "border-marker shadow-sheet" : "border-rule opacity-70 hover:opacity-100",
-                      )}
-                    >
-                      <Page
-                        width={STRIP_THUMB_WIDTH}
-                        pageNumber={n}
-                        renderTextLayer={false}
-                        renderAnnotationLayer={false}
-                        className="bg-paper [&_canvas]:mx-auto [&_canvas]:block [&_canvas]:max-w-full"
-                      />
-                      <span className="pointer-events-none absolute right-1 bottom-1 rounded-sm bg-paper/80 px-0.5 font-mono text-[0.55rem] text-ink-faint">
-                        {n}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                </Document>
-              );
-            })()}
-          </div>
+          <Suspense fallback={<div className="px-4 py-3"><ThumbnailPlaceholder count={metaPageCount ?? numPages ?? 4} /></div>}>
+            <PageStrip
+              key={`${file.id}-strip`}
+              fileId={file.id}
+              source={fileData}
+              pageCount={metaPageCount ?? numPages ?? 0}
+              activePage={page}
+              onSelect={(n) => {
+                setPage(n);
+                scrollToPage(n);
+              }}
+              onBufferDetached={reloadFileData}
+            />
+          </Suspense>
         </div>
       )}
 
@@ -529,10 +513,29 @@ export function ReaderPane() {
                       isProcessed ? "border-marker bg-marker-soft text-marker" : "border-rule bg-canvas text-ink-faint",
                     )}
                   >
-                    {isProcessed ? "Ready for questions" : "Indexing… answers paused"}
+                    {isJobActive
+                      ? `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} · ${ingestionJob?.progress ?? 0}%`
+                      : isJobRetryable
+                        ? isJobFailed
+                          ? "Indexing failed"
+                          : "Indexing cancelled"
+                        : isProcessed
+                          ? "Ready for questions"
+                          : "Indexing"}
                   </span>
-                  <span className="font-mono text-[0.62rem] text-ink-faint">Page {String(page).padStart(2, "0")}</span>
-                </div>
+                  {isJobRetryable && isProcessed && !isJobActive && file && (
+                    <button
+                      type="button"
+                      onClick={() => retryIngestion.mutate(file.name)}
+                      disabled={retryIngestion.isPending}
+                      className="ml-2 border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] text-ink-soft hover:border-ink hover:text-ink disabled:opacity-40"
+                    >
+                      Retry
+                    </button>
+                  )}
+                   <span className="font-mono text-[0.62rem] text-ink-faint">Page {String(page).padStart(2, "0")}</span>
+                 </div>
+
                 <p className="mt-4 font-serif text-[0.95rem] leading-[1.7] text-ink-soft italic">
                   <span className="mr-2 font-mono text-[0.62rem] tracking-[0.14em] text-marker not-italic uppercase">Abstract</span>
                   This workspace keeps every answer tied to the passage it came from. Ask a question in the companion and the document stays open beside it — no context lost.
@@ -548,6 +551,32 @@ export function ReaderPane() {
                 </div>
                 <div className="relative bg-canvas p-3">
                   <div className="overflow-hidden border border-rule bg-white">
+                    {fileDataError ? (
+                      <div className="grid min-h-[760px] place-items-center bg-white p-6 text-center" data-testid="reader-download-error">
+                        <div>
+                          <FailureNotice
+                            title="Could not download this document"
+                            message={`${fileDataError} The document is still in your library — this is a download failure, not a missing document.`}
+                          />
+                          <div className="mt-3 flex items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => reloadFileData()}
+                              className="inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
+                            >
+                              <RotateCw className="size-3" /> Retry download
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLibraryOpen(true)}
+                              className="inline-flex items-center gap-1.5 border border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] text-ink-soft hover:border-ink hover:text-ink"
+                            >
+                              Choose another document
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
                     <Suspense
                       fallback={
                         <div className="grid h-[760px] place-items-center bg-white">
@@ -563,18 +592,66 @@ export function ReaderPane() {
                         activePage={page}
                         flashedPage={flashedPage}
                         pendingPage={pendingCitation?.page ?? null}
+                        onRenderError={reloadFileData}
                       />
                     </Suspense>
+                    )}
                   </div>
-                  {!isProcessed && (
-                    <div className="pointer-events-none absolute inset-3 grid place-items-center bg-paper/70 backdrop-blur-[1px]">
+                  {(!isProcessed || isJobActive) && (
+                    <div className="absolute inset-3 grid place-items-center bg-paper/70 backdrop-blur-[1px]">
                       <div className="rounded-sm border border-rule bg-paper px-4 py-3 text-center shadow-sheet">
-                        <p className="font-mono text-xs font-medium">Indexing document…</p>
-                        <p className="mt-1 text-xs text-ink-soft">Semantic vectors are being generated — chat will unlock when this pass finishes.</p>
+                        <p className="font-mono text-xs font-medium" role="status">
+                          {isJobFailed
+                            ? "Indexing failed"
+                            : isJobRetryable
+                              ? "Indexing cancelled"
+                              : `${ingestionStageLabel(ingestionJob?.stage ?? "queued")} · ${
+                                  ingestionJob?.progress ?? 0
+                                }%`}
+                        </p>
+                        <p className="mt-1 text-xs text-ink-soft">
+                          {isJobFailed
+                            ? (ingestionJob?.error_message ??
+                              "Indexing failed before this document was ready.")
+                            : isJobRetryable
+                              ? "The indexing job was cancelled. You can retry it when ready."
+                              : "Semantic vectors are being generated — chat will unlock when this pass finishes."}
+                        </p>
+                        {isJobRetryable && file && (
+                          <button
+                            type="button"
+                            onClick={() => retryIngestion.mutate(file.name)}
+                            disabled={retryIngestion.isPending}
+                            className="mt-3 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90 disabled:opacity-40"
+                          >
+                            {retryIngestion.isPending ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <RotateCw className="size-3" />
+                            )}
+                            Retry indexing
+                          </button>
+                        )}
+                        {isJobActive && isIngestionCancellable(ingestionJob?.state) && file && (
+                          <button
+                            type="button"
+                            onClick={() => cancelIngestion.mutate(file.name)}
+                            disabled={cancelIngestion.isPending}
+                            className="mt-3 ml-2 inline-flex items-center gap-1.5 border border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] text-ink-soft hover:border-destructive hover:text-destructive disabled:opacity-40"
+                          >
+                            {cancelIngestion.isPending ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Square className="size-3" />
+                            )}
+                            Cancel indexing
+                          </button>
+                        )}
                       </div>
                     </div>
-                  )}
-                </div>
+                   )}
+                 </div>
+
                 <div className="flex items-center justify-between border-t border-rule px-10 py-4">
                   <span className="label-meta">p. {String(page).padStart(2, "0")}</span>
                   <span className="label-meta">{String(page).padStart(2, "0")}</span>

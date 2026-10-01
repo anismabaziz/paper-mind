@@ -1,11 +1,10 @@
 """
 Shared test fixtures.
 
-Convention: tests never talk to real Qdrant, LLM, or Postgres, and every
-upload goes through a fake storage object. A pinned test Settings is
-installed for every test; fakes are constructed per-test and injected
-through the app factory or service constructors rather than patched onto
-modules.
+The default suite uses fake Qdrant, chat, and storage adapters with in-memory
+SQLite. The separately marked full-stack suite explicitly uses real Postgres
+and Qdrant with deterministic model adapters. A pinned Settings instance keeps
+developer environment values out of both suites.
 """
 
 from pathlib import Path
@@ -25,14 +24,18 @@ from settings import (
     DatabaseSettings,
     EmbeddingSettings,
     ParsingSettings,
+    QueryContextSettings,
     RerankSettings,
     Settings,
     StorageSettings,
+    TelemetrySettings,
     VectorSettings,
 )
 
 # Pinned offline-safe settings: sqlite in memory, deterministic secret.
-# Every group is explicit so a real .env cannot leak through.
+# Every group is explicit so a real .env cannot leak through. Telemetry is off
+# so a test run writes no trace files; the tests that read traces build their
+# own tracer over a temporary directory.
 TEST_SETTINGS = Settings(
     database=DatabaseSettings(database_url="sqlite:///:memory:"),
     storage=StorageSettings(
@@ -43,7 +46,9 @@ TEST_SETTINGS = Settings(
     chunking=ChunkingSettings(),
     rerank=RerankSettings(),
     parsing=ParsingSettings(),
+    query_context=QueryContextSettings(),
     auth=AuthSettings(app_secret="test-app-secret"),
+    telemetry=TelemetrySettings(enabled=False),
 )
 
 
@@ -59,3 +64,11 @@ def test_settings():
 def settings_obj():
     """Return the installed test Settings; tweak group fields via monkeypatch."""
     return settings_module.get_settings()
+
+
+@pytest.fixture
+def tracer():
+    """Tracer the composed app answers with; override to record its traces."""
+    from services.telemetry.spans import Tracer
+
+    return Tracer()

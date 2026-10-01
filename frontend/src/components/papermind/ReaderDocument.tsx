@@ -1,21 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import { RotateCw } from "lucide-react";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import type { File as FileType } from "@/types/db";
 import { cn } from "@/lib/utils";
-import { sharedView } from "@/lib/bytes";
+import { clonePdfData } from "@/lib/pdf-buffer";
+import { pdfDocumentOptions, pdfWorkerSrc } from "@/lib/pdf-assets";
+import { FailureNotice } from "./FailureNotice";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc();
 
-const options = {
-  cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-  cMapPacked: true,
-  standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
-};
+const options = pdfDocumentOptions();
 
 // Pages kept mounted behind / ahead of the active page. Everything else
 // renders as a sized placeholder so a 200-page document mounts a handful of
@@ -33,6 +29,8 @@ type Props = {
   // Page a queued citation jump is waiting for. Kept mounted even when it
   // falls outside the active window so the jump can land.
   pendingPage?: number | null;
+  /** Retry the current bytes after a render failure, instead of spinning. */
+  onRenderError?: () => void;
 };
 
 function PdfLoading({ label = "Loading document…" }: { label?: string }) {
@@ -43,12 +41,23 @@ function PdfLoading({ label = "Loading document…" }: { label?: string }) {
   );
 }
 
-function PdfError({ message }: { message: string }) {
+function PdfError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="grid h-[760px] place-items-center bg-white p-6 text-center">
+    <div className="grid h-[760px] place-items-center bg-white p-6 text-center" data-testid="reader-render-error">
       <div>
-        <p className="font-mono text-xs font-medium text-destructive">Failed to load document</p>
-        <p className="mt-1 text-xs text-ink-soft">{message}</p>
+        <FailureNotice
+          title="Could not render this document"
+          message={`${message} The document is still in your library — rendering it again usually clears this.`}
+        />
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
+          >
+            <RotateCw className="size-3" /> Retry rendering
+          </button>
+        )}
       </div>
     </div>
   );
@@ -62,6 +71,7 @@ export default function ReaderDocument({
   activePage = 1,
   flashedPage = null,
   pendingPage = null,
+  onRenderError,
 }: Props) {
   const [internalData, setInternalData] = useState<Uint8Array | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -69,14 +79,17 @@ export default function ReaderDocument({
 
   const data = externalData !== undefined ? externalData : internalData;
 
-  // Share one fetch buffer between the sheet and the thumbnail strip via a
-  // view over the same ArrayBuffer — no .slice() copy, so a 50 MB file does
-  // not become 100–150 MB in JS memory. Note the trade-off: pdf.js transfers
-  // the buffer to the worker on load, detaching the shared view afterwards.
-  // That is fine for the single-load path (both Documents mount from views
-  // created before the transfer); a remount from a detached buffer refetches
-  // via the effect below in ReaderPane's loader or this fallback loader.
-  const fileData = useMemo(() => (data ? { data: sharedView(data) } : null), [data]);
+  // Each Document owns exactly one clone: pdf.js transfers the buffer to its
+  // worker and detaches it, so the fetched source is never handed over
+  // directly. Remounting (including StrictMode remounts) clones again.
+  const [fileData, setFileData] = useState<{ data: Uint8Array } | null>(() => clonePdfData(data));
+  useEffect(() => {
+    try {
+      setFileData(clonePdfData(data));
+    } catch {
+      setFileData(null);
+    }
+  }, [data, file.id]);
 
   useEffect(() => {
     if (externalData !== undefined) return;
@@ -104,7 +117,16 @@ export default function ReaderDocument({
     };
   }, [file.url, externalData]);
 
-  if (fetchError) return <PdfError message={fetchError} />;
+  if (fetchError)
+    return (
+      <PdfError
+        message={fetchError}
+        onRetry={() => {
+          setFetchError(null);
+          onRenderError?.();
+        }}
+      />
+    );
   if (!data || !fileData) return <PdfLoading />;
 
   // Width of the white sheet minus canvas padding (p-3 = 12px each side) and border.

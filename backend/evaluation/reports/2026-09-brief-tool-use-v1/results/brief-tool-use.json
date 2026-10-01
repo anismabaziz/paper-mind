@@ -1,0 +1,2832 @@
+{
+  "configurations": [
+    {
+      "abstention": 1.0,
+      "citation_precision": null,
+      "completion": 1.0,
+      "configuration": "direct",
+      "conflict_handling": 1.0,
+      "correctness": 1.0,
+      "cost_usd": 0.002,
+      "evidence_coverage": 0.0,
+      "latency_p50": 1.2,
+      "latency_p95": 1.2,
+      "trials": 1
+    },
+    {
+      "abstention": 0.909,
+      "citation_precision": 1.0,
+      "completion": 0.909,
+      "configuration": "brief",
+      "conflict_handling": 1.0,
+      "correctness": 0.875,
+      "cost_usd": 0.088,
+      "evidence_coverage": 0.875,
+      "latency_p50": 12.5,
+      "latency_p95": 24.0,
+      "trials": 11
+    },
+    {
+      "abstention": 1.0,
+      "citation_precision": 1.0,
+      "completion": 1.0,
+      "configuration": "extended",
+      "conflict_handling": 1.0,
+      "correctness": 1.0,
+      "cost_usd": 0.096,
+      "evidence_coverage": 1.0,
+      "latency_p50": 13.0,
+      "latency_p95": 22.9,
+      "trials": 12
+    }
+  ],
+  "paid_trials": {
+    "cost_limit_usd": 5.0,
+    "measured": false,
+    "reason": "paid model trials run on a controlled schedule with a cost limit; this report holds deterministic checks only",
+    "trials_per_task": 3
+  },
+  "representative_trajectories": {
+    "conflicting": {
+      "brief": {
+        "abstained": false,
+        "claims": [
+          {
+            "conflicts": [
+              "E2"
+            ],
+            "status": "contested",
+            "supports": [
+              "E1"
+            ],
+            "text": "Sparse finds more of the gold passages (recall 0.70 against 0.62) while dense reaches more questions outright (hit rate 0.71 against 0.66); neither wins on both, so the finding is contested between th"
+          }
+        ],
+        "gaps": [],
+        "summary": "Sparse finds more of the gold passages (recall 0.70 against 0.62) while dense reaches more questions outright (hit rate 0.71 against 0.66); neither wins on both, so the finding is contested between the two measures."
+      },
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "1 claim(s) kept contested",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "3 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "outcome": "complete",
+      "task_id": "brief-disagreement-single-representation",
+      "tool_calls": 4,
+      "tools": [
+        {
+          "evidence_ids": [
+            "E1"
+          ],
+          "latency_ms": 11.0,
+          "refusal": null,
+          "tool": "search_passages"
+        },
+        {
+          "evidence_ids": [
+            "E2"
+          ],
+          "latency_ms": 12.0,
+          "refusal": null,
+          "tool": "search_passages"
+        },
+        {
+          "evidence_ids": [
+            "E1",
+            "E2",
+            "E3"
+          ],
+          "latency_ms": 2.0,
+          "refusal": null,
+          "tool": "read_passages"
+        },
+        {
+          "evidence_ids": [
+            "E1",
+            "E2"
+          ],
+          "latency_ms": 3.0,
+          "refusal": null,
+          "tool": "compare_evidence"
+        }
+      ],
+      "total_seconds": 10.0,
+      "trial": 7,
+      "turns": 3
+    },
+    "failed": {
+      "brief": {
+        "abstained": false,
+        "claims": [],
+        "gaps": [],
+        "summary": ""
+      },
+      "configuration": "brief",
+      "cost_usd": 0.004,
+      "grades": {
+        "abstention": {
+          "detail": "the run ended timeout, which is neither answer nor abstention",
+          "name": "abstention",
+          "outcome": "failed"
+        },
+        "both_documents": {
+          "detail": "evidence held from papermind-rag-primer.pdf; the task needs papermind-eval-methods.pdf, papermind-rag-primer.pdf",
+          "name": "both_documents",
+          "outcome": "failed"
+        },
+        "citation_precision": {
+          "detail": "the brief made no citations to check",
+          "name": "citation_precision",
+          "outcome": "unknown"
+        },
+        "citation_recall": {
+          "detail": "the brief made no claims to check",
+          "name": "citation_recall",
+          "outcome": "unknown"
+        },
+        "completion": {
+          "detail": "the brief ended timeout (timeout)",
+          "name": "completion",
+          "outcome": "failed"
+        },
+        "conflict_handling": {
+          "detail": "the brief made no claims to check",
+          "name": "conflict_handling",
+          "outcome": "unknown"
+        },
+        "correctness": {
+          "detail": "only 0% of the answer reused",
+          "name": "correctness",
+          "outcome": "failed"
+        },
+        "evidence_coverage": {
+          "detail": "no held passage holds: Hit rate at k asks whether any of the passages that answer a question appeared in the first k results",
+          "name": "evidence_coverage",
+          "outcome": "failed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "1 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "1 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "outcome": "timeout",
+      "task_id": "brief-cross-lookup-hit-rate",
+      "tool_calls": 1,
+      "tools": [
+        {
+          "evidence_ids": [
+            "E1"
+          ],
+          "latency_ms": 11.0,
+          "refusal": null,
+          "tool": "search_passages"
+        }
+      ],
+      "total_seconds": 30.0,
+      "trial": 24,
+      "turns": 2
+    },
+    "partial": {
+      "brief": {
+        "abstained": false,
+        "claims": [
+          {
+            "conflicts": [],
+            "status": "supported",
+            "supports": [
+              "E1"
+            ],
+            "text": "The primer names no embedding model, so that half cannot be answered from the pair; it does say overlap between consecutive chunks reduces the chance that a fact sitting across a cut boundary is lost "
+          }
+        ],
+        "gaps": [
+          "The pair names no embedding model, so that half is unanswered."
+        ],
+        "summary": "The primer names no embedding model, so that half cannot be answered from the pair; it does say overlap between consecutive chunks reduces the chance that a fact sitting across a cut boundary is lost entirely."
+      },
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "1 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "partial where the pair runs out",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "1 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "1 gap(s), 0 unresolved",
+          "name": "gaps",
+          "outcome": "passed"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "outcome": "partial",
+      "task_id": "brief-missing-evidence-model",
+      "tool_calls": 3,
+      "tools": [
+        {
+          "evidence_ids": [
+            "E1"
+          ],
+          "latency_ms": 11.0,
+          "refusal": null,
+          "tool": "search_passages"
+        },
+        {
+          "evidence_ids": [
+            "E2"
+          ],
+          "latency_ms": 12.0,
+          "refusal": null,
+          "tool": "search_passages"
+        },
+        {
+          "evidence_ids": [
+            "E1"
+          ],
+          "latency_ms": 2.0,
+          "refusal": null,
+          "tool": "read_passages"
+        }
+      ],
+      "total_seconds": 13.0,
+      "trial": 10,
+      "turns": 3
+    },
+    "successful": {
+      "brief": {
+        "abstained": false,
+        "claims": [
+          {
+            "conflicts": [],
+            "status": "supported",
+            "supports": [
+              "E1",
+              "E2"
+            ],
+            "text": "The share of questions for which at least one gold passage appears in the top k results; the mean over the set is the share of questions the system can reach at all."
+          }
+        ],
+        "gaps": [],
+        "summary": "The share of questions for which at least one gold passage appears in the top k results; the mean over the set is the share of questions the system can reach at all."
+      },
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "outcome": "complete",
+      "task_id": "brief-cross-lookup-hit-rate",
+      "tool_calls": 3,
+      "tools": [
+        {
+          "evidence_ids": [
+            "E1"
+          ],
+          "latency_ms": 11.0,
+          "refusal": null,
+          "tool": "search_passages"
+        },
+        {
+          "evidence_ids": [
+            "E2"
+          ],
+          "latency_ms": 12.0,
+          "refusal": null,
+          "tool": "search_passages"
+        },
+        {
+          "evidence_ids": [
+            "E1",
+            "E2"
+          ],
+          "latency_ms": 2.0,
+          "refusal": null,
+          "tool": "read_passages"
+        }
+      ],
+      "total_seconds": 4.0,
+      "trial": 1,
+      "turns": 3
+    }
+  },
+  "task_set": "2026-09-brief-tasks-v1",
+  "tasks": [
+    {
+      "category": "cross_lookup",
+      "configurations": [
+        "brief",
+        "direct"
+      ],
+      "cost_usd": 0.03,
+      "failures": {
+        "timeout": 1
+      },
+      "grade_pass_rate": {
+        "abstention": 0.8,
+        "both_documents": 0.6,
+        "citation_precision": 1.0,
+        "citation_recall": 0.75,
+        "completion": 0.8,
+        "conflict_handling": 1.0,
+        "correctness": 0.8,
+        "evidence_coverage": 0.6,
+        "repeated_calls": 1.0,
+        "scope_enforcement": 1.0,
+        "tool_validity": 1.0,
+        "unnecessary_calls": 1.0
+      },
+      "latency_p50": 6.0,
+      "latency_p95": 25.299999999999997,
+      "outcome_consistency": 0.8,
+      "task_id": "brief-cross-lookup-hit-rate",
+      "timeout_rate": 0.2,
+      "tokens_p50": 1095.0,
+      "tokens_p95": 1122.0,
+      "tool_calls_p50": 3.0,
+      "tool_calls_p95": 3.0,
+      "trials": 5,
+      "turns_p50": 3.0,
+      "turns_p95": 3.0
+    },
+    {
+      "category": "agreement",
+      "configurations": [
+        "extended"
+      ],
+      "cost_usd": 0.024,
+      "failures": {},
+      "grade_pass_rate": {
+        "abstention": 1.0,
+        "both_documents": 1.0,
+        "citation_precision": 1.0,
+        "citation_recall": 1.0,
+        "completion": 1.0,
+        "conflict_handling": 1.0,
+        "correctness": 1.0,
+        "evidence_coverage": 1.0,
+        "repeated_calls": 1.0,
+        "scope_enforcement": 1.0,
+        "tool_validity": 1.0,
+        "unnecessary_calls": 1.0
+      },
+      "latency_p50": 8.0,
+      "latency_p95": 8.9,
+      "outcome_consistency": 1.0,
+      "task_id": "brief-agreement-recall-stricter",
+      "timeout_rate": 0.0,
+      "tokens_p50": 1155.0,
+      "tokens_p95": 1168.5,
+      "tool_calls_p50": 4.0,
+      "tool_calls_p95": 4.0,
+      "trials": 3,
+      "turns_p50": 3.0,
+      "turns_p95": 3.0
+    },
+    {
+      "category": "disagreement",
+      "configurations": [
+        "extended"
+      ],
+      "cost_usd": 0.024,
+      "failures": {},
+      "grade_pass_rate": {
+        "abstention": 1.0,
+        "citation_precision": 1.0,
+        "citation_recall": 1.0,
+        "completion": 1.0,
+        "conflict_handling": 1.0,
+        "correctness": 1.0,
+        "evidence_coverage": 1.0,
+        "repeated_calls": 1.0,
+        "scope_enforcement": 1.0,
+        "tool_validity": 1.0,
+        "unnecessary_calls": 1.0
+      },
+      "latency_p50": 10.0,
+      "latency_p95": 11.8,
+      "outcome_consistency": 1.0,
+      "task_id": "brief-disagreement-single-representation",
+      "timeout_rate": 0.0,
+      "tokens_p50": 1200.0,
+      "tokens_p95": 1213.5,
+      "tool_calls_p50": 4.0,
+      "tool_calls_p95": 4.0,
+      "trials": 3,
+      "turns_p50": 3.0,
+      "turns_p95": 3.0
+    },
+    {
+      "category": "missing_evidence",
+      "configurations": [
+        "brief"
+      ],
+      "cost_usd": 0.036,
+      "failures": {},
+      "grade_pass_rate": {
+        "abstention": 1.0,
+        "citation_precision": 1.0,
+        "citation_recall": 1.0,
+        "completion": 1.0,
+        "conflict_handling": 1.0,
+        "correctness": 1.0,
+        "evidence_coverage": 1.0,
+        "gaps": 1.0,
+        "repeated_calls": 1.0,
+        "scope_enforcement": 1.0,
+        "tool_validity": 1.0,
+        "unnecessary_calls": 1.0
+      },
+      "latency_p50": 12.0,
+      "latency_p95": 14.7,
+      "outcome_consistency": 1.0,
+      "task_id": "brief-missing-evidence-model",
+      "timeout_rate": 0.0,
+      "tokens_p50": 1252.5,
+      "tokens_p95": 1311.0,
+      "tool_calls_p50": 3.0,
+      "tool_calls_p95": 3.0,
+      "trials": 4,
+      "turns_p50": 3.0,
+      "turns_p95": 5.549999999999999
+    },
+    {
+      "category": "unanswerable",
+      "configurations": [
+        "brief"
+      ],
+      "cost_usd": 0.024,
+      "failures": {},
+      "grade_pass_rate": {
+        "abstention": 1.0,
+        "completion": 1.0,
+        "repeated_calls": 1.0,
+        "scope_enforcement": 1.0,
+        "tool_validity": 1.0,
+        "unnecessary_calls": 1.0
+      },
+      "latency_p50": 16.0,
+      "latency_p95": 17.8,
+      "outcome_consistency": 1.0,
+      "task_id": "brief-unanswerable-hardware-cost",
+      "timeout_rate": 0.0,
+      "tokens_p50": 1290.0,
+      "tokens_p95": 1303.5,
+      "tool_calls_p50": 2.0,
+      "tool_calls_p95": 2.0,
+      "trials": 3,
+      "turns_p50": 3.0,
+      "turns_p95": 3.0
+    },
+    {
+      "category": "page_citation",
+      "configurations": [
+        "extended"
+      ],
+      "cost_usd": 0.024,
+      "failures": {},
+      "grade_pass_rate": {
+        "abstention": 1.0,
+        "both_documents": 1.0,
+        "citation_precision": 1.0,
+        "citation_recall": 1.0,
+        "completion": 1.0,
+        "conflict_handling": 1.0,
+        "correctness": 1.0,
+        "evidence_coverage": 1.0,
+        "page_citation": 1.0,
+        "repeated_calls": 1.0,
+        "scope_enforcement": 1.0,
+        "tool_validity": 1.0,
+        "unnecessary_calls": 1.0
+      },
+      "latency_p50": 19.0,
+      "latency_p95": 20.8,
+      "outcome_consistency": 1.0,
+      "task_id": "brief-page-citation-rerank-table",
+      "timeout_rate": 0.0,
+      "tokens_p50": 1335.0,
+      "tokens_p95": 1348.5,
+      "tool_calls_p50": 4.0,
+      "tool_calls_p95": 4.0,
+      "trials": 3,
+      "turns_p50": 3.0,
+      "turns_p95": 3.0
+    },
+    {
+      "category": "agreement",
+      "configurations": [
+        "extended"
+      ],
+      "cost_usd": 0.024,
+      "failures": {},
+      "grade_pass_rate": {
+        "abstention": 1.0,
+        "both_documents": 1.0,
+        "citation_precision": 1.0,
+        "citation_recall": 1.0,
+        "completion": 1.0,
+        "conflict_handling": 1.0,
+        "correctness": 1.0,
+        "evidence_coverage": 1.0,
+        "repeated_calls": 1.0,
+        "scope_enforcement": 1.0,
+        "tool_validity": 1.0,
+        "unnecessary_calls": 1.0
+      },
+      "latency_p50": 22.0,
+      "latency_p95": 23.8,
+      "outcome_consistency": 1.0,
+      "task_id": "brief-compare-rerank-worth",
+      "timeout_rate": 0.0,
+      "tokens_p50": 1380.0,
+      "tokens_p95": 1393.5,
+      "tool_calls_p50": 4.0,
+      "tool_calls_p95": 4.0,
+      "trials": 3,
+      "turns_p50": 3.0,
+      "turns_p95": 3.0
+    }
+  ],
+  "totals": {
+    "cost_usd": 0.186,
+    "failures": {
+      "timeout": 1
+    },
+    "latency_p50": 12.25,
+    "latency_p95": 23.699999999999996,
+    "timeout_rate": 0.042,
+    "tokens_p50": 1237.5,
+    "tokens_p95": 1377.75,
+    "tokens_total": 28885,
+    "tool_calls_p50": 3.5,
+    "tool_calls_p95": 4.0,
+    "trials": 24,
+    "turns_p50": 3.0,
+    "turns_p95": 3.0
+  },
+  "trials": [
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 910,
+      "outcome": "complete",
+      "output_tokens": 185,
+      "task_id": "brief-cross-lookup-hit-rate",
+      "tool_calls": 3,
+      "total_seconds": 4.0,
+      "trial": 1,
+      "turns": 3
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 920,
+      "outcome": "complete",
+      "output_tokens": 190,
+      "task_id": "brief-cross-lookup-hit-rate",
+      "tool_calls": 3,
+      "total_seconds": 6.0,
+      "trial": 2,
+      "turns": 3
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 930,
+      "outcome": "complete",
+      "output_tokens": 195,
+      "task_id": "brief-cross-lookup-hit-rate",
+      "tool_calls": 3,
+      "total_seconds": 6.5,
+      "trial": 3,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 940,
+      "outcome": "complete",
+      "output_tokens": 200,
+      "task_id": "brief-agreement-recall-stricter",
+      "tool_calls": 4,
+      "total_seconds": 7.0,
+      "trial": 4,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 950,
+      "outcome": "complete",
+      "output_tokens": 205,
+      "task_id": "brief-agreement-recall-stricter",
+      "tool_calls": 4,
+      "total_seconds": 9.0,
+      "trial": 5,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 960,
+      "outcome": "complete",
+      "output_tokens": 210,
+      "task_id": "brief-agreement-recall-stricter",
+      "tool_calls": 4,
+      "total_seconds": 8.0,
+      "trial": 6,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "1 claim(s) kept contested",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "3 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 970,
+      "outcome": "complete",
+      "output_tokens": 215,
+      "task_id": "brief-disagreement-single-representation",
+      "tool_calls": 4,
+      "total_seconds": 10.0,
+      "trial": 7,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "1 claim(s) kept contested",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "3 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 980,
+      "outcome": "complete",
+      "output_tokens": 220,
+      "task_id": "brief-disagreement-single-representation",
+      "tool_calls": 4,
+      "total_seconds": 12.0,
+      "trial": 8,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "1 claim(s) kept contested",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "3 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 990,
+      "outcome": "complete",
+      "output_tokens": 225,
+      "task_id": "brief-disagreement-single-representation",
+      "tool_calls": 4,
+      "total_seconds": 9.5,
+      "trial": 9,
+      "turns": 3
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "1 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "partial where the pair runs out",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "1 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "1 gap(s), 0 unresolved",
+          "name": "gaps",
+          "outcome": "passed"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1000,
+      "outcome": "partial",
+      "output_tokens": 230,
+      "task_id": "brief-missing-evidence-model",
+      "tool_calls": 3,
+      "total_seconds": 13.0,
+      "trial": 10,
+      "turns": 3
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "1 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "partial where the pair runs out",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "1 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "1 gap(s), 0 unresolved",
+          "name": "gaps",
+          "outcome": "passed"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1010,
+      "outcome": "partial",
+      "output_tokens": 235,
+      "task_id": "brief-missing-evidence-model",
+      "tool_calls": 3,
+      "total_seconds": 15.0,
+      "trial": 11,
+      "turns": 3
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "1 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "partial where the pair runs out",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "1 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "1 gap(s), 0 unresolved",
+          "name": "gaps",
+          "outcome": "passed"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1020,
+      "outcome": "partial",
+      "output_tokens": 240,
+      "task_id": "brief-missing-evidence-model",
+      "tool_calls": 3,
+      "total_seconds": 11.0,
+      "trial": 12,
+      "turns": 3
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "abstained as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "the brief made no citations to check",
+          "name": "citation_precision",
+          "outcome": "unknown"
+        },
+        "citation_recall": {
+          "detail": "the brief made no claims to check",
+          "name": "citation_recall",
+          "outcome": "unknown"
+        },
+        "completion": {
+          "detail": "abstained as the task required",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "the brief made no claims to check",
+          "name": "conflict_handling",
+          "outcome": "unknown"
+        },
+        "correctness": {
+          "detail": "the task expects an abstention, not an answer",
+          "name": "correctness",
+          "outcome": "unknown"
+        },
+        "evidence_coverage": {
+          "detail": "the task names no expected evidence",
+          "name": "evidence_coverage",
+          "outcome": "unknown"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "2 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "2 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1030,
+      "outcome": "abstained",
+      "output_tokens": 245,
+      "task_id": "brief-unanswerable-hardware-cost",
+      "tool_calls": 2,
+      "total_seconds": 16.0,
+      "trial": 13,
+      "turns": 3
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "abstained as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "the brief made no citations to check",
+          "name": "citation_precision",
+          "outcome": "unknown"
+        },
+        "citation_recall": {
+          "detail": "the brief made no claims to check",
+          "name": "citation_recall",
+          "outcome": "unknown"
+        },
+        "completion": {
+          "detail": "abstained as the task required",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "the brief made no claims to check",
+          "name": "conflict_handling",
+          "outcome": "unknown"
+        },
+        "correctness": {
+          "detail": "the task expects an abstention, not an answer",
+          "name": "correctness",
+          "outcome": "unknown"
+        },
+        "evidence_coverage": {
+          "detail": "the task names no expected evidence",
+          "name": "evidence_coverage",
+          "outcome": "unknown"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "2 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "2 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1040,
+      "outcome": "abstained",
+      "output_tokens": 250,
+      "task_id": "brief-unanswerable-hardware-cost",
+      "tool_calls": 2,
+      "total_seconds": 18.0,
+      "trial": 14,
+      "turns": 3
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "abstained as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "the brief made no citations to check",
+          "name": "citation_precision",
+          "outcome": "unknown"
+        },
+        "citation_recall": {
+          "detail": "the brief made no claims to check",
+          "name": "citation_recall",
+          "outcome": "unknown"
+        },
+        "completion": {
+          "detail": "abstained as the task required",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "the brief made no claims to check",
+          "name": "conflict_handling",
+          "outcome": "unknown"
+        },
+        "correctness": {
+          "detail": "the task expects an abstention, not an answer",
+          "name": "correctness",
+          "outcome": "unknown"
+        },
+        "evidence_coverage": {
+          "detail": "the task names no expected evidence",
+          "name": "evidence_coverage",
+          "outcome": "unknown"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "2 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "2 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1050,
+      "outcome": "abstained",
+      "output_tokens": 255,
+      "task_id": "brief-unanswerable-hardware-cost",
+      "tool_calls": 2,
+      "total_seconds": 12.5,
+      "trial": 15,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "every citation carries its page",
+          "name": "page_citation",
+          "outcome": "passed"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1060,
+      "outcome": "complete",
+      "output_tokens": 260,
+      "task_id": "brief-page-citation-rerank-table",
+      "tool_calls": 4,
+      "total_seconds": 19.0,
+      "trial": 16,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "every citation carries its page",
+          "name": "page_citation",
+          "outcome": "passed"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1070,
+      "outcome": "complete",
+      "output_tokens": 265,
+      "task_id": "brief-page-citation-rerank-table",
+      "tool_calls": 4,
+      "total_seconds": 21.0,
+      "trial": 17,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "2 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "2 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "every citation carries its page",
+          "name": "page_citation",
+          "outcome": "passed"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1080,
+      "outcome": "complete",
+      "output_tokens": 270,
+      "task_id": "brief-page-citation-rerank-table",
+      "tool_calls": 4,
+      "total_seconds": 14.0,
+      "trial": 18,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "3 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "3 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1090,
+      "outcome": "complete",
+      "output_tokens": 275,
+      "task_id": "brief-compare-rerank-worth",
+      "tool_calls": 4,
+      "total_seconds": 22.0,
+      "trial": 19,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "3 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "3 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1100,
+      "outcome": "complete",
+      "output_tokens": 280,
+      "task_id": "brief-compare-rerank-worth",
+      "tool_calls": 4,
+      "total_seconds": 24.0,
+      "trial": 20,
+      "turns": 3
+    },
+    {
+      "configuration": "extended",
+      "cost_usd": 0.008,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from 2 documents",
+          "name": "both_documents",
+          "outcome": "passed"
+        },
+        "citation_precision": {
+          "detail": "3 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "3 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "4 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "4 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1110,
+      "outcome": "complete",
+      "output_tokens": 285,
+      "task_id": "brief-compare-rerank-worth",
+      "tool_calls": 4,
+      "total_seconds": 15.5,
+      "trial": 21,
+      "turns": 3
+    },
+    {
+      "configuration": "direct",
+      "cost_usd": 0.002,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "evidence held from no document; the task needs papermind-eval-methods.pdf, papermind-rag-primer.pdf",
+          "name": "both_documents",
+          "outcome": "failed"
+        },
+        "citation_precision": {
+          "detail": "the brief made no citations to check",
+          "name": "citation_precision",
+          "outcome": "unknown"
+        },
+        "citation_recall": {
+          "detail": "claims citing no held evidence: The share of questions for which at least one gold passage a",
+          "name": "citation_recall",
+          "outcome": "failed"
+        },
+        "completion": {
+          "detail": "the brief completed",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "no held passage holds: Hit rate at k is, Hit rate at k asks whether any of the passages that answer a question appeared in the first k results",
+          "name": "evidence_coverage",
+          "outcome": "failed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "0 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "0 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 400,
+      "outcome": "complete",
+      "output_tokens": 120,
+      "task_id": "brief-cross-lookup-hit-rate",
+      "tool_calls": 0,
+      "total_seconds": 1.2,
+      "trial": 22,
+      "turns": 1
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.012,
+      "failure_category": "",
+      "grades": {
+        "abstention": {
+          "detail": "answered as the task required",
+          "name": "abstention",
+          "outcome": "passed"
+        },
+        "both_documents": {
+          "detail": "the task needs no second document",
+          "name": "both_documents",
+          "outcome": "unknown"
+        },
+        "citation_precision": {
+          "detail": "1 citations held",
+          "name": "citation_precision",
+          "outcome": "passed"
+        },
+        "citation_recall": {
+          "detail": "1 claims cite held evidence",
+          "name": "citation_recall",
+          "outcome": "passed"
+        },
+        "completion": {
+          "detail": "partial where the pair runs out",
+          "name": "completion",
+          "outcome": "passed"
+        },
+        "conflict_handling": {
+          "detail": "no agreement averaged away",
+          "name": "conflict_handling",
+          "outcome": "passed"
+        },
+        "correctness": {
+          "detail": "100% of the answer reused",
+          "name": "correctness",
+          "outcome": "passed"
+        },
+        "evidence_coverage": {
+          "detail": "1 expected passages held",
+          "name": "evidence_coverage",
+          "outcome": "passed"
+        },
+        "gaps": {
+          "detail": "1 gap(s), 0 unresolved",
+          "name": "gaps",
+          "outcome": "passed"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "3 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "3 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 1100,
+      "outcome": "partial",
+      "output_tokens": 220,
+      "task_id": "brief-missing-evidence-model",
+      "tool_calls": 3,
+      "total_seconds": 9.5,
+      "trial": 23,
+      "turns": 6
+    },
+    {
+      "configuration": "brief",
+      "cost_usd": 0.004,
+      "failure_category": "timeout",
+      "grades": {
+        "abstention": {
+          "detail": "the run ended timeout, which is neither answer nor abstention",
+          "name": "abstention",
+          "outcome": "failed"
+        },
+        "both_documents": {
+          "detail": "evidence held from papermind-rag-primer.pdf; the task needs papermind-eval-methods.pdf, papermind-rag-primer.pdf",
+          "name": "both_documents",
+          "outcome": "failed"
+        },
+        "citation_precision": {
+          "detail": "the brief made no citations to check",
+          "name": "citation_precision",
+          "outcome": "unknown"
+        },
+        "citation_recall": {
+          "detail": "the brief made no claims to check",
+          "name": "citation_recall",
+          "outcome": "unknown"
+        },
+        "completion": {
+          "detail": "the brief ended timeout (timeout)",
+          "name": "completion",
+          "outcome": "failed"
+        },
+        "conflict_handling": {
+          "detail": "the brief made no claims to check",
+          "name": "conflict_handling",
+          "outcome": "unknown"
+        },
+        "correctness": {
+          "detail": "only 0% of the answer reused",
+          "name": "correctness",
+          "outcome": "failed"
+        },
+        "evidence_coverage": {
+          "detail": "no held passage holds: Hit rate at k asks whether any of the passages that answer a question appeared in the first k results",
+          "name": "evidence_coverage",
+          "outcome": "failed"
+        },
+        "gaps": {
+          "detail": "the task expects no gap",
+          "name": "gaps",
+          "outcome": "unknown"
+        },
+        "page_citation": {
+          "detail": "the task needs no exact page",
+          "name": "page_citation",
+          "outcome": "unknown"
+        },
+        "repeated_calls": {
+          "detail": "no call repeated",
+          "name": "repeated_calls",
+          "outcome": "passed"
+        },
+        "scope_enforcement": {
+          "detail": "no call left the selected pair",
+          "name": "scope_enforcement",
+          "outcome": "passed"
+        },
+        "tool_validity": {
+          "detail": "1 calls valid",
+          "name": "tool_validity",
+          "outcome": "passed"
+        },
+        "unnecessary_calls": {
+          "detail": "1 calls ran",
+          "name": "unnecessary_calls",
+          "outcome": "passed"
+        }
+      },
+      "input_tokens": 900,
+      "outcome": "timeout",
+      "output_tokens": 0,
+      "task_id": "brief-cross-lookup-hit-rate",
+      "tool_calls": 1,
+      "total_seconds": 30.0,
+      "trial": 24,
+      "turns": 2
+    }
+  ]
+}

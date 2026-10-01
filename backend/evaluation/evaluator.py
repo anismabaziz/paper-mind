@@ -1,368 +1,695 @@
 """
-End-to-end evaluation of the RAG pipeline against the ground-truth fixture.
+Running a labeled case set through the production answer path, and measuring it.
 
-Every external capability is injected:
+Every case is asked the way a reader asks it: the same document context, the
+same retrieval, the same bounded prompt, the same citation validation, the same
+abstention decision, and the same persistence. A case is therefore a question
+about the application rather than a question about a reimplementation of it,
+and what it ends as — an answer, an abstention, a provider failure, an
+unusable citation, a failed save — is recorded as the outcome it was rather
+than folded into a score.
 
-- ``embed_fn``: texts -> list of embedding vectors
-- ``index``: Qdrant-compatible store with ``upsert``, ``query``, ``delete``
-- ``generate_fn``: (query, context) -> answer text
-- ``judge_fn``: judge prompt -> verdict reply (see evaluation.judge)
+The run record carries the index manifest and generation, the retrieval
+method, the prompt version, the provider, the model, the settings that produced
+every answer, and the identity and rubric version of the judge, so two runs can
+be compared or a result can be explained.
 
-Tests wire deterministic fakes into all four; the CLI wires the real
-providers, and only behind ``--live``. ``uv run pytest`` stays headless
-(no Qdrant/LLM; heavy models mocked or skipped).
-
-Gates per phase (recorded on ``sample_docs`` via this module):
-``hit@5``/``recall@5`` + per-question breakdown and ingest ``sec/PDF``
-(see :func:`index_document_timed`; ``POST /process-file`` also logs
-parse/embed/upsert wall time). Free local path uses Qdrant on
-``http://localhost:6333`` with no API keys (retrieval-only ``--no-judge``).
+Measurement is split so that a failure cannot flatter a number. Only text a
+model wrote is handed to a grader, so a provider that died is reported as a
+failure rather than as an answer with no good citations. Latency is split into
+the run's first case and the rest, because the first one pays for loading
+whatever loads lazily and nobody's second question does. Cost is computed only
+for the cases that reached a model, and from the token counts the run measured.
 """
 
-import json
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, field, replace
+from typing import Any
 
 from evaluation import judge as judge_module
-from evaluation.metrics import RetrievalReport, hit_at_k, recall_at_k, summarize
-from services.parsing.document_parser import DocumentIngestor
-from services.retrieval.reranker import RerankerService
-from services.retrieval.vector_service import (
-    build_vectors_from_chunks,
-    matches_to_sources,
-    shape_sources,
+from evaluation.calibration import load_calibration, run_calibration
+from evaluation.dataset import REPORTED, Case, Dataset, abstention_required
+from evaluation.graders import (
+    UNKNOWN,
+    Grade,
+    GradedCase,
+    grade_case,
+    outcome_for_score,
+)
+from evaluation.harness import EvaluationEnvironment
+from evaluation.judge import Judge
+from evaluation.metrics import (
+    LatencySummary,
+    MetricSummary,
+    PricedModel,
+    RetrievalReport,
+    cost_for,
+    latency_summary,
+    retrieval_scores,
+    summarize,
+)
+from evaluation.outcomes import (
+    ABSTAINED,
+    ANSWERED,
+    CANCELLED,
+    CITATION_ERROR,
+    CONTEXT_FALLBACK,
+    OUTCOMES,
+    PERSISTENCE_ERROR,
+    PROVIDER_ERROR,
+    REFUSED,
+)
+from services.answering import (
+    AnswerEvent,
+    AnswerRequest,
+    AnswerSettings,
+    Refusal,
+    ResolvedTurn,
+)
+from services.chat_context import token_count
+from services.citations import PROMPT_VERSION, claims_block
+from services.llm.base import is_context_fallback
+from services.prompts import SYSTEM_INSTRUCTION
+
+DEFAULT_K = 5
+
+#: The events that end a case, and the one whose name is not already an outcome.
+_TERMINAL_EVENTS = (
+    "done",
+    ABSTAINED,
+    PROVIDER_ERROR,
+    CITATION_ERROR,
+    PERSISTENCE_ERROR,
+    CANCELLED,
 )
 
-
-def _is_rerank_enabled() -> bool:
-    from settings import get_settings
-
-    return get_settings().rerank.enabled
-
-
-def _ingestor() -> DocumentIngestor:
-    """Build the parse-and-chunk pipeline from the installed Settings."""
-    from settings import get_settings
-
-    s = get_settings()
-    return DocumentIngestor(
-        s.parsing.use_docling,
-        s.chunking.chunk_size_tokens,
-        s.chunking.chunk_overlap_tokens,
-    )
+#: A case's phase. The first case of a run that reached retrieval is where
+#: anything loaded lazily is loaded, so its seconds are reported apart from the
+#: rest: a p95 that averaged model loading in would describe a cost the reader
+#: never pays twice.
+COLD_START = "cold_start"
+WARM = "warm"
+#: The case never reached retrieval, so it has no seconds to report either way.
+NOT_MEASURED = "not_measured"
 
 
-def _reranker_from_settings() -> RerankerService:
-    """Build the gated reranker from the installed Settings."""
-    from settings import get_settings
-
-    s = get_settings()
-    return RerankerService(s.rerank.rerank_model, enabled=s.rerank.enabled)
+def outcome_for(event_name: str) -> str:
+    """Return the outcome a terminal event names."""
+    return ANSWERED if event_name == "done" else event_name
 
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-FIXTURE_PATH = Path(__file__).parent / "fixture.json"
-SAMPLE_DOCS_DIR = Path(__file__).parent / "sample_docs"
+@dataclass
+class CaseResult:
+    """What one case did, and the evidence the run can measure it against."""
 
-# Retrieval is fetched generously and scored at k; the index top_k also
-# goes through source shaping, which needs headroom to dedupe.
-# Aligned with production VectorService.FETCH_K=50 so eval numbers describe prod.
-FETCH_K = 50
-DEFAULT_K = 5
+    id: str
+    document: str
+    question: str
+    outcome: str
+    split: str
+    category: str
+    expected_outcome: str
+    detail: str | None = None
+    turn_id: str | None = None
+    retrieval: dict[str, Any] = field(default_factory=dict)
+    retrieved_chunks: int = 0
+    retrieved_texts: list[str] = field(default_factory=list)
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    hit_at_k: bool | None = None
+    recall_at_k: float | None = None
+    reciprocal_rank: float | None = None
+    ndcg_at_k: float | None = None
+    answer: str | None = None
+    claims: list[dict[str, Any]] = field(default_factory=list)
+    grounded: bool | None = None
+    truncated: bool | None = None
+    finish_reason: str | None = None
+    context: str | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
+    faithfulness: float | None = None
+    verdict: str | None = None
+    correctness: float | None = None
+    correctness_verdict: str | None = None
+    expected_answer: str | None = None
+    expected_evidence: list[str] = field(default_factory=list)
+    #: What a person checking this answer has to find, in the reviewer's words.
+    #: It reaches the judge, because a reference answer is one wording of what
+    #: counts as correct and not the whole of it.
+    rubric: str = ""
+    requires_abstention: bool | None = None
+    grades: dict[str, Grade] = field(default_factory=dict)
+    citation_precision: float | None = None
+    citation_recall: float | None = None
+    #: Whether these seconds include a lazy load. Set by the run, not the case:
+    #: a case cannot know whether it is the first one asked.
+    phase: str = NOT_MEASURED
+    retrieval_seconds: float | None = None
+    first_token_seconds: float | None = None
+    total_seconds: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
+
+    @property
+    def generated(self) -> bool:
+        """Report whether a model actually wrote the text a grader would read."""
+        return (
+            self.outcome == ANSWERED
+            and self.answer is not None
+            and not is_context_fallback(self.answer)
+        )
+
+    def scored(self) -> GradedCase:
+        """Return the case as the deterministic graders read it."""
+        return GradedCase(
+            id=self.id,
+            outcome=self.outcome,
+            answer=self.answer,
+            claims=tuple(self.claims),
+            sources=tuple(self.sources),
+            expected_answer=self.expected_answer,
+            expected_evidence=tuple(self.expected_evidence),
+            requires_abstention=self.requires_abstention,
+            expected_outcome=self.expected_outcome,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the case as a report stores it."""
+        result = asdict(self)
+        # A report is read, not re-ingested: it carries what was measured about
+        # the evidence — every retrieval score, and the page each Passage came
+        # from — rather than the Passage text the model read, which would make
+        # every case the size of the context that was sent to a paid model.
+        result.pop("retrieved_texts")
+        sources = result.pop("sources")
+        result["source_pages"] = {
+            str(source.get("source_id")): source.get("page") for source in sources
+        }
+        result["generated"] = self.generated
+        return result
+
+
+@dataclass
+class AnswerReport:
+    """Every metric about the answers themselves, in one comparable shape."""
+
+    correctness: MetricSummary
+    faithfulness: MetricSummary
+    citation_precision: MetricSummary
+    citation_recall: MetricSummary
+    abstention: MetricSummary
+    finish_reasons: dict[str, int]
+    generated: int
+    truncated: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the answer report as a run record stores it."""
+        return {
+            "correctness": self.correctness.to_dict(),
+            "faithfulness": self.faithfulness.to_dict(),
+            "citation_precision": self.citation_precision.to_dict(),
+            "citation_recall": self.citation_recall.to_dict(),
+            "abstention": self.abstention.to_dict(),
+            "generated": self.generated,
+            "truncated": self.truncated,
+            "finish_reasons": self.finish_reasons,
+        }
+
+
+@dataclass
+class LatencyReport:
+    """
+    How long the run took, with the first case held apart from the rest.
+
+    Every measurement is a pair: what the first question cost, and what the
+    others cost. Reporting only the pair's mean, or only the tail, hides either
+    the cost of a cold start or the cost a reader actually waits.
+    """
+
+    cold_start: dict[str, LatencySummary]
+    steady_state: dict[str, LatencySummary]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the latency report as a run record stores it."""
+        return {
+            "cold_start": {
+                name: summary.to_dict() for name, summary in self.cold_start.items()
+            },
+            "steady_state": {
+                name: summary.to_dict() for name, summary in self.steady_state.items()
+            },
+        }
+
+
+@dataclass
+class CostReport:
+    """What the run's calls cost, over the cases that reached a model."""
+
+    input_tokens: int
+    output_tokens: int
+    usd: float
+    priced_cases: int
+    model: str
+    #: The prices the estimate used, so a reader can check it against the
+    #: provider's own published table.
+    input_cost_per_million_usd: float
+    output_cost_per_million_usd: float
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the cost report as a run record stores it."""
+        return asdict(self)
 
 
 @dataclass
 class EvaluationReport:
-    """EvaluationReport."""
+    """One run: what it measured, how it was configured, and every case."""
 
+    run: dict[str, Any]
     retrieval: RetrievalReport
-    faithfulness: dict
-    per_question: list = field(default_factory=list)
+    outcomes: dict[str, int]
+    answers: AnswerReport
+    latency: LatencyReport
+    cost: CostReport
+    cases: list[CaseResult] = field(default_factory=list)
+    calibration: dict[str, Any] | None = None
 
-    def as_dict(self):
-        """Do as dict."""
+    def as_dict(self) -> dict[str, Any]:
+        """Return the report as the CLI's JSON output."""
         return {
+            "run": self.run,
             "retrieval": asdict(self.retrieval),
-            "faithfulness": self.faithfulness,
-            "per_question": self.per_question,
+            "outcomes": self.outcomes,
+            "answers": self.answers.to_dict(),
+            "latency": self.latency.to_dict(),
+            "cost": self.cost.to_dict(),
+            "calibration": self.calibration,
+            "cases": [case.as_dict() for case in self.cases],
         }
 
 
-def load_fixture(path=FIXTURE_PATH) -> dict:
-    """Do load fixture."""
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def read_document(filename: str, docs_dir=SAMPLE_DOCS_DIR) -> bytes:
-    """Do read document."""
-    return (Path(docs_dir) / filename).read_bytes()
-
-
-def index_document(
-    filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR, pdf_name=None
-):
+def input_tokens_of(resolved: ResolvedTurn) -> int:
     """
-    Parse, chunk, embed, and upsert one sample document.
+    Return what one call costs the reader in input tokens.
 
-        ``pdf_name`` names the stored vectors (defaults to ``filename``), so a
-        live run can namespace them under an eval- prefix without changing
-        which file is read. Uses the same parser and vector shape as the
-        /process-file route, so the evaluator exercises the real ingestion
-        path. Sparse BM25 vectors are stored alongside dense for hybrid retrieval.
-        Returns chunk count; timing is logged via :func:`index_document_timed`
-        for gate reports (sec/PDF).
+    The measure lives in the telemetry module, where the answer path uses the
+    same one for its traces: a run and a trace cannot disagree about what a
+    call read.
     """
-    raw = read_document(filename, docs_dir)
-    chunks = _ingestor().get_chunk_objects(filename, raw)
-    embeddings = embed_fn([chunk.text for chunk in chunks])
-    vectors = build_vectors_from_chunks(embeddings, chunks, pdf_name or filename)
-    index.upsert(vectors)
-    return len(chunks)
+    from services.telemetry.usage import input_tokens
+
+    return input_tokens(resolved.request.query, resolved.context, resolved.prior_turns)
 
 
-def index_document_timed(
-    filename: str, index, embed_fn, docs_dir=SAMPLE_DOCS_DIR, pdf_name=None
-):
+def _terminal(events: Sequence[AnswerEvent]) -> tuple[str, dict[str, Any]]:
+    """Return the one event that decided a case, and its payload."""
+    for name in reversed(_TERMINAL_EVENTS):
+        for event in reversed(events):
+            if event.name == name:
+                return event.name, dict(event.payload)
+    raise ValueError("the answer path ended without an outcome")
+
+
+def _streamed(environment: EvaluationEnvironment, resolved: ResolvedTurn):
     """
-    Like :func:`index_document` but returns ``(chunks, elapsed_seconds)``.
+    Walk the answer path's events and read the timings it measured.
 
-    for gate reports (ingest sec/PDF). Phase timing mirrors
-    ``POST /process-file`` parse/embed/upsert logging.
+    The answer path already reads the clock around the stream, so a run reads
+    those measurements rather than starting a second pair of its own: one
+    request is timed once, and the report and the trace cannot disagree about
+    how long it took.
     """
-    import time as _time
-
-    t0 = _time.time()
-    chunks = index_document(
-        filename, index, embed_fn, docs_dir=docs_dir, pdf_name=pdf_name
+    events = list(environment.answer_service.stream(resolved))
+    return (
+        events,
+        resolved.trace.first_token_seconds,
+        round(resolved.trace.elapsed(), 6),
     )
-    elapsed = _time.time() - t0
-    return chunks, elapsed
 
 
-def remove_document(filename: str, index):
-    """Do remove document."""
-    index.delete(filter={"pdf_name": filename})
-
-
-def retrieve(
-    query_embedding,
-    filename,
-    index,
-    k=DEFAULT_K,
-    prefix="",
-    query_text=None,
-    rerank=None,
-    reranker=None,
-):
+def run_case(
+    case: Case,
+    environment: EvaluationEnvironment,
+    model,
+    api_key: str = "evaluation",
+    *,
+    k: int = DEFAULT_K,
+) -> CaseResult:
     """
-    Fetch candidates and shape them exactly like the /response route.
+    Ask one case through the answer path and report what happened.
 
-    When ``query_text`` is provided a hybrid dense+BM25 sparse query is
-    issued (single Qdrant hybrid via RRF), mirroring ``VectorService``.
-    When the reranker is enabled (or ``rerank=True``) the FETCH_K candidates
-    are reranked with a local cross-encoder before shaping to ``k`` (top 5).
-    Entirely local CPU, no API. ``reranker`` injects a pre-built service;
-    without one a settings-built reranker is used.
+    A multi-turn case commits its earlier questions to the Document's
+    Conversation first, so the answer path reads recorded Turns rather than
+    being handed a transcript.
     """
-    sparse = None
-    if query_text is not None:
-        try:
-            from services.retrieval.hybrid import build_sparse_vector
-
-            sparse = build_sparse_vector(query_text)
-            if not sparse["indices"]:
-                sparse = None
-        except Exception:
-            sparse = None
-
-    if sparse is not None:
-        try:
-            results = index.query(
-                vector=query_embedding,
-                top_k=FETCH_K,
-                include_metadata=True,
-                filter={"pdf_name": f"{prefix}{filename}"},
-                sparse_vector=sparse,
+    environment.seed_turns(case.document, case.follow_up)
+    request = AnswerRequest(
+        filename=environment.stored_name(case.document),
+        query=case.question,
+        provider=environment.provider(model, api_key),
+        model=model,
+    )
+    resolved = environment.answer_service.resolve(request)
+    if isinstance(resolved, Refusal):
+        # Retrieval never ran, so there is nothing to score: the case is
+        # reported as refused rather than as a retrieval that found nothing.
+        return _graded(
+            CaseResult(
+                id=case.id,
+                document=case.document,
+                question=case.question,
+                outcome=REFUSED,
+                split=case.split,
+                category=case.category,
+                expected_outcome=case.expected_outcome,
+                detail=resolved.category,
             )
-        except TypeError:
-            results = index.query(
-                vector=query_embedding,
-                top_k=FETCH_K,
-                include_metadata=True,
-                filter={"pdf_name": f"{prefix}{filename}"},
-            )
-    else:
-        results = index.query(
-            vector=query_embedding,
-            top_k=FETCH_K,
-            include_metadata=True,
-            filter={"pdf_name": f"{prefix}{filename}"},
         )
-    matches = (
-        results.get("matches", [])
-        if isinstance(results, dict)
-        else getattr(results, "matches", [])
+
+    sources = list(resolved.sources)
+    texts = [str(source.get("content") or "") for source in sources]
+    scores = retrieval_scores(texts, case.expected_evidence, k)
+    events, first_token, total = _streamed(environment, resolved)
+    name, payload = _terminal(events)
+    outcome = outcome_for(name)
+    result = CaseResult(
+        id=case.id,
+        document=case.document,
+        question=case.question,
+        outcome=outcome,
+        split=case.split,
+        category=case.category,
+        expected_outcome=case.expected_outcome,
+        detail=payload.get("category") or payload.get("reason"),
+        turn_id=resolved.turn_id,
+        retrieval=resolved.retrieval.payload,
+        retrieved_chunks=len(texts),
+        retrieved_texts=texts,
+        sources=sources,
+        context=resolved.context,
+        provenance=resolved.provenance.to_dict(),
+        expected_answer=case.expected_answer,
+        expected_evidence=list(case.expected_evidence),
+        rubric=case.rubric,
+        requires_abstention=abstention_required(case),
+        retrieval_seconds=resolved.provenance.retrieval_seconds,
+        first_token_seconds=first_token,
+        total_seconds=total,
+        # Every call carries the system instruction, whether or not this case
+        # reaches the model, so a run's input total is the question, the
+        # transcript, the evidence, and the instruction the provider is billed
+        # for reading on all of them.
+        input_tokens=input_tokens_of(resolved),
+        **scores,
     )
-    sources = matches_to_sources(matches, filename)
+    if outcome != ANSWERED:
+        return _graded(result)
+    return _graded(_with_answer(result, payload))
 
-    # Gated local reranker mirroring VectorService — single shared gate
-    rerank_service = reranker if reranker is not None else _reranker_from_settings()
-    sources = rerank_service.maybe_rerank(query_text, sources, enabled=rerank)
 
-    return shape_sources(sources)[:k]
+def _with_answer(result: CaseResult, payload: dict[str, Any]) -> CaseResult:
+    """Attach the stored answer, its claims, and how the model ended it."""
+    answer = payload.get("answer")
+    if is_context_fallback(answer):
+        # A provider that failed its one-shot repair quoted the evidence back.
+        # That text is not an answer, so it is reported as the fallback it is.
+        return replace(result, outcome=CONTEXT_FALLBACK)
+    return replace(
+        result,
+        answer=answer,
+        claims=payload.get("claims") or [],
+        grounded=payload.get("grounded"),
+        truncated=payload.get("truncated"),
+        finish_reason=payload.get("finish_reason"),
+        # What the provider was asked to produce is the prose and the claims
+        # block together, and it billed for both. The stored answer is the prose
+        # alone, so the block is put back to count what was actually written.
+        output_tokens=token_count(
+            (answer or "") + claims_block(payload.get("claims") or [])
+        ),
+    )
+
+
+def _graded(result: CaseResult) -> CaseResult:
+    """Run the deterministic graders and read their verdicts back onto the case."""
+    graded = grade_case(result.scored())
+    return replace(
+        result,
+        grades=graded.grades,
+        citation_precision=graded.citation_precision,
+        citation_recall=graded.citation_recall,
+    )
+
+
+def _judge(case: CaseResult, judge: Judge) -> CaseResult:
+    """
+    Grade one case's answer with the model judge, and only a written one.
+
+    Abstentions, provider failures, and refused cases have no answer to grade,
+    and a fallback quote is document text rather than a model answer, so none of
+    them reach the judge. Correctness is skipped when the case set declares no
+    expected answer: there is nothing to compare the answer against.
+    """
+    if not case.generated:
+        return case
+    answer = case.answer or ""
+    context = "\n\n".join(case.retrieved_texts)
+    verdict, score = judge_module.judge_faithfulness(
+        case.question, answer, context, judge
+    )
+    correctness_verdict, correctness = (None, None)
+    if case.expected_answer:
+        correctness_verdict, correctness = judge_module.judge_correctness(
+            case.question, case.expected_answer, answer, context, judge, case.rubric
+        )
+    return replace(
+        case,
+        verdict=verdict,
+        faithfulness=score,
+        correctness_verdict=correctness_verdict,
+        correctness=correctness,
+    )
+
+
+def _grade_scores(grades: Sequence[Grade]) -> tuple[list[float | None], list[str]]:
+    """Return the scores and outcomes one deterministic metric summarizes from."""
+    return (
+        [
+            None if grade.outcome == UNKNOWN else (1.0 if grade.passed else 0.0)
+            for grade in grades
+        ],
+        [grade.outcome for grade in grades],
+    )
+
+
+def _by_outcome(cases: Sequence[CaseResult], name: str) -> list[Grade]:
+    """Return one grader's verdicts across the run, in the order it asked."""
+    return [case.grades[name] for case in cases if name in case.grades]
+
+
+def _from_scores(scores: Sequence[float | None]) -> MetricSummary:
+    """
+    Summarize a metric whose cases each carry one number.
+
+    A case with no number is one the grader could not decide: it is counted as
+    unknown and left out of the mean, and it is never read as a zero.
+    """
+    return MetricSummary.of(scores, [outcome_for_score(score) for score in scores])
+
+
+def _answer_report(cases: Sequence[CaseResult]) -> AnswerReport:
+    """Summarize every metric about the answers a run produced."""
+    correctness_scores = [case.correctness for case in cases]
+    faithfulness_scores = [case.faithfulness for case in cases]
+    precision_scores = [case.citation_precision for case in cases]
+    recall_scores = [case.citation_recall for case in cases]
+    abstention_scores, abstention_outcomes = _grade_scores(
+        _by_outcome(cases, "required_abstention")
+    )
+    answered = [case for case in cases if case.outcome == ANSWERED]
+    reasons: dict[str, int] = {}
+    for case in answered:
+        reason = case.finish_reason or "none"
+        reasons[reason] = reasons.get(reason, 0) + 1
+    return AnswerReport(
+        correctness=_from_scores(correctness_scores),
+        faithfulness=_from_scores(faithfulness_scores),
+        citation_precision=_from_scores(precision_scores),
+        citation_recall=_from_scores(recall_scores),
+        abstention=MetricSummary.of(abstention_scores, abstention_outcomes),
+        finish_reasons=reasons,
+        generated=sum(1 for case in cases if case.generated),
+        truncated=sum(1 for case in answered if case.truncated),
+    )
+
+
+#: The three things a case is timed on, in the order a report lists them.
+MEASURED = ("retrieval_seconds", "first_token_seconds", "total_seconds")
+
+
+def _samples(cases: Sequence[CaseResult], phase: str, name: str) -> list[float]:
+    """Return the values one measurement holds for the cases in one phase."""
+    return [
+        value
+        for case in cases
+        if case.phase == phase
+        for value in [getattr(case, name)]
+        if value is not None
+    ]
+
+
+def _measure_latency(
+    cases: Sequence[CaseResult], model: PricedModel
+) -> tuple[LatencyReport, CostReport]:
+    """Split the run's timings and its cost into the parts a reader compares."""
+    # Only the cases that reached a model and wrote something are priced, and
+    # the token totals count those same cases. A token total that included an
+    # abstention's prompt would sit beside a dollar figure that excluded it.
+    priced = [case for case in cases if case.cost_usd is not None]
+    return (
+        LatencyReport(
+            cold_start={
+                name: latency_summary(_samples(cases, COLD_START, name))
+                for name in MEASURED
+            },
+            steady_state={
+                name: latency_summary(_samples(cases, WARM, name)) for name in MEASURED
+            },
+        ),
+        CostReport(
+            input_tokens=sum(case.input_tokens or 0 for case in priced),
+            output_tokens=sum(case.output_tokens or 0 for case in priced),
+            usd=round(sum(case.cost_usd or 0.0 for case in priced), 6),
+            priced_cases=len(priced),
+            model=model.id,
+            input_cost_per_million_usd=model.input_cost_per_million_usd,
+            output_cost_per_million_usd=model.output_cost_per_million_usd,
+        ),
+    )
+
+
+def _phase(result: CaseResult, asked: Sequence[CaseResult]) -> CaseResult:
+    """
+    Label a case as the run's cold start or as steady state.
+
+    The cold start is the first case whose retrieval actually ran, not the first
+    case in the fixture. A case that was refused before retrieval — a Document
+    that could not be asked about, a question the app will not accept — measures
+    nothing, and calling the case after it warm would put the seconds that paid
+    for a lazy load into the steady-state distribution.
+    """
+    if result.retrieval_seconds is None:
+        return replace(result, phase=NOT_MEASURED)
+    already_cold = any(case.phase == COLD_START for case in asked)
+    return replace(result, phase=WARM if already_cold else COLD_START)
+
+
+def _run_record(
+    environment: EvaluationEnvironment,
+    model,
+    k: int,
+    cases: Sequence[CaseResult],
+    judge: Judge | None,
+    dataset: Dataset,
+    split: str,
+    held_back: Sequence[str],
+) -> dict[str, Any]:
+    """
+    Describe the run as a whole: what it measured, and how it was configured.
+
+    The version of the case set and the split that was run are recorded beside
+    the index manifest and generation of every Document, the prompt version, the
+    provider, the model, and the settings, because a number is only comparable
+    to another number when those match. The set and the configuration come from
+    outside the run rather than from a case, so a run in which every case failed
+    still says what it was measuring.
+    """
+    retrieved = [case for case in cases if case.provenance]
+    return {
+        "k": k,
+        "dataset": dataset.version,
+        "split": split,
+        "cases": len(cases),
+        "held_back": list(held_back),
+        "prompt_version": PROMPT_VERSION,
+        "provider": model.provider,
+        "model": model.id,
+        "judge": judge.to_dict() if judge else None,
+        "settings": AnswerSettings.from_settings(environment.settings).to_dict(),
+        "documents": {
+            name: environment.index_state(name)
+            for name in sorted(environment.documents)
+        },
+        "retrieval_methods": sorted(
+            {case.provenance["retrieval_method"] for case in retrieved}
+        ),
+    }
 
 
 def evaluate(
-    fixture: dict,
-    index,
-    embed_fn,
-    generate_fn,
-    judge_fn=None,
+    dataset: Dataset,
+    environment: EvaluationEnvironment,
+    model,
+    api_key: str = "evaluation",
+    judge: Judge | None = None,
     k: int = DEFAULT_K,
-    docs_dir=SAMPLE_DOCS_DIR,
-    prefix="",
-    rerank=None,
-    reranker=None,
+    calibrate: bool = True,
+    split: str = REPORTED,
+    include_faults: bool = False,
 ) -> EvaluationReport:
     """
-    Run every fixture question through retrieval and generation.
+    Run one split of the case set through the answer path and measure the run.
 
-        ``judge_fn`` may be None to skip faithfulness scoring (retrieval-only
-        runs and tests that focus on the metrics).
-        ``rerank`` overrides the reranker's enabled flag per-run (None = flag).
-        ``reranker`` injects a pre-built reranker; without one, a
-        settings-built service is used for the whole run.
+    The reported split is the default because it is the one a result is quoted
+    from. The cases carrying a fault are held back unless ``include_faults``
+    asks for them, because their expected outcome is only reachable in a run
+    that injects the fault, and a reported number that counted a deliberately
+    broken provider would be reporting the test. The cases left behind are
+    named in the run record rather than dropped quietly.
+
+    ``judge`` may be None to skip the two model-graded metrics and the
+    calibration set, which is what a retrieval-only run does: the deterministic
+    graders, the case outcomes, and the retrieval scores still describe the
+    production path, and nothing is reported as judged that was not judged.
     """
-    import time
-
-    rerank_service = reranker if reranker is not None else _reranker_from_settings()
-    question_results = []
-    per_question = []
-    faithfulness_scores = []
-    rerank_latencies: list[float] = []
-
-    for item in fixture["questions"]:
-        filename = item["document"]
-        query_embedding = embed_fn([item["question"]])[0]
-        t0 = time.time()
-        sources = retrieve(
-            query_embedding,
-            filename,
-            index,
-            k=k,
-            prefix=prefix,
-            query_text=item["question"],
-            rerank=rerank,
-            reranker=rerank_service,
-        )
-        # Record latency delta proxy: rerank timing is printed inside reranker,
-        # but we also capture per-query retrieval time for the report if rerank on
-        if rerank is True or (rerank is None and _is_rerank_enabled()):
-            rerank_latencies.append(time.time() - t0)
-        retrieved_texts = [s["content"] for s in sources]
-
-        result = {
-            "id": item["id"],
-            "hit_at_k": hit_at_k(retrieved_texts, item["gold_snippets"], k),
-            "recall_at_k": recall_at_k(retrieved_texts, item["gold_snippets"], k),
-        }
-
-        detail = {"id": item["id"], **result, "retrieved_chunks": len(retrieved_texts)}
-
-        if judge_fn is not None:
-            context = "\n\n".join(retrieved_texts)
-            answer = generate_fn(item["question"], context)
-            verdict, score = judge_module.judge_faithfulness(
-                item["question"], answer, context, judge_fn
+    asked = dataset.cases_for(split, include_faults=include_faults)
+    held_back = (
+        [] if include_faults else [case.id for case in dataset.faults_for(split)]
+    )
+    cases: list[CaseResult] = []
+    for case in asked:
+        result = run_case(case, environment, model, api_key, k=k)
+        if judge is not None:
+            result = _judge(result, judge)
+        if result.generated:
+            result = replace(
+                result,
+                cost_usd=cost_for(result.input_tokens, result.output_tokens, model),
             )
-            faithfulness_scores.append(score)
-            detail.update({"verdict": verdict, "faithfulness": score, "answer": answer})
+        cases.append(_phase(result, cases))
 
-        question_results.append(result)
-        per_question.append(detail)
-
-    report = EvaluationReport(
-        retrieval=summarize(question_results, k),
-        faithfulness={
-            "mean": (
-                sum(faithfulness_scores) / len(faithfulness_scores)
-                if faithfulness_scores
-                else None
-            ),
-            "judged": len(faithfulness_scores),
-            "faithful": sum(1 for s in faithfulness_scores if s == 1.0),
+    retrieval = summarize(
+        [case.as_dict() for case in cases if case.hit_at_k is not None],
+        k,
+        questions=[case.id for case in cases if case.hit_at_k is not None],
+    )
+    latency, cost = _measure_latency(cases, model)
+    calibration = (
+        run_calibration(load_calibration(), judge).to_dict()
+        if judge is not None and calibrate
+        else None
+    )
+    return EvaluationReport(
+        run=_run_record(environment, model, k, cases, judge, dataset, split, held_back),
+        retrieval=retrieval,
+        outcomes={
+            outcome: sum(1 for case in cases if case.outcome == outcome)
+            for outcome in OUTCOMES
         },
-        per_question=per_question,
+        answers=_answer_report(cases),
+        latency=latency,
+        cost=cost,
+        calibration=calibration,
+        cases=cases,
     )
-    # Log latency delta for 50 docs when reranking was active (cheap observability)
-    if rerank_latencies:
-        avg_ms = sum(rerank_latencies) / len(rerank_latencies) * 1000
-        print(
-            f"Evaluator rerank: avg retrieval {avg_ms:.1f}ms/query over {len(rerank_latencies)} queries "
-            f"(rerank={'on' if (rerank is True or (rerank is None and _is_rerank_enabled())) else 'off'}, FETCH_K={FETCH_K})"
-        )
-    return report
-
-
-def evaluate_with_rerank_comparison(
-    fixture: dict,
-    index,
-    embed_fn,
-    generate_fn,
-    judge_fn=None,
-    k: int = DEFAULT_K,
-    docs_dir=SAMPLE_DOCS_DIR,
-    prefix="",
-    reranker=None,
-) -> dict:
-    """
-    Run the fixture twice — without and with reranking — and log hit@k /.
-
-    faithfulness deltas plus latency for 50 candidates. Returns a dict with
-    both reports for the caller to inspect. Used by the live CLI and docs
-    to demonstrate the gated reranker gate.
-    """
-    import time
-
-    t0 = time.time()
-    report_off = evaluate(
-        fixture,
-        index,
-        embed_fn,
-        generate_fn,
-        judge_fn,
-        k=k,
-        docs_dir=docs_dir,
-        prefix=prefix,
-        rerank=False,
-        reranker=reranker,
-    )
-    off_ms = (time.time() - t0) / max(len(fixture.get("questions", [])), 1) * 1000
-
-    t1 = time.time()
-    report_on = evaluate(
-        fixture,
-        index,
-        embed_fn,
-        generate_fn,
-        judge_fn,
-        k=k,
-        docs_dir=docs_dir,
-        prefix=prefix,
-        rerank=True,
-        reranker=reranker,
-    )
-    on_ms = (time.time() - t1) / max(len(fixture.get("questions", [])), 1) * 1000
-
-    delta_ms = on_ms - off_ms
-    print(
-        f"Rerank comparison: hit@{k} {report_off.retrieval.hit_rate:.2f} -> {report_on.retrieval.hit_rate:.2f} "
-        f"(delta {report_on.retrieval.hit_rate - report_off.retrieval.hit_rate:+.2f}), "
-        f"faithfulness {report_off.faithfulness.get('mean')} -> {report_on.faithfulness.get('mean')}, "
-        f"latency {off_ms:.1f}ms -> {on_ms:.1f}ms (delta {delta_ms:+.1f}ms for 50 candidates, reranked to 5)"
-    )
-    return {
-        "off": report_off.as_dict(),
-        "on": report_on.as_dict(),
-        "latency_delta_ms": delta_ms,
-    }

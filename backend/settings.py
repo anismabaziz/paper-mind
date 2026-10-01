@@ -16,6 +16,7 @@ name the variable to set.
 
 import sys
 import threading
+import urllib.parse
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -71,7 +72,27 @@ class VectorSettings(BaseSettings):
     qdrant_url: str = Field(
         default="http://localhost:6333", validation_alias="QDRANT_URL"
     )
+    # Optional API key sent to Qdrant. Empty for loopback development;
+    # required before any non-loopback Qdrant address is accepted.
+    qdrant_api_key: str | None = Field(default=None, validation_alias="QDRANT_API_KEY")
     index_name: str = "pdf-index"
+
+
+#: Hosts that keep traffic on the local machine. Anything else — including
+#: "0.0.0.0", "::", a LAN address, a compose service name, or an
+#: unparseable value — is treated as remote and fails closed.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def url_is_loopback(url: str) -> bool:
+    """Return True only when a Qdrant URL clearly targets this machine."""
+    try:
+        host = urllib.parse.urlsplit(url.strip()).hostname
+    except ValueError:
+        return False
+    if not host:
+        return False
+    return host.lower() in LOOPBACK_HOSTS
 
 
 class EmbeddingSettings(BaseSettings):
@@ -86,6 +107,24 @@ class EmbeddingSettings(BaseSettings):
     embedding_model: str = Field(
         default="BAAI/bge-m3", validation_alias="LOCAL_EMBEDDING_MODEL"
     )
+    # Pinned immutable revision (a commit sha) of the embedding model. Changing
+    # it makes every stored vector incompatible and marks documents stale.
+    # Empty means the commit recorded in ``services.models`` for this
+    # repository is loaded, which is every shipped default.
+    revision: str = Field(default="", validation_alias="LOCAL_EMBEDDING_REVISION")
+    # Whether the model may execute Python from its own repository. Off by
+    # default: BAAI/bge-m3 loads through stock transformers classes, so turning
+    # it on adds risk without adding capability. Only a commit recorded in
+    # ``services.models.REVIEWED_REMOTE_CODE_MODELS`` is accepted, so the
+    # question is never whether to trust a moving branch.
+    trust_remote_code: bool = Field(
+        default=False, validation_alias="LOCAL_EMBEDDING_TRUST_REMOTE_CODE"
+    )
+
+    @field_validator("trust_remote_code", mode="before")
+    @classmethod
+    def _coerce_remote_code(cls, value):
+        return _parse_bool(value)
 
 
 class ChunkingSettings(BaseSettings):
@@ -118,8 +157,47 @@ class RerankSettings(BaseSettings):
         validation_alias="RERANK_MODEL",
     )
     enabled: bool = Field(default=False, validation_alias="RERANK")
+    # Pinned immutable revision (a commit sha) of the reranker model. Changing
+    # it makes every stored rerank order incompatible and marks documents stale.
+    # Empty means the commit recorded in ``services.models`` for this
+    # repository is loaded, which is every shipped default.
+    revision: str = Field(default="", validation_alias="RERANK_REVISION")
+    # See ``EmbeddingSettings.trust_remote_code``; the reasoning is identical.
+    trust_remote_code: bool = Field(
+        default=False, validation_alias="RERANK_TRUST_REMOTE_CODE"
+    )
 
-    @field_validator("enabled", mode="before")
+    @field_validator("enabled", "trust_remote_code", mode="before")
+    @classmethod
+    def _coerce(cls, value):
+        return _parse_bool(value)
+
+
+class QueryContextSettings(BaseSettings):
+    """
+    Bounds on the context one chat request carries.
+
+    The Conversation window is bounded by both ``chat_recent_turns`` and
+    ``chat_prior_turns_token_budget``; retrieved evidence by
+    ``chat_context_token_budget``. Query rewriting spends an extra model call,
+    so it stays off until the evaluation set shows it earns its cost.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    recent_turns: int = Field(default=4, ge=0, validation_alias="CHAT_RECENT_TURNS")
+    prior_turns_token_budget: int = Field(
+        default=1200, ge=0, validation_alias="CHAT_PRIOR_TURNS_TOKEN_BUDGET"
+    )
+    context_token_budget: int = Field(
+        default=6000, ge=0, validation_alias="CHAT_CONTEXT_TOKEN_BUDGET"
+    )
+    query_rewrite: bool = Field(default=False, validation_alias="CHAT_QUERY_REWRITE")
+    max_expansion_chars: int = Field(
+        default=2000, ge=0, validation_alias="CHAT_MAX_EXPANSION_CHARS"
+    )
+
+    @field_validator("query_rewrite", mode="before")
     @classmethod
     def _coerce(cls, value):
         return _parse_bool(value)
@@ -169,6 +247,115 @@ class UploadSettings(BaseSettings):
     allowed_mime_types: set[str] = {"application/pdf"}
 
 
+DEFAULT_MAX_INGESTION_PAGES = 1000
+DEFAULT_MAX_INGESTION_TEXT_BYTES = 100 * 1024 * 1024
+DEFAULT_MAX_INGESTION_OUTPUT_BYTES = 512 * 1024 * 1024
+DEFAULT_MAX_INGESTION_SECONDS = 1800.0
+DEFAULT_MAX_INGESTION_MEMORY_BYTES = 4 * 1024 * 1024 * 1024
+
+
+class IngestionSettings(BaseSettings):
+    """Resource limits applied to each durable ingestion job."""
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    max_pages: int = Field(
+        default=DEFAULT_MAX_INGESTION_PAGES,
+        ge=0,
+        validation_alias="MAX_INGESTION_PAGES",
+    )
+    max_extracted_text_bytes: int = Field(
+        default=DEFAULT_MAX_INGESTION_TEXT_BYTES,
+        ge=0,
+        validation_alias="MAX_INGESTION_TEXT_BYTES",
+    )
+    max_output_bytes: int = Field(
+        default=DEFAULT_MAX_INGESTION_OUTPUT_BYTES,
+        ge=0,
+        validation_alias="MAX_INGESTION_OUTPUT_BYTES",
+    )
+    max_elapsed_seconds: float = Field(
+        default=DEFAULT_MAX_INGESTION_SECONDS,
+        ge=0,
+        validation_alias="MAX_INGESTION_SECONDS",
+    )
+    max_memory_bytes: int = Field(
+        default=DEFAULT_MAX_INGESTION_MEMORY_BYTES,
+        ge=0,
+        validation_alias="MAX_INGESTION_MEMORY_BYTES",
+    )
+
+
+class ResearchSettings(BaseSettings):
+    """
+    Spend ceilings for one Research Brief.
+
+    A brief lets a model choose what to read next, which is the property that
+    makes it able to spend without being asked. These are the bounds that keep
+    one question from becoming an unbounded bill, and they are per brief rather
+    than per session so a reader sees the same ceiling whatever they are doing.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    #: How many times the model may think before a brief is stopped.
+    max_turns: int = Field(default=6, ge=1, validation_alias="RESEARCH_MAX_TURNS")
+    #: How many tool calls one brief may make, which is what bounds retrieval.
+    max_tool_calls: int = Field(
+        default=8, ge=1, validation_alias="RESEARCH_MAX_TOOL_CALLS"
+    )
+    #: How many times one identical call may be made. A model stuck in a loop
+    #: re-asks rather than alternating, so this is what catches that.
+    max_repeated_calls: int = Field(
+        default=2, ge=1, validation_alias="RESEARCH_MAX_REPEATED_CALLS"
+    )
+    #: What one brief may bill across every turn.
+    max_tokens: int = Field(
+        default=120_000, ge=1, validation_alias="RESEARCH_MAX_TOKENS"
+    )
+    #: What a reader waits before a brief is stopped between turns.
+    max_seconds: float = Field(
+        default=120.0, ge=1.0, validation_alias="RESEARCH_MAX_SECONDS"
+    )
+
+
+class TelemetrySettings(BaseSettings):
+    """
+    Traces for the answer path: where they go, and what they may contain.
+
+    Local export is on by default and writes redacted spans to a file the
+    operator can read while the application runs. Nothing is sent anywhere
+    unless ``otlp_endpoint`` is set, because observability that leaves the
+    machine is a decision the operator makes.
+
+    ``capture_content`` writes the question, the answer, and the evidence into
+    the local file instead of a fingerprint of them. It is a debugging switch:
+    it is off unless asked for, and it stops on its own after
+    ``capture_window_seconds`` so a debugging session cannot become the way the
+    application runs. API keys are stripped either way.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore", populate_by_name=True)
+
+    enabled: bool = Field(default=True, validation_alias="TELEMETRY_ENABLED")
+    local_export_path: Path = Field(
+        default=BACKEND_DIR / "data" / "traces" / "answer-traces.jsonl",
+        validation_alias="TELEMETRY_LOCAL_EXPORT_PATH",
+    )
+    otlp_endpoint: str = Field(default="", validation_alias="TELEMETRY_OTLP_ENDPOINT")
+    capture_content: bool = Field(
+        default=False, validation_alias="TELEMETRY_CAPTURE_CONTENT"
+    )
+    capture_window_seconds: float = Field(
+        default=900.0, validation_alias="TELEMETRY_CAPTURE_WINDOW_SECONDS"
+    )
+
+    @field_validator("enabled", "capture_content", mode="before")
+    @classmethod
+    def _coerce(cls, value):
+        return _parse_bool(value)
+
+
 class FrontendSettings(BaseSettings):
     """Frontend origin for CORS allowlist."""
 
@@ -198,8 +385,15 @@ class Settings(BaseSettings):
         default_factory=RerankSettings, validation_alias=AliasChoices("rerank_group")
     )
     parsing: ParsingSettings = Field(default_factory=ParsingSettings)
+    query_context: QueryContextSettings = Field(
+        default_factory=QueryContextSettings,
+        validation_alias=AliasChoices("query_context_group"),
+    )
     auth: AuthSettings = Field(default_factory=AuthSettings)
     upload: UploadSettings = Field(default_factory=UploadSettings)
+    ingestion: IngestionSettings = Field(default_factory=IngestionSettings)
+    research: ResearchSettings = Field(default_factory=ResearchSettings)
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     frontend: FrontendSettings = Field(default_factory=FrontendSettings)
 
 
@@ -253,6 +447,27 @@ def validate(settings: Settings | None = None) -> None:
         print(
             "\nFix: copy backend/.env.example to backend/.env and fill in the "
             "values above, then start the app again.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if (
+        not url_is_loopback(settings.vector.qdrant_url)
+        and not (settings.vector.qdrant_api_key or "").strip()
+    ):
+        print(
+            "PaperMind backend refuses a remote Qdrant address without an API key:",
+            file=sys.stderr,
+        )
+        print(
+            f"  - QDRANT_URL={settings.vector.qdrant_url!r} is not loopback, "
+            "but QDRANT_API_KEY is unset.",
+            file=sys.stderr,
+        )
+        print(
+            "Fix: keep QDRANT_URL on http://localhost:6333 for local use, or set "
+            "QDRANT_API_KEY to the same value as the Qdrant server's API key "
+            "before exposing it beyond loopback (see backend/README.md).",
             file=sys.stderr,
         )
         sys.exit(1)

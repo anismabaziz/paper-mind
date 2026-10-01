@@ -2,16 +2,27 @@
 
 import hashlib
 import uuid
+from collections.abc import Callable
+from typing import Any
 
 from services.concurrency import map_batches_concurrently
-from services.retrieval.base import VectorStore
-from services.retrieval.hybrid import build_sparse_vector, build_sparse_vectors
+from services.retrieval.base import (
+    RetrievalCandidate,
+    RetrievalMethod,
+    RetrievalResult,
+    VectorStore,
+    VectorStoreConfigurationError,
+)
+from services.retrieval.hybrid import (
+    DEFAULT_FETCH_K,
+    SPARSE_METHOD,
+    TOKENIZER_VERSION,
+    build_sparse_vector,
+    build_sparse_vectors,
+)
+from services.retrieval.reranker import Reranker
 
-# How many candidates the index is asked for vs. how many survive shaping.
-# Asking for more than we keep gives dedupe room to work.
-TOP_K = 8
-FETCH_K = 50
-RRF_K = 60
+FETCH_K = DEFAULT_FETCH_K
 MAX_RETRIEVED_SOURCES = 5
 
 
@@ -72,7 +83,11 @@ def matches_to_sources(matches, filename):
 
 
 def build_vectors_from_chunks(
-    embeddings, chunks, filename: str, offset: int = 0
+    embeddings,
+    chunks,
+    filename: str,
+    offset: int = 0,
+    generation: int | None = None,
 ) -> list[dict]:
     """Build dense and sparse index records from chunks and their embeddings."""
     vectors = []
@@ -86,19 +101,118 @@ def build_vectors_from_chunks(
             "chunk_index": chunk.chunk_index,
             "page_no": chunk.page_no,
             "content_hash": chunk.content_hash,
+            "sparse_method": SPARSE_METHOD,
+            "sparse_tokenizer_version": TOKENIZER_VERSION,
         }
+        if generation is not None:
+            metadata["index_generation"] = generation
         sparse = (
             sparse_batch[j] if j < len(sparse_batch) else {"indices": [], "values": []}
         )
+        identity = (
+            f"papermind:{filename}:{generation}:"
+            f"{chunk.content_hash}:{chunk.chunk_index}"
+        )
         vectors.append(
             {
-                "id": str(uuid.uuid4()),
+                "id": str(uuid.uuid5(uuid.NAMESPACE_URL, identity)),
                 "values": embedding,
                 "sparse_vector": sparse,
                 "metadata": metadata,
             }
         )
     return vectors
+
+
+def _candidates(
+    retrieved: list[dict],
+    reranked: list[dict],
+    shaped: list[dict],
+    *,
+    method: RetrievalMethod,
+) -> tuple[RetrievalCandidate, ...]:
+    """
+    Describe every candidate retrieval returned, and what each stage did to it.
+
+    Fusion happens inside the store, so for a hybrid query the order it returned
+    is already the fused order and the two ranks coincide. Saying so is better
+    than inventing a per-representation ranking nobody measured: a dense or
+    sparse query reports no fused rank, because there was no fusion to report.
+
+    Candidates are keyed by content hash, which is what survives deduping: two
+    matches of the same Passage are one Passage, and the reranker's position for
+    it is the one the reader is shown.
+    """
+    rerank_ranks: dict[str, int] = {}
+    rerank_scores: dict[str, float] = {}
+    for position, source in enumerate(reranked, start=1):
+        if "rerank_score" not in source:
+            continue
+        content_hash = str(source.get("content_hash"))
+        rerank_ranks[content_hash] = position
+        rerank_scores[content_hash] = float(source["rerank_score"])
+    selected = {str(source.get("content_hash")) for source in shaped}
+    fused = method == "hybrid"
+    candidates: list[RetrievalCandidate] = []
+    seen: set[str] = set()
+    for rank, source in enumerate(retrieved, start=1):
+        content_hash = str(source.get("content_hash"))
+        if content_hash in seen:
+            continue
+        seen.add(content_hash)
+        candidates.append(
+            RetrievalCandidate(
+                rank=rank,
+                fused_rank=rank if fused else None,
+                rerank_rank=rerank_ranks.get(content_hash),
+                score=float(source.get("score") or 0.0),
+                content_hash=content_hash,
+                chunk_index=int(source.get("chunk_index") or 0),
+                page=source.get("page"),
+                rerank_score=rerank_scores.get(content_hash),
+                selected=content_hash in selected,
+            )
+        )
+    return tuple(candidates)
+
+
+def _rerank_report(reranker: Any, candidates: tuple[RetrievalCandidate, ...]) -> dict:
+    """
+    Return what the reranker did to this call, as a trace records it.
+
+    ``applied`` is true when the reranker scored at least one candidate.
+    ``reordered`` is true when it moved one. A reranker that is configured but
+    missing from the service is reported as not applied: there is no gate to
+    misread, because the call the trace describes is the one that ran.
+    """
+    model = getattr(reranker, "model_name", None) if reranker is not None else None
+    applied = any(candidate.rerank_rank is not None for candidate in candidates)
+    reordered = any(
+        candidate.rerank_rank is not None and candidate.rerank_rank != candidate.rank
+        for candidate in candidates
+    )
+    return {
+        "applied": applied,
+        "model": model,
+        "candidates": len(candidates),
+        "reordered": reordered,
+    }
+
+
+def _sparse_setting_problems(
+    label: str, found: list | None, expected: str
+) -> list[str]:
+    """
+    Check the sparse settings a generation was indexed with.
+
+    A generation missing the setting is as unusable as one built with another
+    version, so an absent value fails instead of passing unchecked.
+    """
+    if found is None or not found:
+        return [f"no {label} was recorded for the generation"]
+    if list(found) != [expected]:
+        return [f"indexed with {label} {found[0]!r} instead of {expected!r}"]
+    return []
 
 
 class VectorService:
@@ -114,12 +228,19 @@ class VectorService:
 
     UPSERT_BATCH_SIZE = 100
 
-    def __init__(self, store: VectorStore, reranker=None):
+    def __init__(self, store: VectorStore, reranker: Reranker | None = None):
         """Bind the store to index and query; the reranker is optional."""
         self._store = store
         self._reranker = reranker
 
-    def upsert_chunks(self, embeddings, chunks, filename):
+    def upsert_chunks(
+        self,
+        embeddings,
+        chunks,
+        filename,
+        generation: int | None = None,
+        check: Callable[[], None] | None = None,
+    ):
         """Preferred entry: ``chunks`` is a ``list[Chunk]`` (bundled)."""
         if not embeddings:
             return None
@@ -127,23 +248,35 @@ class VectorService:
             self.UPSERT_BATCH_SIZE
         )
         if num_batches <= 1:
-            vectors = build_vectors_from_chunks(embeddings, chunks, filename)
+            if check is not None:
+                check()
+            vectors = build_vectors_from_chunks(
+                embeddings, chunks, filename, generation=generation
+            )
             return self._store.upsert(vectors)
         batches: list[list[dict]] = []
         for start in range(0, len(embeddings), self.UPSERT_BATCH_SIZE):
             batch_embeddings = embeddings[start : start + self.UPSERT_BATCH_SIZE]
             vectors = build_vectors_from_chunks(
-                batch_embeddings, chunks, filename, start
+                batch_embeddings, chunks, filename, start, generation
             )
             batches.append(vectors)
         ordered_responses = map_batches_concurrently(
             batches,
             self._store.upsert,
             label=f"VectorService.upsert_vectors: {len(embeddings)} vectors",
+            before_batch=check,
         )
         return ordered_responses[-1] if ordered_responses else None
 
-    def upsert_vectors(self, embeddings, texts, filename, page_numbers=None):
+    def upsert_vectors(
+        self,
+        embeddings,
+        texts,
+        filename,
+        page_numbers=None,
+        generation: int | None = None,
+    ):
         """Upsert from parallel lists, bundled into :class:`Chunk` first."""
         if not embeddings:
             return None
@@ -161,80 +294,191 @@ class VectorService:
             )
             for i in range(len(texts))
         ]
-        return self.upsert_chunks(embeddings, chunks, filename)
+        return self.upsert_chunks(embeddings, chunks, filename, generation=generation)
 
     def query_vectors(
-        self, embedding, filename, top_k=FETCH_K, query_text=None, rerank=None
-    ):
+        self,
+        embedding,
+        filename,
+        top_k=FETCH_K,
+        query_text=None,
+        rerank=None,
+        method: RetrievalMethod | None = None,
+        generation: int | None = None,
+        include_legacy: bool = False,
+    ) -> RetrievalResult:
         """
-        Return shaped sources: deduped, score-ordered, bounded.
+        Return shaped sources with an explicit method and empty or success outcome.
 
-        When ``query_text`` is provided the method issues a hybrid query:
-        dense embedding + BM25 sparse (``sparse_vectors`` via ``rank-bm25``)
-        fused with ``RRF(k=60)`` by Qdrant.
-        ``FETCH_K=50`` candidates are fetched before shaping to ``5``.
-
-        When the injected reranker is enabled (or ``rerank=True`` explicitly)
-        and ``query_text`` is present, the 50 hybrid candidates are reranked
-        with a local cross-encoder (``ms-marco-MiniLM-L-6-v2`` 22M fast or
-        ``bge-reranker-v2-m3`` quality) before ``shape_sources`` keeps top 5.
-        Entirely local CPU, no API. ``rerank=False`` preserves legacy order
-        even when the reranker is enabled (used by tests/evaluator).
+        Queries without usable sparse terms select dense retrieval and record
+        that choice in the result.
         """
-        sparse: dict | None = None
-        if query_text is not None:
+        if method not in {None, "dense", "sparse", "hybrid"}:
+            raise VectorStoreConfigurationError(
+                f"Unsupported retrieval method: {method}"
+            )
+
+        sparse = None
+        if query_text is not None and method != "dense":
             sparse = build_sparse_vector(query_text)
             if not sparse["indices"]:
                 sparse = None
-        else:
-            sparse = None
 
-        if sparse is not None:
-            try:
-                # Single Qdrant hybrid query: dense + BM25 sparse via
-                # rank-bm25 on the ``sparse`` field, fused with RRF(k=60)
-                search_results = self._store.query(
-                    vector=embedding,
-                    top_k=top_k,
-                    include_metadata=True,
-                    filter={"pdf_name": filename},
-                    sparse_vector=sparse,
-                )
-            except TypeError as exc:
-                # Explicit warning instead of silent fallback – hybrid is
-                # degraded, helps surface mis-wired fakes in tests.
-                print(
-                    f"VectorService hybrid query degraded to dense (TypeError): {exc}"
-                )
-                search_results = self._store.query(
-                    vector=embedding,
-                    top_k=top_k,
-                    include_metadata=True,
-                    filter={"pdf_name": filename},
-                )
-        else:
-            search_results = self._store.query(
-                vector=embedding,
-                top_k=top_k,
-                include_metadata=True,
-                filter={"pdf_name": filename},
+        if method is None:
+            selected_method: RetrievalMethod = (
+                "hybrid" if sparse is not None else "dense"
             )
+        else:
+            selected_method = method
+            if selected_method != "dense" and sparse is None:
+                raise VectorStoreConfigurationError(
+                    f"{selected_method} retrieval requires query text"
+                )
+
+        query_filter: dict[str, object] = {"pdf_name": filename}
+        if generation is not None:
+            query_filter["index_generation"] = generation
+        elif include_legacy:
+            query_filter["index_generation"] = None
+        query_args = {
+            "vector": embedding,
+            "top_k": top_k,
+            "include_metadata": True,
+            "filter": query_filter,
+            "method": selected_method,
+        }
+        if sparse is not None:
+            query_args["sparse_vector"] = sparse
+        search_results = self._store.query(**query_args)
 
         matches = (
             search_results.get("matches", [])
             if isinstance(search_results, dict)
             else getattr(search_results, "matches", [])
         )
-
-        sources = matches_to_sources(matches, filename)
-
-        # Gated local reranker over FETCH_K candidates before shaping to 5.
-        # Centralised in the reranker's maybe_rerank so VectorService and
-        # evaluator share one gate; entirely local CPU, no API.
+        retrieved = matches_to_sources(matches, filename)
+        sources = retrieved
         if self._reranker is not None:
             sources = self._reranker.maybe_rerank(query_text, sources, enabled=rerank)
+        shaped = shape_sources(sources)
+        actual_method = selected_method
+        if isinstance(search_results, dict) and "method" in search_results:
+            reported_method = search_results["method"]
+            if reported_method not in {"dense", "sparse", "hybrid"}:
+                raise VectorStoreConfigurationError(
+                    f"Vector store reported an invalid retrieval method: {reported_method}"
+                )
+            actual_method = reported_method
+        candidates = _candidates(retrieved, sources, shaped, method=actual_method)
+        return RetrievalResult(
+            sources=shaped,
+            method=actual_method,
+            outcome="success" if shaped else "empty",
+            candidates=candidates,
+            rerank=_rerank_report(self._reranker, candidates),
+        )
 
-        return shape_sources(sources)
+    def validate_generation(
+        self,
+        filename,
+        generation,
+        expected_count,
+        page_count: int | None = None,
+    ):
+        """
+        Check a built index generation before it may be activated.
+
+        Activation is the moment chat starts reading a generation, so every
+        stage the pipeline ran is verified here: the expected number of
+        Passages, dense and sparse representations, payload metadata, Page
+        provenance, and the sparse indexing settings the running configuration
+        expects. A generation that fails any check is never activated and the
+        previous one keeps serving.
+        """
+        reporter = self._store.generation_report
+        report = reporter(
+            filter={"pdf_name": filename, "index_generation": generation},
+            limit=expected_count,
+            value_keys=("sparse_method", "sparse_tokenizer_version"),
+        )
+        if report is None:
+            return self._validate_generation_count(filename, generation, expected_count)
+        problems: list[str] = []
+        total = int(report.get("total", 0))
+        if total != expected_count:
+            problems.append(f"expected {expected_count} vectors but found {total}")
+        if report.get("truncated"):
+            problems.append(
+                f"the stored points were not fully inspected "
+                f"({report.get('inspected', 0)} of {total})"
+            )
+        without_dense = int(report.get("without_dense", 0) or 0)
+        if without_dense:
+            problems.append(f"{without_dense} Passages without a dense vector")
+        without_sparse = int(report.get("without_sparse", 0) or 0)
+        if without_sparse:
+            problems.append(f"{without_sparse} Passages without a sparse vector")
+        for key, count in sorted((report.get("missing_payload") or {}).items()):
+            if count:
+                problems.append(f"{count} Passages missing payload for {key}")
+        for key, count in sorted((report.get("empty_payload") or {}).items()):
+            if count:
+                problems.append(f"{count} Passages with blank {key}")
+        pages = [int(page) for page in report.get("pages") or []]
+        if expected_count and not pages:
+            problems.append("Passages have no Page provenance")
+        if page_count:
+            outside = [page for page in pages if page < 1 or page > page_count]
+            if outside:
+                problems.append(
+                    f"Pages {sorted(outside)} fall outside the document's "
+                    f"{page_count} Pages"
+                )
+        distinct = report.get("distinct_values") or {}
+        problems.extend(
+            _sparse_setting_problems(
+                "sparse method", distinct.get("sparse_method"), SPARSE_METHOD
+            )
+        )
+        problems.extend(
+            _sparse_setting_problems(
+                "sparse tokenizer version",
+                distinct.get("sparse_tokenizer_version"),
+                TOKENIZER_VERSION,
+            )
+        )
+        if problems:
+            raise VectorStoreConfigurationError(
+                f"Index generation {generation} of {filename} failed validation: "
+                + "; ".join(problems)
+                + "."
+            )
+        return report
+
+    def _validate_generation_count(self, filename, generation, expected_count):
+        """Verify the point count when the store cannot report a generation."""
+        counter = getattr(self._store, "count", None)
+        if not callable(counter):
+            return None
+        count = counter(filter={"pdf_name": filename, "index_generation": generation})
+        if count != expected_count:
+            raise VectorStoreConfigurationError(
+                f"Index generation {generation} is incomplete: expected "
+                f"{expected_count} vectors but found {count}."
+            )
+        return count
+
+    def delete_unversioned(self, filename):
+        """Delete vectors created before generation metadata was introduced."""
+        return self._store.delete(
+            filter={"pdf_name": filename, "index_generation": None}
+        )
+
+    def delete_by_generation(self, filename, generation):
+        """Delete vectors from one index generation."""
+        return self._store.delete(
+            filter={"pdf_name": filename, "index_generation": generation}
+        )
 
     def delete_by_filename(self, filename):
         """Delete every vector stored for one document."""

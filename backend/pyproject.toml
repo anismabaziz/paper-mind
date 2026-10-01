@@ -14,8 +14,7 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "pymupdf>=1.27.2.2",
     "python-dotenv>=1.2.2",
-    "qdrant-client>=1.15.0",
-    "rank-bm25>=0.2.2",
+    "qdrant-client>=1.19.0",
     "sentence-transformers>=3.1.0",
     "sqlalchemy>=2.0.0",
     "tiktoken>=0.14.0",
@@ -32,6 +31,7 @@ docling = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=1.15.0",
     "pytest>=8.3.0",
     "ruff>=0.8.0",
@@ -40,17 +40,39 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "full_stack: HTTP tests backed by real Postgres and Qdrant",
+]
 
 [tool.mypy]
 python_version = "3.11"
 files = [
     "app.py",
+    "audit",
     "composition.py",
     "db.py",
+    "evaluation/dataset.py",
+    "evaluation/digest.py",
+    "evaluation/traces.py",
     "evaluation/evaluator.py",
+    "evaluation/harness.py",
+    "evaluation/outcomes.py",
     "repositories",
     "routes",
-    "services/retrieval/vector_service.py",
+    "services/answering.py",
+    "services/brief",
+    "services/chat_context.py",
+    "services/citations.py",
+    "services/deletion.py",
+    "services/accounts/chat_settings_service.py",
+    "services/accounts/model_availability.py",
+    "services/embeddings",
+    "services/indexing",
+    "services/ingestion",
+    "services/llm",
+    "services/models.py",
+    "services/retrieval",
+    "services/telemetry",
     "services/titles.py",
 ]
 check_untyped_defs = true

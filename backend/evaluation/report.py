@@ -1,0 +1,982 @@
+"""
+A checked-in report: what was measured, on what, and by which models.
+
+A retrieval number on its own is a claim. What a reviewer can check is the
+number together with everything that produced it: the revision, the version of
+the case set, the hash of every document, the index manifest, the prompts, the
+models and their revisions, the settings, and the environment. Those travel in
+a manifest, and a report is the directory holding the manifest, one file per
+experiment, and a summary a person reads first.
+
+The report also says what it did *not* measure. A retrieval-only run has no
+answer, citation, abstention, token, or dollar figure, and a summary that left
+those cells empty would read as a run that measured them and got nothing, so
+each kind of evidence is either measured somewhere in the report or carries the
+reason it was not.
+
+Reproducibility is checked, not asserted. Timing is a property of the machine
+and the hour, so it is deliberately outside the manifest's digest: two runs that
+measured the same things reproduce the manifest, and a run that measured
+something different, or with a different model revision, says which field moved.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import platform
+import subprocess
+import sys
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from evaluation import experiments
+from evaluation.dataset import TUNING
+from evaluation.experiments import describe
+from services.answering import AnswerSettings
+from services.citations import PROMPT_VERSION
+from services.indexing.manifest import COLLECTION_SCHEMA_VERSION
+from services.models import model_source
+from services.retrieval.hybrid import RRF_K, TOKENIZER_VERSION
+from services.retrieval.vector_service import FETCH_K, MAX_RETRIEVED_SOURCES
+
+#: Bumped when the shape of a report changes, so an old directory is not read
+#: as a current one.
+REPORT_VERSION = "1"
+
+#: What a retrieval-only measurement has and has not measured. The four kinds
+#: the answer path grades are stated here too, rather than left out: a report
+#: that omitted them would read as a run that decided nothing at all.
+RETRIEVAL_ONLY_REASON = "retrieval-only measurement, nothing asked a model"
+
+#: Fields of a result that are measurements of the machine rather than of the
+#: application, and so are left out of the digest a reproduction is judged on.
+_TIMING_FIELDS = frozenset(
+    {
+        "latency",
+        "comparison",
+        "seconds",
+        "indexed_seconds",
+        "cold_start",
+        "steady_state",
+    }
+)
+
+#: What a report measured, which decides how its summary is written. Retrieval
+#: reports compare experiments; an answer-path report has one column and its
+#: numbers are about answers, not about ranking.
+ABLATION_MODE = "retrieval-ablations"
+ANSWER_MODE = "answer-path"
+
+#: The kinds of evidence a report distinguishes. Deterministic checks are
+#: computed from text; model-graded results come from a judge; human
+#: calibration compares the judge with a person; provider failures are the runs
+#: that never reached a model at all.
+EVIDENCE = (
+    "deterministic",
+    "model_graded",
+    "human_calibration",
+    "provider_failures",
+    "answers",
+    "citations",
+    "abstention",
+    "tokens",
+    "cost",
+)
+
+#: The answer metrics a deterministic grader decides, as opposed to the two a
+#: model judge decides.
+DETERMINISTIC_METRICS = ("citation_precision", "citation_recall", "abstention")
+
+MANIFEST_NAME = "manifest.json"
+RESULTS_DIR = "results"
+SUMMARY_NAME = "README.md"
+
+
+def _package_version(name: str) -> str:
+    """Return an installed package's version, or a note that it is unknown."""
+    try:
+        from importlib.metadata import version
+
+        return version(name)
+    except Exception:  # noqa: BLE001 - a missing package is worth reporting
+        return "not installed"
+
+
+def git_revision(root: Path | None = None) -> dict[str, Any]:
+    """
+    Return the revision the report was measured on.
+
+    A report measured on an uncommitted tree says so: the numbers exist, but the
+    code that produced them does not, which is a different thing from a
+    revision that can be checked out and re-run.
+    """
+    root = Path(root or Path(__file__).parent)
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        subject = subprocess.run(
+            ["git", "log", "-1", "--pretty=%s"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return {"revision": "", "dirty": False, "subject": f"unavailable: {exc}"}
+    return {
+        "revision": revision,
+        "dirty": bool(status),
+        "subject": subject,
+        "files_changed": len(status.splitlines()) if status else 0,
+    }
+
+
+def environment_fingerprint() -> dict[str, Any]:
+    """
+    Return the environment a report was measured in.
+
+    Deliberately a list rather than a dump of the machine's environment: an
+    evaluation run holds two provider keys, and a report is committed. The
+    version of a retrieval implementation is here because a change in the
+    tokenizer, the fusion constant, or the candidate depth moves the numbers
+    without any file in the application changing.
+    """
+    return {
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "packages": {
+            name: _package_version(name)
+            for name in (
+                "qdrant-client",
+                "sentence-transformers",
+                "sqlalchemy",
+                "tiktoken",
+            )
+        },
+        "retrieval": {
+            "rrf_k": RRF_K,
+            "sparse_tokenizer": TOKENIZER_VERSION,
+            "candidate_depth": FETCH_K,
+            "context_sources": MAX_RETRIEVED_SOURCES,
+            "collection_schema": COLLECTION_SCHEMA_VERSION,
+        },
+    }
+
+
+def evidence_from_run(run: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return what one answer-path run measured, and what it could not decide.
+
+    A provider that died is counted as a failure rather than as an answer with
+    no good citations, which is why the answer and token sections are not
+    measured for a run in which nothing was written.
+    """
+    record = run.get("run", run)
+    answers = run["answers"]
+    cost = run["cost"]
+    outcomes = run["outcomes"]
+    calibration = run.get("calibration")
+    judged = [case for case in run["cases"] if case.get("verdict")]
+    failures = outcomes.get("provider_error", 0) + outcomes.get("context_fallback", 0)
+    priced = cost["priced_cases"] > 0
+    # A judge that could not be reached decides nothing, which is reported as
+    # Unknown rather than as a score: a broken judge is not evidence about the
+    # model that wrote the answer.
+    return {
+        "deterministic": {
+            "measured": True,
+            "graded": sum(answers[name]["graded"] for name in DETERMINISTIC_METRICS),
+        },
+        "model_graded": (
+            {"measured": True, "verdicts": len(judged)}
+            if record.get("judge")
+            else {"measured": False, "reason": "no judge was configured for this run"}
+        ),
+        "human_calibration": (
+            # A calibration run that decided nothing has not calibrated
+            # anything, however many cases it was handed.
+            {
+                "measured": True,
+                "agreement": calibration["agreement"],
+                "decided": calibration["agreed"] + calibration["disagreed"],
+            }
+            if calibration
+            else {"measured": False, "reason": "the calibration set was not run"}
+        ),
+        "provider_failures": {"measured": True, "failures": failures},
+        "answers": (
+            {"measured": True, "generated": answers["generated"]}
+            if answers["generated"]
+            else {"measured": False, "reason": "no model wrote an answer"}
+        ),
+        "citations": (
+            {"measured": True, "graded": answers["citation_precision"]["graded"]}
+            if answers["citation_precision"]["graded"]
+            else {"measured": False, "reason": "no answer carried a citation"}
+        ),
+        "abstention": (
+            {"measured": True, "graded": answers["abstention"]["graded"]}
+            if answers["abstention"]["graded"]
+            else {"measured": False, "reason": "no case required an abstention"}
+        ),
+        "tokens": (
+            {
+                "measured": True,
+                "input": cost["input_tokens"],
+                "output": cost["output_tokens"],
+            }
+            if priced
+            else {"measured": False, "reason": "no case reached a model"}
+        ),
+        "cost": (
+            {"measured": True, "usd": cost["usd"]}
+            if priced
+            else {"measured": False, "reason": "no case reached a model"}
+        ),
+    }
+
+
+def _canonical(value: Any) -> str:
+    """Return one value as JSON, in a form that does not depend on key order."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def measurements_digest(results: Sequence[dict[str, Any]]) -> str:
+    """
+    Return a hash over what the results measured, timings left out.
+
+    Latency and dollars move on every run, on any machine, so a report that
+    digested them could never be said to have reproduced. What is left is the
+    part a second run has to match: the retrieval numbers, the outcomes, the
+    verdicts, and the evidence each run recorded.
+    """
+    return hashlib.sha256(
+        _canonical([_without_timings(result) for result in results]).encode()
+    ).hexdigest()
+
+
+def _without_timings(value: Any) -> Any:
+    """
+    Return one result with every timing left out, wherever it is nested.
+
+    Indexing seconds sit inside a document's index state rather than beside it,
+    so pruning only the top level would let a re-index of the same documents
+    read as a different measurement.
+    """
+    if isinstance(value, dict):
+        return {
+            name: _without_timings(nested)
+            for name, nested in value.items()
+            if name not in _TIMING_FIELDS
+        }
+    if isinstance(value, list):
+        return [_without_timings(item) for item in value]
+    return value
+
+
+def evidence_for_retrieval(questions: int) -> dict[str, Any]:
+    """
+    Return what a retrieval-only measurement measured, for every evidence kind.
+
+    The four kinds the answer path grades are stated here too, rather than left
+    out: a report that omitted them would read as a run that decided nothing at
+    all, and a provider that was never called cannot have failed.
+    """
+    unmeasured = {"measured": False, "reason": RETRIEVAL_ONLY_REASON}
+    return {
+        "deterministic": {"measured": True, "graded": questions},
+        "model_graded": unmeasured,
+        "human_calibration": unmeasured,
+        "provider_failures": {
+            "measured": False,
+            "reason": "no provider was called, so no call could fail",
+        },
+        "answers": unmeasured,
+        "citations": unmeasured,
+        "abstention": unmeasured,
+        "tokens": unmeasured,
+        "cost": unmeasured,
+    }
+
+
+def _split_of(results: Sequence[dict[str, Any]]) -> str:
+    """Return the one split every result was measured on, or refuse the set."""
+    splits = {result.get("split") for result in results}
+    if len(splits) != 1:
+        raise ValueError(
+            "a report compares results measured on one split; "
+            f"got {sorted(str(split) for split in splits)}"
+        )
+    return splits.pop() or ""
+
+
+def _run_record(run_records: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Return the run record, whether a whole report or the record was passed."""
+    if not run_records:
+        return {}
+    first = run_records[0]
+    return first.get("run", first)
+
+
+def _model(settings, run_records: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Return the models a report names: the two local ones and the two remote.
+
+    The two local revisions are the commits that will be loaded, resolved
+    through :mod:`services.models`, not the raw settings: a report whose
+    revision reads "" cannot say whether two runs loaded the same weights.
+    """
+    run = _run_record(run_records)
+    judge = run.get("judge")
+    return {
+        "embedding": {
+            "id": settings.embedding.embedding_model,
+            "revision": model_source(
+                settings.embedding.embedding_model, settings.embedding.revision
+            ).revision,
+        },
+        "reranker": {
+            "id": settings.rerank.rerank_model,
+            "revision": model_source(
+                settings.rerank.rerank_model, settings.rerank.revision
+            ).revision,
+        },
+        "generator": (
+            {"provider": run["provider"], "id": run["model"]}
+            if "provider" in run
+            else None
+        ),
+        "judge": (
+            {
+                "provider": judge["provider"],
+                "id": judge["model"],
+                "rubric": judge["rubric_version"],
+            }
+            if judge
+            else None
+        ),
+    }
+
+
+def evidence_summary(results: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Return, per kind of evidence, where it was measured and where it was not."""
+    summary: dict[str, Any] = {}
+    for kind in EVIDENCE:
+        measured_in = []
+        missing = []
+        for result in results:
+            stated = result.get("evidence", {}).get(kind)
+            if stated is None:
+                continue
+            if stated.get("measured"):
+                measured_in.append(result["experiment"])
+            else:
+                missing.append(
+                    {
+                        "experiment": result["experiment"],
+                        "reason": stated.get("reason", "not measured"),
+                    }
+                )
+        summary[kind] = {
+            "measured_in": measured_in,
+            "not_measured": missing,
+            "measured": bool(measured_in),
+        }
+    return summary
+
+
+def build_manifest(
+    *,
+    dataset,
+    settings,
+    results: Sequence[dict[str, Any]],
+    revision: dict[str, Any] | None = None,
+    run_records: Sequence[dict[str, Any]] = (),
+    environment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Return everything a reader needs before reading a number.
+
+    The manifest holds no measurements of its own beyond the digest, so a second
+    run of the same experiments is compared against the first by comparing two
+    manifests rather than two directories of numbers.
+    """
+    run = _run_record(run_records)
+    return {
+        "report_version": REPORT_VERSION,
+        "mode": ANSWER_MODE if run_records else ABLATION_MODE,
+        "revision": revision or git_revision(),
+        "dataset": {
+            "version": dataset.version,
+            "reviewed_on": dataset.reviewed_on,
+            "split": _split_of(results),
+            # The questions asked, not the sum over the columns: the same
+            # questions are asked of every experiment, and adding them up would
+            # read as a set eleven times larger than the one that was reviewed.
+            "cases": len(
+                {case["id"] for result in results for case in result.get("cases", [])}
+            ),
+            # The cases of this split a reported run leaves out, named here
+            # rather than dropped quietly.
+            "held_back": sorted(
+                {name for result in results for name in result.get("held_back", [])}
+            ),
+        },
+        "documents": [document.to_dict() for document in dataset.documents],
+        "prompts": {
+            "citation": PROMPT_VERSION,
+            "judge_rubric": (run.get("judge") or {}).get("rubric_version"),
+        },
+        "models": _model(settings, run_records),
+        "settings": AnswerSettings.from_settings(settings).to_dict(),
+        "retrieval_methods": run.get("retrieval_methods", []),
+        "environment": environment or environment_fingerprint(),
+        "experiments": described_experiments(results),
+        "evidence": evidence_summary(results),
+        "results": [
+            {
+                "experiment": result["experiment"],
+                "family": result.get("family", ""),
+                "split": result.get("split", ""),
+                "questions": result.get("retrieval", {}).get("questions", 0),
+            }
+            for result in results
+        ],
+        "measurements_digest": measurements_digest(results),
+    }
+
+
+def described_experiments(results: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Return the declared experiments a report's results were measured under.
+
+    A result that names an experiment nobody declared is a result whose column
+    in the table says nothing, so the registry is the only place a report can
+    learn what a variant changed.
+    """
+    return describe(
+        [experiments.experiment(result["experiment"]) for result in results]
+    )
+
+
+def _leaves(value: Any, path: str = "") -> dict[str, Any]:
+    """Return a manifest's leaf values by dotted path."""
+    if isinstance(value, dict):
+        leaves: dict[str, Any] = {}
+        for name, nested in value.items():
+            leaves.update(_leaves(nested, f"{path}.{name}" if path else str(name)))
+        return leaves
+    return {path: value}
+
+
+def manifest_changes(
+    previous: dict[str, Any], current: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Return every field that differs between two manifests, in path order."""
+    before, after = _leaves(previous), _leaves(current)
+    return [
+        {"field": path, "before": before.get(path), "after": after.get(path)}
+        for path in sorted(set(before) | set(after))
+        if before.get(path) != after.get(path)
+    ]
+
+
+def reproduction(current: Path, previous: Path) -> dict[str, Any]:
+    """
+    Return whether a new report reproduces a published one, and what moved.
+
+    Two questions, deliberately answered apart. Did the setup match — the same
+    revision, case set, documents, models, settings, and environment? And did
+    the numbers move? Retrieval is measured against an approximate index whose
+    sparse scores carry collection-wide term weights, so the second question has
+    a real answer of its own against a store that is otherwise identical, and
+    reporting that as a failed reproduction would teach a reader to ignore the
+    check.
+
+    A changed model revision is called out on its own, because that is the one
+    difference a reader cannot fix by checking out the same revision: the model
+    behind it moved without a line of this codebase changing.
+    """
+    published = load_manifest(previous)
+    fresh = load_manifest(current)
+    changes = manifest_changes(
+        {
+            name: value
+            for name, value in published.items()
+            if name != "measurements_digest"
+        },
+        {name: value for name, value in fresh.items() if name != "measurements_digest"},
+    )
+    return {
+        "reproduced": not changes,
+        "measurements_changed": (
+            published["measurements_digest"] != fresh["measurements_digest"]
+        ),
+        "measurement_deltas": retrieval_deltas(previous, current),
+        "changes": changes,
+        "model_revisions_changed": [
+            change for change in changes if change["field"].startswith("models.")
+        ],
+    }
+
+
+def load_results(directory: Path) -> dict[str, dict[str, Any]]:
+    """Return every result a report directory holds, by experiment id."""
+    return {
+        path.stem: json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((Path(directory) / RESULTS_DIR).glob("*.json"))
+    }
+
+
+def retrieval_deltas(previous: Path, current: Path) -> list[dict[str, Any]]:
+    """
+    Return how far each experiment's retrieval numbers moved between two reports.
+
+    The largest movement is the number a reader wants: a variant that looked
+    better by less than the run-to-run movement was never a result.
+    """
+    before, after = load_results(previous), load_results(current)
+    deltas = []
+    for experiment, result in after.items():
+        published = before.get(experiment)
+        if published is None:
+            continue
+        deltas.append(
+            {
+                "experiment": experiment,
+                "largest_move": max(
+                    (
+                        abs(
+                            result["retrieval"][metric] - published["retrieval"][metric]
+                        )
+                        for metric in ("hit_rate", "recall", "mrr", "ndcg")
+                    ),
+                    default=0.0,
+                ),
+            }
+        )
+    return deltas
+
+
+def load_manifest(directory: Path) -> dict[str, Any]:
+    """Return the manifest a report directory was written with."""
+    return json.loads((Path(directory) / MANIFEST_NAME).read_text(encoding="utf-8"))
+
+
+def write_report(
+    directory: Path, manifest: dict[str, Any], results: Sequence[dict[str, Any]]
+) -> Path:
+    """
+    Write a report: the manifest, one file per experiment, and the summary.
+
+    The summary is written from the same manifest and results as the files, so
+    a table in it cannot drift from the numbers beside it.
+    """
+    directory = Path(directory)
+    (directory / RESULTS_DIR).mkdir(parents=True, exist_ok=True)
+    for result in results:
+        (directory / RESULTS_DIR / f"{result['experiment']}.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    (directory / MANIFEST_NAME).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (directory / SUMMARY_NAME).write_text(render(manifest, results), encoding="utf-8")
+    return directory
+
+
+@dataclass(frozen=True)
+class Column:
+    """One experiment's numbers as the summary table shows them."""
+
+    id: str
+    family: str
+    hit_rate: float | None
+    recall: float | None
+    mrr: float | None
+    ndcg: float | None
+    p50: float | None
+    p95: float | None
+
+
+def number_cell(value: Any, places: int = 3) -> str:
+    """
+    Return a number for a table cell, or a dash when there is none.
+
+    Shared with the digest rather than written again there, because a dash means
+    the same thing in both documents: the run did not measure that cell. A table
+    that spelled a missing measurement differently in each half would read as two
+    findings about the same absence.
+    """
+    if value is None:
+        return "-"
+    if isinstance(value, (int, float)):
+        return f"{value:.{places}f}"
+    return str(value)
+
+
+def failed_graders(case: dict[str, Any]) -> list[str]:
+    """
+    Return the graders that rejected one case, in the order the report prints them.
+
+    Shared with the digest, which counts the same rejections per grader instead of
+    naming them. Two implementations of "which graders said no" would eventually
+    disagree, and the digest is the document a reader checks when the report's
+    failure table and its numbers seem to contradict each other.
+    """
+    return sorted(
+        name
+        for name, grade in (case.get("grades") or {}).items()
+        if isinstance(grade, dict) and grade.get("outcome") == "failed"
+    )
+
+
+def columns(results: Iterable[dict[str, Any]]) -> list[Column]:
+    """Return one column per result, in the order the report lists them."""
+    table = []
+    for result in results:
+        retrieval = result.get("retrieval", {})
+        latency = result.get("latency", {}).get("retrieval_seconds", {})
+        table.append(
+            Column(
+                id=result["experiment"],
+                family=result.get("family", ""),
+                hit_rate=retrieval.get("hit_rate"),
+                recall=retrieval.get("recall"),
+                mrr=retrieval.get("mrr"),
+                ndcg=retrieval.get("ndcg"),
+                p50=latency.get("p50"),
+                p95=latency.get("p95"),
+            )
+        )
+    return table
+
+
+def _model_line(model: dict[str, Any] | None, label: str) -> str:
+    """Return the line naming the model that generated or judged a run."""
+    if not model:
+        return ""
+    revision = f" at `{model['revision']}`" if model.get("revision") else ""
+    return f"{label} `{model['id']}` on {model['provider']}{revision}"
+
+
+#: The answer metrics a table of an answer-path run shows, in the order a
+#: reader wants them: what the answers said, then whether they can be checked.
+ANSWER_METRICS = (
+    ("correctness", "Correctness"),
+    ("faithfulness", "Faithfulness"),
+    ("citation_precision", "Citation precision"),
+    ("citation_recall", "Citation recall"),
+    ("abstention", "Abstention"),
+)
+
+
+def _answer_table(results: Sequence[dict[str, Any]]) -> list[str]:
+    """
+    Return the table of what the answers said and what could be decided.
+
+    A metric with cases nothing could be decided about shows its ``unknown``
+    count beside the mean, because a mean over the cases that survived a
+    throttled judge reads as a better result than it is.
+    """
+    lines = [
+        "## Answers",
+        "",
+        "| Metric | Mean | Scored | Unknown | Failed |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for result in results:
+        answers = result.get("answers") or {}
+        for name, label in ANSWER_METRICS:
+            metric = answers.get(name)
+            if metric is None:
+                continue
+            lines.append(
+                f"| {label} | {number_cell(metric['mean'])} | "
+                f"{metric['scored']}/{metric['graded']} | {metric['unknown']} | "
+                f"{metric['failed']} |"
+            )
+        cost = result.get("cost") or {}
+        if cost.get("priced_cases"):
+            lines.append(
+                f"| Cost | ${cost['usd']:.4f} | {cost['priced_cases']} answered | "
+                f"{cost['input_tokens']} in / {cost['output_tokens']} out | - |"
+            )
+    calibration = next(
+        (result.get("calibration") for result in results if result.get("calibration")),
+        None,
+    )
+    if calibration:
+        decided = calibration["agreed"] + calibration["disagreed"]
+        agreement = calibration["agreement"]
+        lines += [
+            "",
+            f"The judge agreed with the hand-labelled set on "
+            + (
+                f"{agreement:.0%} of {decided} decided cases."
+                if agreement is not None
+                else f"none of {calibration['cases']} labelled cases — it decided "
+                "nothing, so its verdicts above carry no weight."
+            ),
+        ]
+    return lines
+
+
+def _failures(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Return the questions this result did not get right, and why not.
+
+    A failure is a case that ended as anything but an answer, or an answer one
+    of the deterministic graders would not accept. The rows name the questions;
+    the per-question file beside the summary holds the rest.
+    """
+    failed = []
+    for case in result.get("cases", []):
+        rejected = failed_graders(case)
+        if case.get("outcome") != "answered" or rejected:
+            row: dict[str, Any] = {"id": case["id"], "outcome": case["outcome"]}
+            if rejected:
+                row["failed"] = ",".join(rejected)
+            for verdict in ("verdict", "correctness_verdict"):
+                if case.get(verdict) not in (None, "correct", "faithful"):
+                    row[verdict] = case.get(verdict)
+            failed.append(row)
+    return failed
+
+
+def _moved(results: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return every question that moved, with the move and the direction."""
+    moved = []
+    for result in results:
+        comparison = result.get("comparison") or {}
+        for direction in ("regressions", "improvements"):
+            for row in comparison.get(direction, []):
+                moved.append(
+                    {
+                        "experiment": result["experiment"],
+                        "direction": direction,
+                        "id": row["id"],
+                        "delta": row.get("delta", {}).get("ndcg_at_k", 0.0),
+                    }
+                )
+    return moved
+
+
+def render(manifest: dict[str, Any], results: Sequence[dict[str, Any]]) -> str:
+    """
+    Return the report a reviewer reads first.
+
+    It leads with what was measured and what was not, because a column of
+    numbers is worth nothing without knowing whether the run behind it asked a
+    model, and then with the comparison itself.
+    """
+    revision = manifest["revision"]
+    dataset = manifest["dataset"]
+    models = manifest["models"]
+    environment = manifest["environment"]
+    mode = manifest.get("mode", ABLATION_MODE)
+    lines = [
+        f"# {'Answers' if mode == ANSWER_MODE else 'Retrieval'}"
+        f"{'' if mode == ANSWER_MODE else ' baseline'}: case set "
+        f"{dataset['version']}",
+        "",
+        f"Measured on revision `{revision['revision'][:12] or 'unknown'}` "
+        f"({revision.get('subject', '')})"
+        + (", with uncommitted changes" if revision.get("dirty") else ""),
+        f"Case set {dataset['version']} (reviewed {dataset['reviewed_on']}), split "
+        f"`{dataset['split']}`: {dataset['cases']} questions asked of "
+        + (
+            "the shipped configuration."
+            if mode == ANSWER_MODE
+            else f"each of the {len(results)} experiments."
+        )
+        + " "
+        + (
+            f"{len(dataset['held_back'])} of the split's cases held back "
+            f"({', '.join(f'`{name}`' for name in dataset['held_back'])})."
+            if dataset["held_back"]
+            else "no cases held back."
+        ),
+        f"Embedding `{models['embedding']['id']}`"
+        + (
+            f" at `{models['embedding']['revision']}`"
+            if models["embedding"]["revision"]
+            else ""
+        ),
+        _model_line(models["generator"], "Generating model") or "No model generated.",
+        _model_line(models["judge"], "Judging model") or "No model judged.",
+        (
+            ""
+            if mode == ANSWER_MODE
+            else f"Reranker `{models['reranker']['id']}`"
+            + (
+                f" at `{models['reranker']['revision']}`"
+                if models["reranker"]["revision"]
+                else ""
+            )
+        ),
+        f"Citation prompt `{manifest['prompts']['citation']}`, Python "
+        f"{environment['python']}, RRF k="
+        f"{environment['retrieval']['rrf_k']}, candidate depth "
+        f"{environment['retrieval']['candidate_depth']}.",
+        "",
+        "## What this run measured",
+        "",
+    ]
+    for kind in EVIDENCE:
+        stated = manifest["evidence"][kind]
+        if stated["measured"]:
+            lines.append(
+                f"- **{kind.replace('_', ' ')}**: measured in "
+                + ", ".join(f"`{name}`" for name in stated["measured_in"])
+            )
+        elif stated["not_measured"]:
+            reasons = sorted({row["reason"] for row in stated["not_measured"]})
+            lines.append(
+                f"- **{kind.replace('_', ' ')}**: not measured — " + "; ".join(reasons)
+            )
+    if mode == ANSWER_MODE:
+        lines += [""] + _answer_table(results)
+        rows = [row for result in results for row in _failures(result)]
+        lines += ["", "## Cases that failed", ""]
+        if rows:
+            lines += [
+                "| Question | Outcome | Failed graders | Judge | Correctness |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+            lines += [
+                f"| `{row['id']}` | {row['outcome']} | "
+                f"{row.get('failed', '-')} | {row.get('verdict', '-')} | "
+                f"{row.get('correctness_verdict', '-')} |"
+                for row in rows
+            ]
+        else:
+            lines.append("Every question ended as an accepted answer.")
+    if mode == ANSWER_MODE:
+        lines += [
+            "",
+            "## Reproducing this report",
+            "",
+            "```",
+            "docker compose up db qdrant",
+            "export PAPERMIND_EVAL_GENERATOR_API_KEY=...",
+            "export PAPERMIND_EVAL_JUDGE_API_KEY=...",
+            "uv run python -m evaluation.cli --live \\",
+            _generation_command(manifest["models"]),
+            "  --report <directory>",
+            "```",
+            "",
+        ]
+        lines += _closing_lines()
+        return "\n".join(lines)
+    lines += [
+        "",
+        "## Experiments",
+        "",
+        (
+            "This is the tuning half: the split every variant's value was "
+            "chosen on. A number here is a decision, not a result — the "
+            "reported half is a separate run, and no variant's value was "
+            "changed after reading it."
+            if dataset["split"] == TUNING
+            else "Each variant's value was chosen on the `tuning` split, never "
+            "on the split reported here."
+        ),
+        "",
+        "| Experiment | Family | Changes | Hit@k | Recall | MRR | nDCG | Retrieval p50 (s) | Retrieval p95 (s) |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    declared = {item["id"]: item for item in manifest["experiments"]}
+    for column in columns(results):
+        changes = declared.get(column.id, {}).get("changes", {})
+        changed = ", ".join(f"{name}={value}" for name, value in changes.items()) or "-"
+        lines.append(
+            f"| `{column.id}` | {column.family} | {changed} | "
+            f"{number_cell(column.hit_rate)} | {number_cell(column.recall)} | "
+            f"{number_cell(column.mrr)} | {number_cell(column.ndcg)} | "
+            f"{number_cell(column.p50, 4)} | {number_cell(column.p95, 4)} |"
+        )
+    moved = _moved(results)
+    lines += ["", "## Questions that moved", ""]
+    if moved:
+        lines += [
+            "| Experiment | Direction | Question | nDCG change |",
+            "| --- | --- | --- | --- |",
+        ]
+        lines += [
+            f"| `{row['experiment']}` | {row['direction']} | `{row['id']}` | "
+            f"{number_cell(row['delta'])} |"
+            for row in moved
+        ]
+    else:
+        lines.append("No question changed rank between the baseline and any variant.")
+    lines += [
+        "",
+        "## Reproducing this report",
+        "",
+        "```",
+        "docker compose up db qdrant",
+        "uv run python -m evaluation.cli --live --report <directory> --ablate",
+        "uv run python -m evaluation.cli --live --report <directory> --compare-report "
+        "<published directory>",
+        "```",
+        "",
+    ]
+    lines += _closing_lines()
+    return "\n".join(lines)
+
+
+def _generation_command(models: dict[str, Any]) -> str:
+    """
+    Return the flags that run this report's generator and judge again.
+
+    The manifest names the models that produced the numbers, and a command
+    that does not name them is not the command the report was measured with.
+    """
+    generator = models.get("generator") or {}
+    judged = models.get("judge") or {}
+    lines = [
+        f"  --provider {generator.get('provider', '')} "
+        f"--model {generator.get('id', '')} \\"
+    ]
+    if judged:
+        lines.append(
+            f"  --judge-provider {judged.get('provider', '')} "
+            f"--judge-model {judged.get('id', '')} \\"
+        )
+    return "\n".join(lines)
+
+
+def _closing_lines() -> list[str]:
+    """Return what every report says about being checked and re-run."""
+    return [
+        "The manifest holds the revision, the case set, the document hashes, the "
+        "prompts, the models, the settings, and the environment; each result "
+        "beside it holds the index manifest and generation of every document, "
+        "with the per-question rows the numbers came from. A re-run says whether "
+        "the setup matched and how far each experiment's numbers moved, and a "
+        "changed model revision is named on its own.",
+        "",
+        "The setup is checkable; the numbers are a sample. Retrieval is measured "
+        "against an approximate index whose sparse scores carry term weights "
+        "taken across the whole collection, so two runs over the same documents "
+        "in the same collection can rank a borderline passage differently. Treat "
+        "a difference smaller than the reported movement as no difference.",
+        "",
+    ]

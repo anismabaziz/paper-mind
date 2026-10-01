@@ -1,8 +1,9 @@
 # PaperMind
 
 Chat with your research papers. Upload a PDF, wait for it to index, then ask
-questions and get answers streamed in from an LLM, each grounded in the
-retrieved chunks of your document with the sources shown inline.
+questions and get answers streamed in from an LLM. Every claim in an answer
+names the passages of your document that support it, and clicking a citation
+opens the page it came from.
 
 This is a portfolio project built to run locally. It is PDF-only by design:
 the parser currently registers exactly one parser, for `.pdf`. There is
@@ -20,19 +21,51 @@ and stores one global set of provider settings.
   returned in plaintext
 - Human titles derived from the PDF itself (metadata Title → original filename
   → first heading) while the stable uuid filename stays on disk and in Qdrant
-- Retrieval evaluator with a committed ground-truth fixture
+- Evaluation that asks a committed labeled case set through the same answer
+  path the chat route uses
+- Research Brief: one question across two Documents, answered through four
+  read-only tools under fixed ceilings — see below
 - Postgres for persistence, local filesystem for uploaded files
+
+PaperMind is [MIT licensed](LICENSE); bundled samples, fonts, and reader
+assets are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The
+moving parts are explained in [docs/architecture.md](docs/architecture.md),
+the choices that are expensive to reverse in
+[docs/adr/0010-atomic-generations-local-first-bounded-tools.md](docs/adr/0010-atomic-generations-local-first-bounded-tools.md),
+and what the project does not do in [docs/limits.md](docs/limits.md).
 
 ## Quick start
 
 ```bash
-# Start infra (Postgres + Qdrant) — backend is not a compose service
+./papermind.sh up --seed
+```
+
+That is the whole setup. It checks for Docker, uv, Node, and curl, writes
+the gitignored local secrets, starts Postgres and Qdrant on loopback,
+migrates the database, and starts the worker, the API, and the Vite frontend.
+With `--seed` it also indexes two small CC0 sample PDFs and stores one
+abstained exchange, so a fresh clone has something to open without a model
+key. Then visit http://127.0.0.1:5173.
+
+```bash
+./papermind.sh status   # database, Qdrant, worker, API, frontend
+./papermind.sh smoke    # cited answer or deterministic abstention
+./papermind.sh down     # stop everything, keep volumes and uploads
+```
+
+Prefer the manual steps? They still work:
+
+```bash
+# Generate local-only secrets once (random Postgres password, gitignored),
+# then start infra (Postgres + Qdrant, loopback-only) — backend is not a compose service
+backend/scripts/bootstrap-local.sh
 docker compose -f backend/compose.yaml up -d
 # Run backend locally
 cd backend
 uv sync
 uv run alembic upgrade head
 uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
+uv run python worker.py # in a second terminal: ingestion jobs
 ```
 
 The frontend is a Vite app and runs separately:
@@ -47,8 +80,11 @@ Then open the printed localhost URL. Environment variables for the frontend
 are documented in [frontend/.env.example](frontend/.env.example), and the
 backend's in [backend/.env.example](backend/.env.example).
 
-Required env vars: `DATABASE_URL` (e.g. `postgresql+psycopg://papermind:papermind@localhost:5432/papermind`)
-and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional: `APP_SECRET`
+Required env vars: `DATABASE_URL` (written by `backend/scripts/bootstrap-local.sh`
+from a per-machine random password in gitignored `backend/.infra.env`)
+and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional: `QDRANT_API_KEY`
+— empty for loopback development, required before any remote Qdrant address —
+and `APP_SECRET`
 — the Fernet root that encrypts the stored provider key. Set it in any
 persistent deployment; changing it invalidates previously stored keys. With no
 `APP_SECRET`, a warning is printed and stored keys cannot be encrypted or
@@ -58,7 +94,10 @@ decrypted. After boot, open Settings in the app and paste your provider key — 
 
 There are no provider keys in the environment. Open the Settings dialog in the
 app, pick a provider (Google or Groq) and a model from the curated list, paste
-your own API key, and hit "Test connection" to verify before saving. Keys are
+your own API key, and hit "Test connection" to verify before saving. The
+catalog is five entries: `gemini-2.5-flash` and `gemini-3.5-flash` on
+Google, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, and `qwen/qwen3.8-27b`
+on Groq. Keys are
 stored encrypted in the single `app_settings` row and applied to new chats
 immediately. The app boots with no provider key present; asking a question
 before saving settings returns a clear error pointing at Settings rather than
@@ -71,23 +110,41 @@ except the chat LLM, which is configured once in Settings:
 |---|---|
 | Vector store | Qdrant on `http://localhost:6333` (compose `qdrant` service, volume `qdrant_storage`), collection `pdf-index` |
 | Embeddings | `BAAI/bge-m3` via `sentence-transformers`, CPU, 8192 ctx, 1024d Matryoshka, cached locally via `HF_HOME` (`~/.cache/huggingface`) — no API key |
-| Retrieval | Hybrid dense + BM25 sparse fused with `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
+| Retrieval | Hybrid 1,024-d dense + hashed term-frequency sparse with Qdrant IDF, fused by one Qdrant query using `RRF(k=60)`, 50 candidates → 5, gated reranker `RERANK=true` (22M MiniLM ~10ms/50 or `bge-reranker-v2-m3` ~80ms/50) |
 | Chunking | `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50` (~10%) via `tiktoken cl100k_base`, per-page, `page_no` + `content_hash` metadata |
+| Follow-up context | The last `CHAT_RECENT_TURNS=4` answered turns, with the transcript capped at `CHAT_PRIOR_TURNS_TOKEN_BUDGET=1200` tokens and the evidence at `CHAT_CONTEXT_TOKEN_BUDGET=6000`. Oldest turns and lowest-ranked Citation Sources drop first, both counts are reported in the `retrieval` trace, and the current question is never truncated |
+| Query expansion | A follow-up ("the second method") is searched with recent user questions prepended. `CHAT_QUERY_REWRITE=false` (default) costs no extra model call; `true` rewrites with the model and falls back to the deterministic expansion on failure. Both query forms land in the `done` event's `retrieval` block and in evaluation detail |
 | Parser | `pymupdf` fast path default; `USE_DOCLING=auto` routes only image-only / borderless-table / 2-col PDFs to Docling (opt-in `.[docling]`), `USE_DOCLING=true` forces all |
 | Chat LLM | Single-instance Settings: provider (Google or Groq), curated model, your own API key — encrypted at rest via `APP_SECRET` |
 | Document title | Derived from PDF metadata Title → original filename (without extension) → first heading; stored alongside the uuid `filename` |
-| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant (no chat key); `--live` with the LLM-as-judge needs a key |
+| Evaluator live | `uv run python -m evaluation.cli --live --no-judge` works with just local Qdrant; keys come from `PAPERMIND_EVAL_GENERATOR_API_KEY` and `PAPERMIND_EVAL_JUDGE_API_KEY`, never from a command-line argument. The generator and the judge are configured separately, and the judge's rubric version is recorded with the run. `--no-calibration` skips grading the hand-labelled set |
 
 All free-path knobs live in `backend/.env.example`:
-`RERANK`/`RERANK_MODEL`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
-`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`.
+`RERANK`/`RERANK_MODEL`/`RERANK_REVISION`, `CHUNK_SIZE_TOKENS`/`CHUNK_OVERLAP_TOKENS`,
+`CHAT_RECENT_TURNS`/`CHAT_PRIOR_TURNS_TOKEN_BUDGET`/`CHAT_CONTEXT_TOKEN_BUDGET`/
+`CHAT_MAX_EXPANSION_CHARS`/`CHAT_QUERY_REWRITE`,
+`USE_DOCLING`, `LOCAL_EMBEDDING_MODEL`/`LOCAL_EMBEDDING_REVISION`. Changing any
+of those marks already indexed documents stale and asks for a reindex. The
+`CHAT_*` knobs shape a request, not an index, so they take effect immediately.
 
-The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only).
+The infra compose file is `backend/compose.yaml` (Postgres + Qdrant only,
+both bound to `127.0.0.1` with credentials outside source control — see
+[backend/README.md](backend/README.md) for the threat model and the steps
+required before any remote exposure).
 Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backend/README.md).
 
 ## Screenshots
 
-![Main chat interface](screenshots/main.png)
+Desktop library, reader, and cited answer over the CC0 sample primer:
+
+![Desktop library, reader, and cited answer](screenshots/desktop.png)
+
+Mobile chat drawer with hybrid-retrieval citations over the CC0 team notes:
+
+![Mobile chat drawer with citations](screenshots/mobile.png)
+
+Both were captured from the shipped interface against real sample Documents
+through the deterministic browser backend (`frontend/e2e/`).
 
 ## How it works
 
@@ -100,6 +157,17 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 4. The finished answer is persisted to Postgres together with the sources
    that were used, so reloading a document restores the full conversation.
 
+Every indexed document records the manifest its vectors were built with:
+parser, chunk size and overlap, embedding model and revision, vector
+dimension, sparse method and tokenizer, reranker model and revision, and the
+collection schema version. When the running configuration no longer matches
+that manifest the document is marked stale — its vectors are kept, the
+library and chat panes show which setting changed, chat refuses with a
+reindex action, and a reindex queues an ordinary ingestion job that only
+replaces the active index generation once the replacement validates.
+Documents indexed before manifests existed are marked stale once, so their
+provenance gets recorded.
+
 ## Architecture
 
 ```
@@ -108,7 +176,7 @@ Manual backend run (uv, local Postgres, Alembic) is in [backend/README.md](backe
 └──────────────┘             │                                       │
                              │  settings ── single global app_settings│
                              │  chat ── SSE stream, answers + sources│
-                             │  eval ── retrieval/answer evaluator   │
+                             │  eval ── labeled cases, same path     │
                              │                                       │
                               │  parser (pymupdf fast / Docling)      │
                               │  storage (LocalStorage impl)          │
@@ -163,36 +231,247 @@ can fix their own key or quota. That no-fallback rule is deliberate — with
 a single BYO key, a silent switch would hide the billing owner's error
 (see [docs/adr/0001-per-user-byo-provider-keys.md](docs/adr/0001-per-user-byo-provider-keys.md)).
 
+**One terminal event per answer.** The stream opens with `start` (the recorded
+Turn), carries `token` events, and ends with exactly one of `done`,
+`abstained`, `provider_error`, `citation_error`, `persistence_error`, or
+`cancelled`. `done` is sent only after the Turn and its Citation Sources are
+committed, so a stored answer on screen is an answer in history. The browser
+rejects an event the protocol does not define, and treats a stream that ends
+without a terminal event as a failure — an indefinite loader would be
+indistinguishable from a slow answer. Each way an answer can end reads
+differently: a timeout, an empty answer, a provider failure, an unresolvable
+citation, a save failure, and a stop are six separate messages, not one generic
+error.
+
+**Citations that name something real.** Every retrieved Passage gets a stable
+id (`S1`, `S2`, …) and its retrieval rank before the model is called, and the
+model is asked to list the ids behind each claim it makes. A `done` event
+carries those claims, whether the answer is grounded in them, and the
+`prompt_version` the answer was produced under; the claims and ids are stored
+with the answer, so a reloaded transcript cites the same passages in the same
+order. An id that was never supplied is not a citation to a thin claim — the
+app asks the model to correct the mapping once, and if it still names a
+passage that does not exist, the turn ends as `citation_error` rather than
+showing a citation the reader cannot open. Retrieval scores stay internal:
+the interface shows rank and retrieval method, never a score dressed up as a
+confidence percentage.
+
+**Abstaining before it costs anything.** When retrieval leaves nothing usable
+— no passage for the question at all, or matches that cannot be read or cited —
+the app says so itself and never calls the provider. The exchange is stored as
+a completed Turn carrying a machine-readable reason, with no Citation Sources
+invented for it, and the reason travels into history so a reload still shows an
+abstention rather than a blank answer. An unreachable vector store is not an
+abstention: that stays an error the user can retry, so an outage is never
+replayed as a considered refusal.
+
+**Bounded by the model's own budget.** Every catalogued model declares an
+input budget, an answer budget, a generation timeout, and the finish reasons
+its API reports. The prompt is trimmed to fit the input budget, the answer
+budget is sent to the provider on every call, and a stream that stalls is
+abandoned at the timeout rather than left running. An answer is only called
+complete when the provider said so; anything else is flagged as truncated
+rather than presented as a finished thought. A transient provider failure is
+retried once on the same provider, and only before the first fragment reaches
+the user — retrying later would either duplicate text on screen or bill the
+same account twice for a partial answer.
+
 **Single-instance BYO keys.** Provider, model, and API key are global app
 settings configured in the Settings dialog, not server environment variables.
 Keys are encrypted at rest with Fernet and only ever returned masked. The app
 boots with no provider key present; a workspace with no saved settings gets
 a clear error pointing at Settings rather than a crash or an env default.
 
-**Retrieval evaluation.** `backend/evaluation/` measures the retrieval
-pipeline against a committed ground-truth fixture: ten questions over two
-sample documents, scored with hit-rate and recall@k, plus an optional
-LLM-as-judge faithfulness check on generated answers. The scoring logic runs
-in tests against deterministic fakes; a live run against real providers is
-opt-in because it costs API calls. This exists so changes to chunking or
-retrieval can be judged with numbers instead of vibes.
+**Evaluation runs the app.** `backend/evaluation/` asks a committed labeled
+case set (57 questions over four sample documents) the way a reader asks them.
+The fixture documents are stored and indexed by the same ingestion job and
+worker the upload route uses, and every question goes through the same answer
+path the chat route uses: same document context, retrieval, bounded prompt,
+citation validation, abstention, and persistence. There is no second retrieval
+or generation path to drift out of sync.
+
+Each case ends as whatever it actually was — an answer, an abstention, a
+provider failure, an unusable citation, a failed save, or a refusal — and only
+an answer the model wrote is handed to a grader. Retrieved text quoted back
+after a provider failure is a fallback, not an answer, so scoring it would
+credit the model with the retrieval. Graders say Unknown when they have nothing
+to decide, and a failure is scored as a failure rather than as a quiet zero. A
+run records the index manifest and
+generation, the retrieval method, the prompt version, the provider, the model,
+and the settings behind every number, and the retrieval contract is checked
+once up front: a store that cannot serve hybrid fails the run rather than
+quietly reporting dense numbers.
+
+The tests run the whole thing offline against deterministic embedding, vector
+store, and provider doubles. A live run needs local Qdrant and a provider key
+read from `PAPERMIND_EVAL_GENERATOR_API_KEY` (and
+`PAPERMIND_EVAL_JUDGE_API_KEY` for the judge), never from a command-line
+argument. Generator and judge are configured separately, so a run can generate
+with one account and grade with another.
+
+## Research Brief
+
+For a question across two Documents, the Brief searches the chosen pair
+through four read-only tools — library search, Passage retrieval, Page
+text, and evidence comparison — and returns a structured brief with claims,
+supporting Page citations, conflicting evidence, and explicit gaps. The run
+is bounded (2 Documents, 6 turns, 8 tool calls, 2 repeated calls, 120,000
+tokens, 120 seconds) and only models with structured output plus tool use
+can run it. It cannot execute code, browse sites, change settings, or
+delete Documents. Measured behaviour is in
+[`2026-09-brief-tool-use-v1`](backend/evaluation/reports/2026-09-brief-tool-use-v1/).
 
 ## Testing
+
+Run the fast suite against fakes and in-memory SQLite:
 
 ```bash
 cd backend
 uv run pytest
 ```
 
-Tests run against fakes and in-memory sqlite; they never touch real Qdrant,
-the LLM, or real Postgres (heavy models mocked or `pytest.importorskip`'d; `uv run pytest` stays headless).
+Run the full HTTP workflow against disposable Postgres and Qdrant services:
 
-The evaluator (`backend/evaluation/`) measures retrieval against
-`fixture.json` with `hit@5`/`recall@5` (k=5) + per-question breakdown and
-`ingest sec/PDF` (parse/embed/upsert wall time) via
-`evaluation/evaluator.py`; live runs are opt-in (`--live`). See
-[backend/README.md](backend/README.md) for free local live instructions
-(`http://localhost:6333` without any chat key).
+```bash
+cd backend
+./run-full-stack-tests.sh
+```
+
+The full-stack run applies every migration to an empty database, uses deterministic local embedding, reranking, and chat providers, and removes its database, collection, and containers when it finishes. It needs Docker but no model API keys or paid services.
+
+The evaluator (`backend/evaluation/`) runs a versioned labeled case set
+(`backend/evaluation/datasets/`) through the production answer path and
+reports three things together. Retrieval is scored per question and in
+aggregate with hit rate, recall, MRR, and nDCG, where the
+ideal ranking is one relevant chunk per gold snippet, so a run that found only
+some of the evidence cannot read as a perfect one. Answers are graded twice
+over: six deterministic graders decide the case outcome, the abstention
+decision, whether the citations reach the evidence, whether the claims are
+readable, whether every claim names a supplied Passage, and whether every page
+the answer points at is a page that claim cited, while a separately configured
+judge grades faithfulness against the context and correctness against the
+expected answer against a versioned rubric. Every metric reports what it could
+not decide as Unknown rather than as a zero, and a provider failure fails the
+case instead of improving a score. Latency is reported at p50 and p95 for
+retrieval, time to first token, and total, with the run's first measured case
+held apart from the rest so a cold start is not reported as steady state, next
+to input and output tokens, finish reasons, and a cost estimated from the
+catalog's prices. A judged run also grades a hand-labelled calibration set and
+reports where the judge disagreed with the person.
+
+The case set is 57 reviewed questions over four sample documents, split into a
+tuning half and a reported half before any configuration was chosen, so the
+numbers a report quotes were not the numbers that were fitted. Every document
+is pinned by content hash, so a replaced file cannot keep answering to
+expectations a person wrote against the old one, and a report names the version
+of the set it measured. The handful of cases that only mean something with a
+failure injected are held back from a run and named in the run record.
+
+Live runs are opt-in (`--live`); `--split tuning` runs the other half, and
+`--compare-rerank` runs the case set twice, once with the reranker gate off and
+once with it on, and reports both. See [backend/README.md](backend/README.md) for free local live
+instructions (`http://localhost:6333` with `--no-judge` needs no chat key).
+
+**Four published reports back the retrieval, answer, and brief claims.**
+
+The two retrieval reports — [`2026-09-retrieval-baseline-v1`](backend/evaluation/reports/2026-09-retrieval-baseline-v1/)
+for the reported half and [`2026-09-retrieval-tuning-v1`](backend/evaluation/reports/2026-09-retrieval-tuning-v1/)
+for the tuning half — run eleven retrieval configurations over the same
+case set against real documents, real local embeddings, and real Qdrant: the
+shipped one, dense-only, sparse-only, hybrid-only, reranked, two candidate
+depths, two query-expansion policies, and two chunking policies, every value
+chosen on the tuning half. They report retrieval quality, retrieval latency,
+and the per-question row behind every difference. They are retrieval only: no
+model was called, so neither carries an answer, citation, abstention, token, or
+dollar figure, and each says so. Retrieval is measured against an approximate
+index, so a difference smaller than a run's own movement is not a difference.
+
+[`2026-09-answers-baseline-v1`](backend/evaluation/reports/2026-09-answers-baseline-v1/)
+asks the same 37 reported questions through the answer path with a live
+generator and a separately configured model judge. It reports answer
+correctness, faithfulness, citation precision and recall, abstention accuracy,
+which questions failed and which grader rejected them, p50 and p95 retrieval
+latency, time to first token, total latency, tokens, and the cost estimated at
+the model's published prices. It also records how often the judge agreed with a
+person on a hand-labelled set, which is what tells a reader how much weight its
+verdicts carry.
+
+The manifest beside each set of numbers names the revision, the case set,
+every document's hash and index manifest, the prompts, the models, and the
+environment, and `--compare-report` says whether a re-run reproduced it or which
+field moved.
+
+[`2026-09-brief-tool-use-v1`](backend/evaluation/reports/2026-09-brief-tool-use-v1/)
+measures the Research Brief over 7 tasks and 24 deterministic trials: 100%
+citation precision on completed briefs, 88–100% evidence coverage and
+91–100% abstention accuracy depending on configuration, tool calls at p50
+3.5 / p95 4.0 against the ceiling of 8, and $0.1860 total cost with a 4%
+timeout rate. Coverage is graded as a set
+comparison over held evidence, so two different tool orders that reach the
+same sources grade the same — no task requires one exact tool path. Paid
+model trials run on a controlled schedule with a $5.00 per-run limit.
+
+## Keeping dependencies and models current
+
+Three things in this project can change what the application does without a
+commit: a package's code, a container image's bytes, and a model's weights.
+Each is pinned, and each pin has a job that notices when it stops meaning
+anything.
+
+**Packages.** `backend/uv.lock` and `frontend/package-lock.json` are the
+sources of truth; CI installs them with `uv sync --frozen` and `npm ci`, so a
+build never resolves a version nobody reviewed. A vulnerable *direct*
+dependency fails the `Dependency audit` workflow. An advisory the project has
+decided to live with is recorded with its reason in
+[`backend/audit/accepted.json`](backend/audit/accepted.json) rather than
+silently ignored, and a scheduled job flags acceptances that no longer match
+anything — a decision that outlived the package it was about.
+
+**Images.** Postgres and Qdrant are pinned by digest in
+[`backend/compose.yaml`](backend/compose.yaml) and
+[`backend/compose.test.yaml`](backend/compose.test.yaml), so a re-pushed tag
+cannot swap the database out from under an existing volume. The tag stays in
+the reference as the readable label; the digest decides which bytes run. To
+move a pin forward, resolve the new index digest with
+`docker buildx imagetools inspect <tag>` and update both files.
+
+**Models.** The local embedding model and reranker load at the commit recorded
+for them in [`backend/services/models.py`](backend/services/models.py), not at
+whatever the branch points at. Both load through stock `transformers`
+architectures, so no code from a model repository is executed; a model that
+genuinely needs `trust_remote_code` is refused unless the exact reviewed
+commit is recorded first. Because the revisions are part of the index manifest,
+changing one marks indexed documents stale and asks for a reindex rather than
+mixing vectors from two models.
+
+The remote catalogue is the part that moves on its own: providers retire models
+without a changelog entry. A scheduled job asks every catalogue entry whether
+its provider still serves it and fails naming the ones that do not, so a dead
+entry is removed while there is still time rather than after a user picks it.
+Run it locally with a key in the environment:
+
+```bash
+cd backend
+PAPERMIND_CHECK_GOOGLE_API_KEY=... PAPERMIND_CHECK_GROQ_API_KEY=... \
+  uv run python -m audit.cli models
+```
+
+**Bumping anything that changes answers needs a comparison.** A dependency
+bump, a model revision, or a container digest can move retrieval quality,
+latency, and cost without failing a single test, because the tests measure
+contracts rather than outcomes. The `comparison` check names the files that can
+do this, so a reviewer sees the omission rather than inferring it from a green
+run. Before accepting one, run the evaluation and compare against the last
+report:
+
+```bash
+cd backend
+uv run python -m evaluation.cli --live --split validation \
+  --report reports/<new-name> --compare-report reports/2026-09-retrieval-baseline-v1
+```
+
+Put the comparison in the pull request. If the numbers did not move, say so —
+that is the result, and it is worth as much as a passing test.
 
 ## Technologies
 
@@ -203,4 +482,4 @@ The evaluator (`backend/evaluation/`) measures retrieval against
 - Embeddings: BGE-M3 local via `sentence-transformers` (CPU, 1024d, no key)
 - LLM: Google Gemini or Groq, single-instance via the Settings dialog (BYO key, encrypted at rest)
 - Chunking: `tiktoken` `cl100k_base`, `CHUNK_SIZE_TOKENS=512` / `CHUNK_OVERLAP_TOKENS=50`
-- Retrieval: hybrid dense + BM25 (`rank-bm25`) with RRF, gated local cross-encoder reranker
+- Retrieval: named dense vectors plus hashed term-frequency sparse vectors with Qdrant IDF and RRF, gated local cross-encoder reranker

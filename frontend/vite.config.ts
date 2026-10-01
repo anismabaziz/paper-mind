@@ -45,9 +45,12 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "node",
+    environment: "jsdom",
     env: {
       VITE_API_URL: "http://127.0.0.1:3000",
     },
+    // Playwright browser tests live in e2e/ and run under `npm run test:e2e`,
+    // not Vitest.
+    exclude: ["e2e/**", "node_modules/**", "dist/**"],
   },
 });

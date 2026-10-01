@@ -1,16 +1,26 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
+import { useRef } from "react";
 import { LibraryRail } from "@/components/papermind/LibraryRail";
 import { ReaderPane } from "@/components/papermind/ReaderPane";
 import { ChatPane } from "@/components/papermind/ChatPane";
 import SettingsDialog from "./app/settings-dialog";
+import { ResearchBriefDialog } from "@/components/papermind/ResearchBriefDialog";
 import { useEscapeKey } from "@/hooks/useEscape";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import useMobileUi from "@/store/mobile-ui";
 
 export default function App() {
   const { libraryOpen, chatOpen, setLibraryOpen, setChatOpen } = useMobileUi();
+  const libraryOverlayRef = useRef<HTMLDivElement>(null);
   const libraryPanelRef = useRef<HTMLDivElement>(null);
+  const chatOverlayRef = useRef<HTMLDivElement>(null);
   const chatPanelRef = useRef<HTMLDivElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  // Each drawer traps focus while open and restores it to the toolbar
+  // control that opened it when closed. The trap covers the whole overlay
+  // (panel plus its backdrop control) so Tab cannot leak behind the dialog.
+  useFocusTrap(libraryOpen, libraryOverlayRef, libraryPanelRef);
+  useFocusTrap(chatOpen, chatOverlayRef, chatPanelRef);
 
   const closeDrawers = useCallback(() => {
     setLibraryOpen(false);
@@ -18,21 +28,6 @@ export default function App() {
   }, [setLibraryOpen, setChatOpen]);
   const drawersOpen = libraryOpen || chatOpen;
   useEscapeKey(drawersOpen, closeDrawers);
-
-  // Move focus into whichever drawer opens; restore it when both close.
-  useEffect(() => {
-    if (!drawersOpen) return;
-    if (!restoreFocusRef.current) {
-      restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    }
-    (libraryOpen ? libraryPanelRef : chatPanelRef).current?.focus();
-    return () => {
-      if (!useMobileUi.getState().libraryOpen && !useMobileUi.getState().chatOpen) {
-        restoreFocusRef.current?.focus();
-        restoreFocusRef.current = null;
-      }
-    };
-  }, [libraryOpen, chatOpen, drawersOpen]);
 
   return (
     <div className="flex h-screen max-w-full min-h-[680px] w-full min-w-0 overflow-hidden overflow-x-hidden bg-background text-foreground flex-col lg:flex-row">
@@ -47,7 +42,7 @@ export default function App() {
       </div>
 
       {libraryOpen && (
-        <div className="fixed inset-0 z-40 flex lg:hidden">
+        <div ref={libraryOverlayRef} className="fixed inset-0 z-40 flex lg:hidden">
           <div
             ref={libraryPanelRef}
             tabIndex={-1}
@@ -63,7 +58,7 @@ export default function App() {
       )}
 
       {chatOpen && (
-        <div className="fixed inset-0 z-40 flex justify-end lg:hidden">
+        <div ref={chatOverlayRef} className="fixed inset-0 z-40 flex justify-end lg:hidden">
           <button type="button" aria-label="Close chat" className="flex-1 bg-black/40" onClick={() => setChatOpen(false)} />
           <div
             ref={chatPanelRef}
@@ -79,6 +74,7 @@ export default function App() {
       )}
 
       <SettingsDialog />
+      <ResearchBriefDialog />
     </div>
   );
 }

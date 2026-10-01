@@ -6,6 +6,7 @@ from flask import Flask
 
 from routes.chat import register_chat_routes
 from routes.files import register_file_routes
+from routes.research import register_research_routes
 from routes.settings import register_settings_routes
 
 if TYPE_CHECKING:
@@ -16,4 +17,5 @@ def register_routes(app: Flask, services: "Services") -> None:
     """Register every HTTP route over the injected application graph."""
     register_file_routes(app, services)
     register_chat_routes(app, services)
+    register_research_routes(app, services)
     register_settings_routes(app, services)

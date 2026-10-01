@@ -16,6 +16,12 @@ from services.parsing.document_parser import (
     UnknownDocumentFormat,
     resolve_parser,
 )
+from services.retrieval.hybrid import (
+    SPARSE_METHOD,
+    TOKENIZER_VERSION,
+    build_sparse_vector,
+)
+from services.retrieval.reranker import Reranker
 from services.retrieval.vector_service import (
     MAX_RETRIEVED_SOURCES,
     VectorService,
@@ -135,6 +141,51 @@ class TestDocumentParser:
         return doc.tobytes()
 
 
+def test_sparse_vector_aggregates_hash_collisions():
+    """Colliding token hashes produce one weighted sparse index."""
+    vector = build_sparse_vector("acc acr")
+
+    assert vector == {"indices": [1750], "values": [2.0]}
+
+
+def test_query_without_sparse_terms_selects_dense_explicitly():
+    """A stopword-only query records the dense method it selected."""
+    index = FakeVectorIndex([])
+
+    result = VectorService(index).query_vectors([0.1], "doc.pdf", query_text="the and")
+
+    assert result.method == "dense"
+    assert result.outcome == "empty"
+    assert index.queries[0]["kwargs"]["method"] == "dense"
+    assert "sparse_vector" not in index.queries[0]["kwargs"]
+
+
+def test_service_records_the_selected_retrieval_method():
+    """A shaped result names the retrieval method that ran."""
+    index = FakeVectorIndex(
+        [
+            {
+                "id": "point-1",
+                "score": 0.5,
+                "metadata": {
+                    "content": "keyword evidence",
+                    "pdf_name": "doc.pdf",
+                    "chunk_index": 0,
+                },
+            }
+        ]
+    )
+
+    result = VectorService(index).query_vectors(
+        [0.1], "doc.pdf", query_text="keyword", method="sparse"
+    )
+
+    assert result.method == "sparse"
+    assert result.outcome == "success"
+    assert result.sources[0]["content"] == "keyword evidence"
+    assert index.queries[0]["kwargs"]["method"] == "sparse"
+
+
 class FakeVectorIndex:
     """FakeVectorIndex."""
 
@@ -143,10 +194,15 @@ class FakeVectorIndex:
         self._matches = matches
         self.queries = []
 
-    def query(self, vector, top_k, include_metadata, filter):
+    def query(self, vector, top_k, include_metadata, filter, **kwargs):
         """Do query."""
-        self.queries.append({"top_k": top_k, "filter": filter})
-        return {"matches": self._matches}
+        self.queries.append({"top_k": top_k, "filter": filter, "kwargs": kwargs})
+        method = kwargs.get("method", "dense")
+        return {
+            "matches": self._matches,
+            "method": method,
+            "outcome": "success" if self._matches else "empty",
+        }
 
 
 @pytest.fixture
@@ -167,7 +223,7 @@ class TestRetrievalShaping:
     def run_shaping(self, service_factory, matches):
         """Do run shaping."""
         service, index = service_factory(matches)
-        return service.query_vectors([0.1], "doc.pdf"), index
+        return service.query_vectors([0.1], "doc.pdf").sources, index
 
     @staticmethod
     def match(content, score, chunk_index=0, document="doc.pdf"):
@@ -259,7 +315,39 @@ class TestChunkMetadata:
             "chunk_index": 1,
             "page_no": 7,
             "content_hash": "world-hash",
+            "sparse_method": SPARSE_METHOD,
+            "sparse_tokenizer_version": TOKENIZER_VERSION,
         }
+
+    def test_generation_point_ids_are_deterministic_and_isolated(self):
+        """The same generation reuses point IDs while a new generation does not."""
+        chunks = [Chunk("hello", page_no=1, chunk_index=0, content_hash="hash")]
+
+        first = build_vectors_from_chunks([[0.3]], chunks, "paper.pdf", generation=1)
+        repeated = build_vectors_from_chunks([[0.3]], chunks, "paper.pdf", generation=1)
+        replacement = build_vectors_from_chunks(
+            [[0.3]], chunks, "paper.pdf", generation=2
+        )
+
+        assert first[0]["id"] == repeated[0]["id"]
+        assert first[0]["id"] != replacement[0]["id"]
+        assert first[0]["metadata"]["index_generation"] == 1
+
+    def test_generation_validation_rejects_an_incomplete_index(self):
+        """A generation with the wrong point count cannot become ready."""
+        from services.retrieval.base import VectorStoreConfigurationError
+
+        class CountingStore:
+            """Store double that reports an incomplete generation."""
+
+            def generation_report(self, filter=None, limit=1000, value_keys=()):
+                return None
+
+            def count(self, filter=None):
+                return 1
+
+        with pytest.raises(VectorStoreConfigurationError):
+            VectorService(CountingStore()).validate_generation("doc.pdf", 2, 2)
 
     def test_upsert_includes_page_no_and_content_hash(self):
         """Do test upsert includes page no and content hash."""
@@ -368,3 +456,111 @@ class TestChunkMetadata:
         assert len(sources) == 1
         assert sources[0]["page_no"] == 5
         assert sources[0]["content_hash"] == "hash2"
+
+
+class TestRetrievalCandidateRanks:
+    """What retrieval can be explained by, for every candidate it returned."""
+
+    @staticmethod
+    def match(content, score, chunk_index=0, content_hash=None):
+        """Do match."""
+        return {
+            "id": f"v-{content_hash or content}",
+            "score": score,
+            "metadata": {
+                "content": content,
+                "pdf_name": "doc.pdf",
+                "chunk_index": chunk_index,
+                "page_no": chunk_index + 1,
+                "content_hash": content_hash or f"hash-{content}",
+            },
+        }
+
+    def test_a_hybrid_query_reports_a_fused_rank_for_every_candidate(
+        self, service_factory
+    ):
+        """Fusion happened inside the store, so every candidate carries its rank."""
+        service, _ = service_factory(
+            [self.match("low", 0.10, 0), self.match("high", 0.90, 1)]
+        )
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="keyword")
+
+        assert [c.rank for c in result.candidates] == [1, 2]
+        assert [c.fused_rank for c in result.candidates] == [1, 2]
+        assert [c.content_hash for c in result.candidates] == ["hash-low", "hash-high"]
+
+    def test_a_dense_query_reports_no_fused_rank(self, service_factory):
+        """There was no fusion to report, so no fused rank is invented."""
+        service, _ = service_factory([self.match("only", 0.5, 0)])
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="the and")
+
+        assert result.method == "dense"
+        assert result.candidates[0].fused_rank is None
+
+    def test_a_reranked_query_reports_the_rerank_result(self, service_factory):
+        """Reranking is a reorder, and the trace shows the move it made."""
+        service, _ = service_factory(
+            [self.match("first", 0.90, 0), self.match("second", 0.80, 1)]
+        )
+        service._reranker = _ReversingReranker()
+
+        result = service.query_vectors(
+            [0.1], "doc.pdf", query_text="keyword", rerank=True
+        )
+
+        by_hash = {c.content_hash: c for c in result.candidates}
+        assert by_hash["hash-first"].rank == 1
+        assert by_hash["hash-first"].rerank_rank == 2
+        assert by_hash["hash-second"].rerank_rank == 1
+        assert by_hash["hash-second"].rerank_score == 1.0
+        assert result.rerank["applied"] is True
+        assert result.rerank["reordered"] is True
+
+    def test_candidates_say_which_ones_survived_the_bound(self, service_factory):
+        """A candidate the app dropped is still reported, marked as dropped."""
+        matches = [self.match(f"chunk {i}", 1.0 - i / 100, i) for i in range(8)]
+        service, _ = service_factory(matches)
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="keyword")
+
+        selected = [c.content_hash for c in result.candidates if c.selected]
+        assert selected == [f"hash-chunk {i}" for i in range(MAX_RETRIEVED_SOURCES)]
+        assert len(result.candidates) == 8
+
+    def test_a_duplicate_match_is_one_candidate(self, service_factory):
+        """Dedupe is a Passage-level decision, so a repeated match is not a second one."""
+        service, _ = service_factory(
+            [self.match("same", 0.4, 0), self.match("same", 0.9, 1)]
+        )
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="keyword")
+
+        assert [c.rank for c in result.candidates] == [1]
+        assert len(result.sources) == 1
+
+    def test_a_candidate_records_where_it_came_from(self, service_factory):
+        """A Page and a chunk are provenance, not private text, and are kept."""
+        service, _ = service_factory([self.match("only", 0.5, 3)])
+
+        result = service.query_vectors([0.1], "doc.pdf", query_text="keyword")
+
+        candidate = result.candidates[0]
+        assert (candidate.page, candidate.chunk_index) == (4, 3)
+        assert candidate.score == 0.5
+
+
+class _ReversingReranker(Reranker):
+    """Reranker that reverses the candidates, so a reorder is visible."""
+
+    def maybe_rerank(self, query, sources, enabled=None):
+        """Return the candidates last, with the reranker's own score."""
+        return [
+            {
+                **source,
+                "score": 1.0 - position / 10,
+                "rerank_score": 1.0 - position / 10,
+            }
+            for position, source in enumerate(reversed(sources))
+        ]

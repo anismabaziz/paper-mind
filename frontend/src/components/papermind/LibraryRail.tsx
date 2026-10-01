@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings } from "lucide-react";
+import { Archive, Clock3, Search, Upload, File, Trash2, MoreHorizontal, Loader2, Settings, AlertTriangle, RotateCw, RefreshCw, Square, Scale } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { processFile } from "@/services/files";
-import { useFiles, useUploadFile, useDeleteFile, useProcessFile, useTouchFileOpened } from "@/hooks/useFiles";
+import { useFiles, useUploadFile, useDeleteFile, useRetryIngestion, useCancelIngestion, useReindex, useTouchFileOpened } from "@/hooks/useFiles";
 import { formatFileSize } from "@/lib/format";
+import { FailureNotice } from "./FailureNotice";
 import usePdfStore from "@/store/pdf-state";
 import useSettingsUi from "@/store/settings-ui";
+import useBriefUi from "@/store/brief-ui";
 import useMobileUi from "@/store/mobile-ui";
+import { isBriefBlocked, isBriefReadable } from "@/services/research";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -14,8 +16,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import type { File as DbFile } from "@/types/db";
-import { displayTitle } from "@/types/db";
+import type { File as DbFile, IngestionJob } from "@/types/db";
+import { displayTitle, indexStatusLine, ingestionStageLabel, isIndexStale, isIngestionActive, isIngestionCancellable, isIngestionRetryable } from "@/types/db";
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -23,19 +25,36 @@ function pad(n: number) {
 
 const MAX_RECENTS = 12;
 
+function jobStatusLine(job: IngestionJob | null | undefined): string {
+  if (!job) return "Not indexed";
+  if (job.state === "failed") {
+    return job.error_message ?? "Indexing failed \u2014 retry";
+  }
+  if (job.state === "cancelled") return "Cancelled \u00b7 retry available";
+  if (job.state === "cancelling") return "Cancelling";
+  if (job.state === "stale") return "Superseded by a newer attempt";
+  if (job.state === "ready") return "Indexed";
+  return `${ingestionStageLabel(job.stage)} \u00b7 ${job.progress}%`;
+}
+
 export function LibraryRail() {
   const queryClient = useQueryClient();
   const { file: selectedFile, setFile } = usePdfStore();
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<"library" | "recent">("library");
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openSettings = useSettingsUi((s) => s.open);
+  const openBrief = useBriefUi((s) => s.open);
   const setLibraryOpen = useMobileUi((s) => s.setLibraryOpen);
   const filesQuery = useFiles();
   const touchOpened = useTouchFileOpened();
 
   const files = filesQuery.data?.files ?? [];
+  // The same rule the brief dialog applies, so the control is offered exactly
+  // when a brief could actually be started rather than opening onto a refusal.
+  const briefable = files.filter((file) => isBriefReadable(file) && !isBriefBlocked(file));
 
   const recents = useMemo(() => {
     const opened = files.filter((f): f is DbFile & { last_opened_at: string } => f.last_opened_at != null);
@@ -73,29 +92,35 @@ export function LibraryRail() {
   }, [viewFiles, query]);
 
   const uploadMutation = useUploadFile({
-    onSuccess: async (data) => {
-      try {
-        await processFile(data.file);
-      } catch (err) {
-        console.error("Indexing failed:", err);
-        alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        // A fresh upload counts as opened so it enters Recent readings.
-        touchOpened.mutate(data.file);
-        // ["files"] prefix covers the per-document status/messages/meta keys.
-        queryClient.invalidateQueries({ queryKey: ["files"] });
-      }
+    onSuccess: (data) => {
+      // A fresh upload counts as opened so it enters Recent readings. The
+      // upload response already carries the queued ingestion job, so the
+      // listing polls it directly with no client-side processing call.
+      touchOpened.mutate(data.file);
+      queryClient.invalidateQueries({ queryKey: ["files"] });
     },
     onError: (err) => {
-      alert(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
+      setUploadError(err instanceof Error ? err.message : String(err));
     },
   });
 
-  const deleteMutation = useDeleteFile();
-
-  const processMutation = useProcessFile({
-    onError: (err) => alert(`Indexing failed: ${err instanceof Error ? err.message : String(err)}`),
+  const deleteMutation = useDeleteFile({
+    onSuccess: (_data, variables) => {
+      if (selectedFile?.id === variables.id) setFile(null);
+    },
   });
+  const deleteError = deleteMutation.error instanceof Error ? deleteMutation.error.message : null;
+  const deleteTarget = deleteMutation.variables as DbFile | undefined;
+
+  const retryMutation = useRetryIngestion();
+  const retryTarget = retryMutation.variables as string | undefined;
+  const retryError = retryMutation.error instanceof Error ? retryMutation.error.message : null;
+  const cancelMutation = useCancelIngestion();
+  const cancelTarget = cancelMutation.variables as string | undefined;
+  const cancelError = cancelMutation.error instanceof Error ? cancelMutation.error.message : null;
+  const reindexMutation = useReindex();
+  const reindexTarget = reindexMutation.variables as string | undefined;
+  const reindexError = reindexMutation.error instanceof Error ? reindexMutation.error.message : null;
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files?.[0]) uploadMutation.mutate(e.target.files[0]);
@@ -126,10 +151,11 @@ export function LibraryRail() {
           className="grid size-8 place-items-center border border-rule text-ink-soft hover:border-marker hover:text-marker disabled:opacity-40"
           aria-label="Upload paper"
           title="Upload paper"
+          data-testid="upload-paper"
         >
           {uploadMutation.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
         </button>
-        <input ref={fileInputRef} type="file" hidden accept=".pdf" onChange={handleFileChange} />
+        <input ref={fileInputRef} type="file" hidden accept=".pdf" onChange={handleFileChange} data-testid="file-input" />
       </header>
 
       <div className="border-b border-rule p-4">
@@ -139,7 +165,9 @@ export function LibraryRail() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search library"
+            aria-label="Search library"
             className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-ink-faint"
+            data-testid="library-search"
           />
         </label>
       </div>
@@ -151,6 +179,7 @@ export function LibraryRail() {
             <button
               type="button"
               onClick={() => setTab("library")}
+              aria-pressed={tab === "library"}
               className={cn(
                 "flex w-full items-center gap-2.5 px-2 py-2 text-left text-xs",
                 tab === "library" ? "bg-marker-soft font-medium text-marker" : "text-ink-soft hover:bg-canvas",
@@ -165,6 +194,7 @@ export function LibraryRail() {
             <button
               type="button"
               onClick={() => setTab("recent")}
+              aria-pressed={tab === "recent"}
               className={cn(
                 "flex w-full items-center gap-2.5 px-2 py-2 text-left text-xs",
                 tab === "recent" ? "bg-marker-soft font-medium text-marker" : "text-ink-soft hover:bg-canvas",
@@ -190,14 +220,76 @@ export function LibraryRail() {
           )}
         </div>
 
+        {/* Each failure keeps its own heading and its own dismissal: collapsing
+            them into one priority chain hid an upload failure behind an
+            unrelated reindex error, so neither read as what it was. */}
+        {[
+          { key: "upload", heading: "Upload failed", detail: uploadError, reset: () => setUploadError(null) },
+          { key: "retry", heading: "Retry failed", detail: retryError, reset: () => retryMutation.reset() },
+          { key: "cancel", heading: "Cancellation failed", detail: cancelError, reset: () => cancelMutation.reset() },
+          { key: "reindex", heading: "Reindex failed", detail: reindexError, reset: () => reindexMutation.reset() },
+        ]
+          .filter((failure) => failure.detail)
+          .map((failure) => (
+            <div key={failure.key} role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2" data-testid={`library-${failure.key}-error`}>
+              <p className="text-xs font-medium text-destructive">{failure.heading}</p>
+              <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-soft">{failure.detail}</p>
+              <button
+                type="button"
+                onClick={failure.reset}
+                className="mt-2 border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
+
+        {deleteMutation.isError && (
+          <div role="alert" className="mx-1 mb-2 border border-destructive/40 bg-destructive/5 px-3 py-2">
+            <p className="text-xs font-medium text-destructive">
+              Delete failed{deleteTarget ? ` for ${displayTitle(deleteTarget)}` : ""}
+            </p>
+            <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-soft">
+              {deleteError ?? "The document was kept so you can retry."}
+            </p>
+            <div className="mt-2 flex gap-2">
+              {deleteTarget && (
+                <button
+                  type="button"
+                  onClick={() => deleteMutation.mutate(deleteTarget)}
+                  disabled={deleteMutation.isPending}
+                  className="border border-ink bg-ink px-2 py-1 font-mono text-[0.6rem] text-paper hover:bg-ink/90 disabled:opacity-40"
+                >
+                  Retry delete
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => deleteMutation.reset()}
+                className="border border-rule bg-paper px-2 py-1 font-mono text-[0.6rem] hover:border-ink"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {filesQuery.isPending ? (
           <div className="space-y-2 px-1">
             {[...Array(3)].map((_, i) => (
               <div key={i} className="h-[76px] w-full animate-pulse rounded-sm border border-rule bg-paper/60" />
             ))}
           </div>
+        ) : filesQuery.isError ? (
+          <FailureNotice
+            testId="library-error"
+            title="Could not load your library"
+            message={`${filesQuery.error instanceof Error ? filesQuery.error.message : "The library request failed."} Nothing was deleted — this is a loading failure, not an empty library.`}
+            actionLabel="Retry library load"
+            onAction={() => filesQuery.refetch()}
+          />
         ) : filtered.length === 0 ? (
-          <div className="mx-1 rounded-sm border border-dashed border-rule bg-paper/40 px-4 py-8 text-center">
+          <div className="mx-1 rounded-sm border border-dashed border-rule bg-paper/40 px-4 py-8 text-center" data-testid="library-empty">
             <div className="mx-auto grid size-8 place-items-center border border-rule bg-paper text-ink-faint">
               <File className="size-3.5" />
             </div>
@@ -223,66 +315,164 @@ export function LibraryRail() {
             )}
           </div>
         ) : (
-          <ul className="min-w-0 max-w-full space-y-px overflow-hidden">
+          <ul className="min-w-0 max-w-full space-y-px overflow-hidden" data-testid="library-list">
             {filtered.map((item, index) => {
               const active = selectedFile?.id === item.id;
               const isRemoving = deleteMutation.isPending && (deleteMutation.variables as DbFile | undefined)?.id === item.id;
-              const isRetrying = processMutation.isPending && (processMutation.variables as DbFile | undefined)?.name === item.name;
-              const isProcessing = !item.is_processed;
+              const job = item.ingestion;
+              const isRetrying = retryMutation.isPending && retryTarget === item.name;
+              const isCancelling = cancelMutation.isPending && cancelTarget === item.name;
+              const isJobActive = isIngestionActive(job?.state) || isRetrying || isCancelling;
+              const isJobRetryable = isIngestionRetryable(job?.state) && !isRetrying;
+              const isJobFailed = job?.state === "failed" && !isRetrying;
+              const isReindexing = reindexMutation.isPending && reindexTarget === item.name;
+              const isStaleIndex = isIndexStale(item.index) && !isJobActive && !isReindexing;
+
+              const isDeleting = item.deletion_state === "deleting" || isRemoving;
+              const isDeleteFailed = item.deletion_state === "delete_failed";
 
               return (
-                <li key={item.id} className="min-w-0 max-w-full overflow-hidden">
+                <li key={item.id} className="min-w-0 max-w-full overflow-hidden" data-testid={`library-item-${item.name}`}>
                   <div
-                    className={cn(
-                      "group relative flex min-w-0 max-w-full items-center gap-0 overflow-hidden border-l-2 text-left transition-colors",
-                      active ? "border-marker bg-paper" : "border-transparent hover:border-rule hover:bg-paper/70",
-                      isRemoving && "opacity-50 pointer-events-none",
-                    )}
+                      className={cn(
+                        "group relative flex min-w-0 max-w-full items-center gap-0 overflow-hidden border-l-2 text-left transition-colors",
+                        active ? "border-marker bg-paper" : "border-transparent hover:border-rule hover:bg-paper/70",
+                        (isRemoving || isDeleting) && "opacity-50 pointer-events-none",
+                      )}
                   >
                     <button
                       type="button"
                       onClick={() => {
-                        if (!isProcessing) selectFile(item);
+                        // A failed job still has readable PDF bytes, so the
+                        // reader stays reachable to inspect and retry it.
+                        if (!isJobActive) selectFile(item);
                       }}
-                      className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isProcessing && "cursor-default")}
+                      aria-disabled={isJobActive}
+                      aria-label={isJobActive ? `${displayTitle(item)}, indexing` : undefined}
+                      className={cn("flex min-w-0 max-w-full flex-1 flex-col gap-1 overflow-hidden px-3 py-3 text-left", isJobActive && "cursor-default")}
                     >
                       <span className="flex w-full min-w-0 max-w-full items-center justify-between overflow-hidden font-mono text-[0.58rem] text-ink-faint">
                         <span>0{index + 1}</span>
                         <span className="flex items-center gap-1.5">
-                          {isProcessing ? (
+                          {isDeleting ? (
                             <span className="inline-flex items-center gap-1">
                               <Loader2 className="size-2.5 animate-spin" />
-                              {isRetrying ? "Re-indexing" : "Indexing"}
+                              Deleting
+                            </span>
+                          ) : isDeleteFailed ? (
+                            <span className="text-destructive">Delete failed</span>
+                          ) : isStaleIndex || isReindexing ? (
+                            <span className="inline-flex items-center gap-1 text-destructive">
+                              {isReindexing ? <Loader2 className="size-2.5 animate-spin" /> : <AlertTriangle className="size-2.5" />}
+                              {isReindexing ? "Reindexing" : "Stale"}
+                            </span>
+                          ) : isJobFailed ? (
+                            <span className="inline-flex items-center gap-1 text-destructive">
+                              <AlertTriangle className="size-2.5" />
+                              Failed
+                            </span>
+                          ) : isJobActive ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Loader2 className="size-2.5 animate-spin" />
+                              {isCancelling
+                                ? "Cancelling"
+                                : isRetrying
+                                  ? "Retrying"
+                                  : ingestionStageLabel(job?.stage ?? "queued")}
+                            </span>
+                          ) : isJobRetryable ? (
+                            <span className="inline-flex items-center gap-1 text-destructive">
+                              <AlertTriangle className="size-2.5" />
+                              Retry
                             </span>
                           ) : (
                             <span>{formatFileSize(item.metadata.size)}</span>
-                          )}
-                        </span>
-                      </span>
+                           )}
+                         </span>
+                       </span>
+
                       <span className={cn("block min-w-0 max-w-full overflow-hidden text-[0.78rem] leading-snug break-words line-clamp-2", active ? "font-medium text-ink" : "text-ink-soft group-hover:text-ink")}>
                         {displayTitle(item)}
                       </span>
                       <span className="block min-w-0 max-w-full truncate overflow-hidden text-[0.65rem] text-ink-faint">
                         {item.metadata.content_type.split("/").pop()?.toUpperCase() ?? "PDF"} ·{" "}
-                        {isProcessing ? "Queued for indexing" : "Indexed"}
+                        {isDeleting
+                          ? "Deleting"
+                          : isDeleteFailed
+                            ? (item.deletion_error ?? "Delete failed — retry")
+                            : isStaleIndex || isReindexing
+                              ? indexStatusLine(item.index)
+                              : jobStatusLine(job)}
                       </span>
                     </button>
 
                     <div className="pr-1">
-                      {isProcessing ? (
+                      {isDeleteFailed ? (
                         <button
                           type="button"
-                          onClick={() => processMutation.mutate(item)}
-                          disabled={isRetrying}
-                          className="mr-1 grid size-7 place-items-center border border-rule bg-paper text-[0.6rem] font-medium text-ink-soft hover:border-ink hover:text-ink disabled:opacity-40"
+                          onClick={() => deleteMutation.mutate(item)}
+                          disabled={deleteMutation.isPending}
+                          title={item.deletion_error ?? "Retry deletion"}
+                          className="mr-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
                         >
-                          {isRetrying ? <Loader2 className="size-3 animate-spin" /> : "→"}
+                          Retry
                         </button>
-                      ) : !isRemoving ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
+                      ) : isStaleIndex || isReindexing ? (
+                        <button
+                          type="button"
+                          onClick={() => reindexMutation.mutate(item.name)}
+                          disabled={isReindexing}
+                          title={item.index?.change_details.map((c) => c.label).join(", ") ?? "Reindex"}
+                          aria-label={`Reindex ${displayTitle(item)}`}
+                          data-testid={`reindex-${item.name}`}
+                          className="mr-1 inline-flex items-center gap-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
+                        >
+                          {isReindexing ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                          Reindex
+                        </button>
+                      ) : isJobRetryable ? (
+                        <button
+                          type="button"
+                          onClick={() => retryMutation.mutate(item.name)}
+                          disabled={isRetrying}
+                          title={job?.error_message ?? "Retry indexing"}
+                          aria-label={`Retry indexing ${displayTitle(item)}`}
+                          data-testid={`retry-${item.name}`}
+                          className="mr-1 inline-flex items-center gap-1 border border-destructive/50 bg-paper px-2 py-1 font-mono text-[0.6rem] text-destructive hover:border-destructive disabled:opacity-40"
+                        >
+                          {isRetrying ? <Loader2 className="size-3 animate-spin" /> : <RotateCw className="size-3" />}
+                          Retry
+                        </button>
+                      ) : isJobActive ? (
+                        <>
+                          <span
+                            className="mr-1 grid size-7 place-items-center"
+                            role="status"
+                            aria-label={`${ingestionStageLabel(job?.stage ?? "queued")} ${job?.progress ?? 0}%`}
+                          >
+                            <Loader2 className="size-3 animate-spin" />
+                          </span>
+                          {isIngestionCancellable(job?.state) && (
                             <button
                               type="button"
+                              onClick={() => cancelMutation.mutate(item.name)}
+                              disabled={isCancelling}
+                              title="Cancel indexing"
+                              aria-label={`Cancel indexing ${displayTitle(item)}`}
+                              className="mr-1 grid size-7 place-items-center border border-rule bg-paper text-ink-soft hover:border-destructive hover:text-destructive disabled:opacity-40"
+                            >
+                              {isCancelling ? <Loader2 className="size-3 animate-spin" /> : <Square className="size-3" />}
+                            </button>
+                          )}
+                        </>
+                       ) : !isRemoving && !isDeleting ? (
+                         <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                              data-testid={`document-menu-${item.name}`}
+                              type="button"
+                              aria-label={`Actions for ${displayTitle(item)}`}
+                              aria-haspopup="menu"
                               onClick={(e) => e.stopPropagation()}
                               className={cn(
                                 "grid size-7 place-items-center border border-transparent text-ink-faint hover:border-rule hover:bg-paper hover:text-ink",
@@ -296,6 +486,7 @@ export function LibraryRail() {
                             <DropdownMenuItem
                               className="flex items-center gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive"
                               onClick={() => deleteMutation.mutate(item)}
+                              data-testid={`delete-paper-${item.name}`}
                             >
                               <Trash2 className="size-3.5" /> Remove Paper
                             </DropdownMenuItem>
@@ -315,7 +506,22 @@ export function LibraryRail() {
         )}
       </nav>
 
-      <footer className="flex justify-end border-t border-rule px-5 py-3">
+      <footer className="flex items-center justify-between border-t border-rule px-5 py-3">
+        <button
+          type="button"
+          onClick={openBrief}
+          disabled={briefable.length < 2}
+          aria-label="Start a research brief over two documents"
+          title={
+            briefable.length < 2
+              ? "A brief compares two indexed documents"
+              : "Compare two documents"
+          }
+          data-testid="open-research-brief"
+          className="inline-flex items-center gap-1.5 font-mono text-[0.6rem] text-ink-faint hover:text-marker disabled:opacity-40"
+        >
+          <Scale size={12} /> Brief
+        </button>
         <button
           type="button"
           onClick={openSettings}

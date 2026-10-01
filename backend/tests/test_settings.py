@@ -198,7 +198,7 @@ def test_providers_stay_lazy_until_first_use(monkeypatch):
     constructed = []
 
     class FakeQdrantClient:
-        def __init__(self, url):
+        def __init__(self, url, api_key=None, **kwargs):
             constructed.append(url)
 
     monkeypatch.setattr("qdrant_client.QdrantClient", FakeQdrantClient)
@@ -218,8 +218,9 @@ def test_provider_client_is_built_once_from_settings(monkeypatch):
     built = []
 
     class FakeQdrantClient:
-        def __init__(self, url):
+        def __init__(self, url, api_key=None, **kwargs):
             self.url = url
+            self.api_key = api_key
             built.append(self)
 
     monkeypatch.setattr("qdrant_client.QdrantClient", FakeQdrantClient)
@@ -254,3 +255,30 @@ def test_provider_index_is_built_once_from_settings(monkeypatch):
     assert built == [first]
     assert first.index_name == "pdf-index"
     assert first is second
+
+
+class TestLocalModelSources:
+    """The local models' weights and code-execution policy are settings."""
+
+    def test_remote_code_is_off_for_both_local_models_by_default(self, monkeypatch):
+        """Do test remote code is off for both local models by default."""
+        _clear(
+            "LOCAL_EMBEDDING_TRUST_REMOTE_CODE",
+            "RERANK_TRUST_REMOTE_CODE",
+            monkeypatch=monkeypatch,
+        )
+
+        s = Settings()
+
+        assert s.embedding.trust_remote_code is False
+        assert s.rerank.trust_remote_code is False
+
+    def test_an_operator_can_ask_for_remote_code(self, monkeypatch):
+        """The escape hatch exists; whether it is honoured is the model's call."""
+        monkeypatch.setenv("LOCAL_EMBEDDING_TRUST_REMOTE_CODE", "true")
+        monkeypatch.setenv("RERANK_TRUST_REMOTE_CODE", "1")
+
+        s = Settings()
+
+        assert s.embedding.trust_remote_code is True
+        assert s.rerank.trust_remote_code is True

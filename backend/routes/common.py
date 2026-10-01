@@ -6,7 +6,32 @@ from typing import Any
 
 from flask import jsonify, request
 
+from services.deletion import deletion_block_payload
+from services.retrieval.base import (
+    VectorStoreConfigurationError,
+    VectorStoreUnavailableError,
+)
+
 log = logging.getLogger(__name__)
+
+
+def vector_store_error_response(error: Exception):
+    """Return the stable HTTP response for a vector-store failure category."""
+    if isinstance(error, VectorStoreUnavailableError):
+        return jsonify(
+            {
+                "error": "Vector store is unavailable",
+                "category": "vector_store_unavailable",
+            }
+        ), 503
+    if isinstance(error, VectorStoreConfigurationError):
+        return jsonify(
+            {
+                "error": "Vector store configuration is invalid",
+                "category": "vector_store_configuration",
+            }
+        ), 500
+    raise TypeError("Unsupported vector-store error")
 
 
 def file_url(storage: Any, filename: str) -> str:
@@ -41,6 +66,11 @@ def is_safe_filename(storage: Any, filename: str) -> bool:
         except Exception:
             return ".." not in filename
     return ".." not in filename and not filename.startswith("/")
+
+
+def deletion_blocked_response(file_record: dict):
+    """Return the stable 409 response blocking work on a deleting document."""
+    return jsonify(deletion_block_payload(file_record)), 409
 
 
 def scrub_api_key_from_text(text: str | None, api_key: str | None) -> str | None:

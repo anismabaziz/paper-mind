@@ -3,20 +3,46 @@
 import io
 import logging
 import os
+import threading
 import time
 import uuid
 from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from routes.common import file_url, is_safe_filename, traversal_check
-from services.retrieval.base import VectorDimensionError
+from routes.common import (
+    deletion_blocked_response,
+    file_url,
+    is_safe_filename,
+    traversal_check,
+)
+from repositories.ingestion_jobs import JobConflictError
+from services.deletion import is_deleting_record
+from services.indexing.state import index_status
 from services.titles import backfill_title, derive_title
 
 if TYPE_CHECKING:
     from composition import Services
 
 log = logging.getLogger(__name__)
+
+
+_document_locks: dict[str, threading.RLock] = {}
+_document_locks_guard = threading.RLock()
+
+
+def _document_lock(filename: str) -> threading.RLock:
+    """Return the per-document lock serializing process, chat, and deletion."""
+    with _document_locks_guard:
+        lock = _document_locks.get(filename)
+        if lock is None:
+            lock = threading.RLock()
+            _document_locks[filename] = lock
+        return lock
+
+
+_is_deleting = is_deleting_record
+_deletion_blocked_response = deletion_blocked_response
 
 
 def _timed_call(func, *args, **kwargs):
@@ -29,14 +55,19 @@ def register_file_routes(app: Flask, services: "Services") -> None:
     """Register document, upload, processing, and vector routes."""
     files_repository = services.repositories.files
     conversations_repository = services.repositories.conversations
+    ingestion_jobs = services.repositories.ingestion_jobs
+    index_cleanups = services.repositories.index_cleanups
     storage = services.storage
-    parser = services.parser
-    embedding_service = services.embedding_service
     vector_service = services.vector_service
     storage_dir = services.settings.storage.storage_dir
     max_upload_bytes = services.settings.upload.max_upload_bytes
     allowed_extensions = services.settings.upload.allowed_extensions
     allowed_mime_types = services.settings.upload.allowed_mime_types
+
+    def _index_status(file_record: dict) -> dict:
+        """Judge a document's index against the running configuration."""
+        state = index_status(files_repository, file_record, services.settings)
+        return state.to_dict(services.settings)
 
     @app.route("/files/<path:filename>/meta", methods=["GET"])
     def get_file_meta(filename):
@@ -156,7 +187,9 @@ def register_file_routes(app: Flask, services: "Services") -> None:
 
         try:
             storage.save(unique_filename, file_content)
-            file_record = files_repository.create_file(
+            # One transaction creates the document and its first job, so a
+            # document can never exist without work queued to index it.
+            file_record, job = files_repository.create_file_with_job(
                 unique_filename,
                 title=title,
                 original_filename=original_filename,
@@ -171,6 +204,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                         "original_filename": file_record["original_filename"],
                         "url": file_url(storage, unique_filename),
                     },
+                    "job": job,
                 }
             )
         except Exception:
@@ -194,7 +228,13 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             file_record = files_repository.get_file(filename)
             if not file_record:
                 return jsonify({"error": "File not found"}), 404
-            return jsonify({"is_processed": file_record["is_processed"]})
+            return jsonify(
+                {
+                    "is_processed": file_record["is_processed"],
+                    "ingestion": ingestion_jobs.get_latest(filename),
+                    "index": _index_status(file_record),
+                }
+            )
         except Exception:
             log.exception("check_processed failed")
             return jsonify({"error": "Internal server error"}), 500
@@ -217,8 +257,121 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             log.exception("mark_opened failed")
             return jsonify({"error": "Internal server error"}), 500
 
+    @app.route("/ingestion-jobs/<path:filename>", methods=["GET"])
+    def get_ingestion_job(filename):
+        """Return the newest ingestion job for one document."""
+        try:
+            guard = traversal_check(storage, filename)
+            if guard is not None:
+                return guard
+            file_record = files_repository.get_file(filename)
+            if not file_record:
+                return jsonify({"error": "File not found"}), 404
+            job = ingestion_jobs.get_latest(filename)
+            if not job:
+                return jsonify({"error": "No ingestion job for this document"}), 404
+            return jsonify({"job": job}), 200
+        except Exception:
+            log.exception("get_ingestion_job failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/ingestion-jobs/<path:filename>/cancel", methods=["POST"])
+    def cancel_ingestion_job(filename):
+        try:
+            guard = traversal_check(storage, filename)
+            if guard is not None:
+                return guard
+            file_record = files_repository.get_file(filename)
+            if not file_record:
+                return jsonify({"error": "File not found"}), 404
+            if _is_deleting(file_record):
+                return _deletion_blocked_response(file_record)
+            with _document_lock(filename):
+                job = ingestion_jobs.request_cancel(file_record["id"])
+            if job is None:
+                return jsonify({"error": "No ingestion job for this document"}), 404
+            return jsonify(
+                {
+                    "job": job,
+                    "cancelled": job["state"] in ("cancelling", "cancelled"),
+                }
+            ), 200
+        except Exception:
+            log.exception("cancel_ingestion_job failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/ingestion-jobs/<path:filename>/retry", methods=["POST"])
+    def retry_ingestion_job(filename):
+        """Queue a new attempt for a document that is not already active."""
+        try:
+            guard = traversal_check(storage, filename)
+            if guard is not None:
+                return guard
+            file_record = files_repository.get_file(filename)
+            if not file_record:
+                return jsonify({"error": "File not found"}), 404
+            if _is_deleting(file_record):
+                return _deletion_blocked_response(file_record)
+            try:
+                job = ingestion_jobs.enqueue(file_record["id"], filename)
+            except JobConflictError:
+                active = ingestion_jobs.get_active(file_record["id"])
+                return jsonify(
+                    {
+                        "error": (
+                            "An ingestion job is already active for this document."
+                        ),
+                        "category": "ingestion_job_active",
+                        "job": active,
+                    }
+                ), 409
+            return jsonify({"job": job}), 201
+        except Exception:
+            log.exception("retry_ingestion_job failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
+
+    @app.route("/files/<path:filename>/reindex", methods=["POST"])
+    def reindex_file(filename):
+        """Queue a replacement index for a document whose index went stale."""
+        try:
+            guard = traversal_check(storage, filename)
+            if guard is not None:
+                return guard
+            file_record = files_repository.get_file(filename)
+            if not file_record:
+                return jsonify({"error": "File not found"}), 404
+            if _is_deleting(file_record):
+                return _deletion_blocked_response(file_record)
+            if not storage.exists(filename):
+                return jsonify({"error": "File is missing from storage"}), 400
+            active = ingestion_jobs.get_active(file_record["id"])
+            if active:
+                return jsonify(
+                    {
+                        "message": "A reindex is already running for this document.",
+                        "job": active,
+                    }
+                ), 202
+            try:
+                job = ingestion_jobs.enqueue(file_record["id"], filename)
+            except JobConflictError:
+                active = ingestion_jobs.get_active(file_record["id"])
+                return jsonify(
+                    {
+                        "message": "A reindex is already running for this document.",
+                        "job": active,
+                    }
+                ), 202
+            # The active generation stays queryable until the replacement
+            # validates, so a failed reindex never leaves the document unusable.
+            return jsonify({"job": job, "index": _index_status(file_record)}), 201
+        except Exception:
+            log.exception("reindex_file failed for %r", filename)
+            return jsonify({"error": "Internal server error"}), 500
+
     @app.route("/process-file", methods=["POST"])
     def process_file():
+        """Queue indexing work for one document; the worker runs the stages."""
         filename = None
         try:
             data = request.get_json()
@@ -228,94 +381,39 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             guard = traversal_check(storage, filename)
             if guard is not None:
                 return guard
-
-            wall_start = time.time()
+            existing = files_repository.get_file(filename)
+            if existing is None:
+                return jsonify({"error": "File not found"}), 404
+            if _is_deleting(existing):
+                return _deletion_blocked_response(existing)
             if not storage.exists(filename):
                 return jsonify({"error": "Failed to fetch file"}), 400
-            file_content = storage.open(filename)
-            chunk_objects, parse_elapsed = _timed_call(
-                parser.get_chunk_objects, filename, file_content
-            )
-            degraded = any(chunk.page_no is None for chunk in chunk_objects)
-            if degraded:
-                log.warning(
-                    "/process-file degraded parse for %s: chunks carry null page numbers",
-                    filename,
-                )
-            if not chunk_objects:
-                return jsonify({"error": "No text extracted from document"}), 400
-            try:
-                vector_service.delete_by_filename(filename)
-            except Exception as exc:
-                log.warning(
-                    "/process-file vector cleanup warning for %s: %s", filename, exc
-                )
-            texts = [chunk.text for chunk in chunk_objects]
-            try:
-                embeddings, embed_elapsed = _timed_call(
-                    embedding_service.embed_texts, texts
-                )
-                _, upsert_elapsed = _timed_call(
-                    vector_service.upsert_chunks,
-                    embeddings,
-                    chunk_objects,
-                    filename,
-                )
-            except Exception:
-                try:
-                    vector_service.delete_by_filename(filename)
-                except Exception as cleanup_exc:
-                    log.warning(
-                        "/process-file compensation cleanup failed for %s: %s",
-                        filename,
-                        cleanup_exc,
-                    )
-                try:
-                    files_repository.set_processed(filename, False)
-                except Exception as state_exc:
-                    log.warning(
-                        "/process-file compensation state failed for %s: %s",
-                        filename,
-                        state_exc,
-                    )
-                raise
-
-            file_record = files_repository.get_file(filename)
-            if file_record and not conversations_repository.get_conversation_id(
-                file_record["id"]
-            ):
-                conversations_repository.create_conversation(file_record["id"])
-            files_repository.set_processed(filename, True)
-
-            log.info(
-                "/process-file %s: %s chunks | parse %.2fs embed %.2fs upsert %.2fs total %.2fs",
-                filename,
-                len(chunk_objects),
-                parse_elapsed,
-                embed_elapsed,
-                upsert_elapsed,
-                time.time() - wall_start,
-            )
-            if degraded:
+            # Upload already queued this document's job. Reuse it so repeated
+            # clicks cannot supersede the queued attempt with a new one.
+            active = ingestion_jobs.get_active(existing["id"])
+            if active:
                 return jsonify(
                     {
-                        "message": "PDF processed",
-                        "warning": (
-                            "Page numbers could not be detected, so citation "
-                            "sources for this document show no page."
-                        ),
+                        "message": "Ingestion job already queued",
+                        "job": active,
                     }
-                ), 200
-            return jsonify({"message": "PDF processed"}), 200
-        except VectorDimensionError as exc:
-            hint = (
-                "Delete embeddings via POST /delete-embeddings and re-ingest "
-                "your Documents."
-            )
-            log.warning(
-                "/process-file dimension mismatch for %s: %s", filename or "?", exc
-            )
-            return jsonify({"error": str(exc), "hint": hint}), 400
+                ), 202
+            try:
+                job = ingestion_jobs.enqueue(existing["id"], filename)
+            except JobConflictError:
+                active = ingestion_jobs.get_active(existing["id"])
+                return jsonify(
+                    {
+                        "message": "Ingestion job already active",
+                        "job": active,
+                    }
+                ), 202
+            return jsonify(
+                {
+                    "message": "PDF queued for indexing",
+                    "job": job,
+                }
+            ), 202
         except Exception:
             log.exception("/process-file failed for %s", filename or "?")
             return jsonify({"error": "Internal server error"}), 500
@@ -349,6 +447,11 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                         "url": file_url(storage, filename),
                         "is_processed": db_file["is_processed"],
                         "last_opened_at": db_file.get("last_opened_at"),
+                        "deletion_state": db_file.get("deletion_state", "active"),
+                        "deletion_error": db_file.get("deletion_error"),
+                        "deletion_attempts": db_file.get("deletion_attempts", 0),
+                        "ingestion": ingestion_jobs.get_latest(filename),
+                        "index": _index_status(db_file),
                         "metadata": {
                             "size": storage_item["size"] if storage_item else 0,
                             "content_type": "application/pdf",
@@ -369,30 +472,136 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             guard = traversal_check(storage, filename)
             if guard is not None:
                 return guard
-            try:
-                vector_service.delete_by_filename(filename)
-            except Exception:
-                log.exception("vector delete failed for %r", filename)
-            try:
-                storage.delete(filename)
-            except ValueError:
-                log.warning("traversal delete blocked for %r", filename)
-                return jsonify({"error": "Invalid filename"}), 400
-            except Exception:
-                log.exception("storage delete failed for %r", filename)
+            with _document_lock(filename):
+                file_record = files_repository.get_file(filename)
+                if not file_record:
+                    # No metadata: still attempt index and file cleanup so a
+                    # retry after a partial failure cannot leave silent vectors.
+                    leftovers: list[str] = []
+                    try:
+                        vector_service.delete_by_filename(filename)
+                    except Exception:
+                        log.exception("vector delete failed for %r", filename)
+                        leftovers.append("vectors")
+                    try:
+                        storage.delete(filename)
+                    except Exception:
+                        log.exception("storage delete failed for %r", filename)
+                        leftovers.append("file")
+                    if leftovers:
+                        return jsonify(
+                            {
+                                "error": (
+                                    "Deletion incomplete: could not remove "
+                                    + ", ".join(leftovers)
+                                    + ". Retry deletion."
+                                ),
+                                "category": "document_delete_failed",
+                                "leftovers": leftovers,
+                            }
+                        ), 500
+                    return jsonify(
+                        {"message": "File and all its data deleted successfully"}
+                    ), 200
 
-            file_record = files_repository.get_file(filename)
-            if file_record:
-                conversation_id = conversations_repository.get_conversation_id(
-                    file_record["id"]
-                )
-                if conversation_id:
-                    conversations_repository.delete_messages(conversation_id)
-                    conversations_repository.delete_conversation(conversation_id)
-                files_repository.delete_file(file_record["id"])
-            return jsonify(
-                {"message": "File and all its data deleted successfully"}
-            ), 200
+                # Durable deleting state first: retries re-enter here and the
+                # UI can render deleting vs failed from the listing.
+                marked = files_repository.mark_deleting(filename)
+                if marked is None:
+                    return jsonify({"error": "File not found"}), 404
+                file_id = file_record["id"]
+                failures: list[str] = []
+
+                # A queued or running job must not index a document that is
+                # being removed, so supersede it before external cleanup.
+                try:
+                    ingestion_jobs.cancel_active(file_id)
+                except Exception:
+                    log.exception("ingestion job cancel failed for %r", filename)
+                    failures.append("ingestion")
+
+                # Every point for this document lives under its pdf_name
+                # payload filter, covering active and any stale generations.
+                try:
+                    vector_service.delete_by_filename(filename)
+                except Exception:
+                    log.exception("vector delete failed for %r", filename)
+                    failures.append("vectors")
+                try:
+                    storage.delete(filename)
+                except ValueError:
+                    log.warning("traversal delete blocked for %r", filename)
+                    try:
+                        files_repository.mark_delete_failed(
+                            filename,
+                            "Could not remove file: invalid filename. Retry deletion.",
+                        )
+                    except Exception:
+                        log.exception("delete-failed marking failed for %r", filename)
+                    return jsonify({"error": "Invalid filename"}), 400
+                except Exception:
+                    log.exception("storage delete failed for %r", filename)
+                    failures.append("file")
+
+                conversation_failed = False
+                try:
+                    conversation_id = conversations_repository.get_conversation_id(
+                        file_id
+                    )
+                    if conversation_id:
+                        conversations_repository.delete_conversation_tree(
+                            conversation_id
+                        )
+                except Exception:
+                    log.exception("conversation delete failed for %r", filename)
+                    failures.append("conversation")
+                    conversation_failed = True
+
+                metadata_failed = False
+                if not failures:
+                    try:
+                        ingestion_jobs.delete_for_file(file_id)
+                        index_cleanups.delete_for_file(file_id)
+                        files_repository.delete_file(file_id)
+                    except Exception:
+                        log.exception("metadata delete failed for %r", filename)
+                        failures.append("metadata")
+                        metadata_failed = True
+
+                if failures:
+                    detail = ", ".join(failures)
+                    # Keep the row so a retry has the file id, conversation
+                    # id, and filename needed to finish the cleanup.
+                    try:
+                        files_repository.mark_delete_failed(
+                            filename,
+                            f"Could not remove {detail}. Retry deletion.",
+                        )
+                    except Exception:
+                        log.exception("delete-failed marking failed for %r", filename)
+                    # A metadata failure after external cleanup succeeded is
+                    # still not a success: the row remains for retry.
+                    if metadata_failed and not conversation_failed:
+                        log.error(
+                            "remove_file metadata failed for %r after external cleanup",
+                            filename,
+                        )
+                    return jsonify(
+                        {
+                            "error": (
+                                "Deletion incomplete: could not remove "
+                                f"{detail}. Retry deletion."
+                            ),
+                            "category": "document_delete_failed",
+                            "deletion_state": "delete_failed",
+                            "leftovers": failures,
+                        }
+                    ), 500
+                with _document_locks_guard:
+                    _document_locks.pop(filename, None)
+                return jsonify(
+                    {"message": "File and all its data deleted successfully"}
+                ), 200
         except Exception:
             log.exception("remove_file failed for %r", request.args.get("path"))
             return jsonify({"error": "Internal server error"}), 500

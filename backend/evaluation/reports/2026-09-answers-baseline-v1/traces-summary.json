@@ -1,0 +1,39 @@
+{
+  "cost": {
+    "model": "qwen/qwen3.8-27b",
+    "per_trace_usd": 0.002092,
+    "priced_calls": 129,
+    "usd": 0.269881
+  },
+  "latency": {
+    "first_token_seconds": {
+      "p50": 0.529017,
+      "p95": 1.103757,
+      "samples": 129
+    },
+    "retrieval_seconds": {
+      "p50": 4.262575,
+      "p95": 6.619247,
+      "samples": 158
+    },
+    "total_seconds": {
+      "p50": 0.83499,
+      "p95": 2.024891,
+      "samples": 158
+    }
+  },
+  "outcomes": {
+    "answered": 122,
+    "citation_error": 7,
+    "provider_error": 29
+  },
+  "throughput": {
+    "traces_per_minute": 0.099,
+    "window_seconds": 95991.990455
+  },
+  "tokens": {
+    "input": 291134,
+    "output": 19741
+  },
+  "traces": 158
+}

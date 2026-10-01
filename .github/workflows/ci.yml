@@ -5,6 +5,9 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  # An operator can run the whole check suite on their own branch without
+  # pushing a no-op commit.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,6 +32,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
+        # npm ci installs package-lock.json exactly and fails if it disagrees
+        # with package.json, so this is already frozen.
         run: npm ci
 
       - name: Lint
@@ -66,7 +71,12 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: uv sync --dev
+        # --frozen installs the lockfile as committed and fails when it does
+        # not match pyproject.toml, so a build can never resolve a version
+        # nobody reviewed. Plain `uv sync` would quietly re-resolve and
+        # re-lock, which is how a build starts testing something other than
+        # what ships.
+        run: uv sync --frozen --dev
 
       - name: Lint
         run: uv run ruff check .
@@ -79,3 +89,148 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+  evaluation-report:
+    name: Evaluation report (thresholds)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    # The published reports are re-rendered from the committed numbers and held
+    # to the bounds in evaluation/thresholds.json. Nothing here measures
+    # anything: a live run needs two provider keys and a real index, and a CI
+    # job that spent either would be a job nobody could run on a fork. So this
+    # checks that the report a reviewer reads still says what it said, and fails
+    # only where a person wrote down a bound to be failed on.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+          # Pinned to the minimum supported Python, for the reason given in the
+          # backend job.
+          python-version: "3.11"
+
+      - name: Install dependencies
+        # --frozen: see the backend job.
+        run: uv sync --frozen --dev
+
+      - name: Render the published reports
+        run: |
+          # Each kind of report is held to bounds on the numbers it measured: a
+          # retrieval run has no answers and no tokens, so the answer bounds
+          # would cross for the honest reason that there is nothing to bound.
+          uv run python -m evaluation.cli \
+            --render evaluation/reports/2026-09-retrieval-baseline-v1 \
+            --check evaluation/thresholds-retrieval.json
+          uv run python -m evaluation.cli \
+            --render evaluation/reports/2026-09-retrieval-tuning-v1 \
+            --check evaluation/thresholds-retrieval.json
+          uv run python -m evaluation.cli \
+            --render evaluation/reports/2026-09-answers-baseline-v1 \
+            --check evaluation/thresholds.json
+
+      # Always, and not only on failure: the digest is the artifact a person
+      # opens when a bound is crossed, and it is the reason to keep the run.
+      - name: Upload the rendered reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-reports
+          path: backend/evaluation/reports/*/digest.*
+          retention-days: 14
+
+  full-stack:
+    name: Full stack (HTTP + Postgres + Qdrant)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install dependencies
+        # --frozen: see the backend job. A test that runs against a version
+        # the lockfile does not name is not a test of what ships.
+        run: uv sync --frozen --dev
+
+      - name: Test
+        run: ./run-full-stack-tests.sh
+
+  browser:
+    name: Browser (Playwright + Postgres + Qdrant)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Generate ephemeral test credentials
+        run: |
+          TEST_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "POSTGRES_TEST_USER=papermind_test" >> "$GITHUB_ENV"
+          echo "POSTGRES_TEST_DB=papermind_test" >> "$GITHUB_ENV"
+          echo "POSTGRES_TEST_PASSWORD=$TEST_PASSWORD" >> "$GITHUB_ENV"
+          echo "FULL_STACK_DATABASE_URL=postgresql+psycopg://papermind_test:$TEST_PASSWORD@127.0.0.1:55432/papermind_test" >> "$GITHUB_ENV"
+          echo "FULL_STACK_QDRANT_URL=http://127.0.0.1:56333" >> "$GITHUB_ENV"
+
+      - name: Start Postgres and Qdrant
+        run: docker compose -f ../backend/compose.test.yaml up -d --wait
+        # The Playwright webServer starts the deterministic browser backend
+        # and the Vite dev server itself; only the backing services are
+        # needed up front.
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        # --frozen: see the backend job.
+        run: uv sync --frozen --dev
+        working-directory: backend
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        # npm ci is lockfile-exact; see the frontend job.
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Test
+        run: npm run test:e2e
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: frontend/test-results/
+          retention-days: 7
+
+      - name: Stop services
+        if: always()
+        run: docker compose -f ../backend/compose.test.yaml down --volumes

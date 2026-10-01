@@ -1,30 +1,51 @@
 services:
   db:
-    image: postgres:17-alpine
+    # Pinned by digest, not just tag. The tag is the human-readable label;
+    # the digest is what decides which bytes run, so a re-pushed tag cannot
+    # change the database under an existing volume. The digest is the
+    # multi-architecture index, so one pin covers Apple silicon and CI alike.
+    # To move forward: change the tag, resolve the new index digest with
+    # `docker buildx imagetools inspect <tag>`, and update both here and in
+    # compose.test.yaml.
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    # Credentials come from backend/.infra.env (gitignored, created by
+    # backend/scripts/bootstrap-local.sh). Nothing secret lives in this file,
+    # so a clone never starts with a shared default password.
+    env_file:
+      - path: .infra.env
+        required: true
     environment:
-      POSTGRES_USER: papermind
-      POSTGRES_PASSWORD: papermind
       POSTGRES_DB: papermind
     ports:
-      - "5432:5432"
+      # Loopback only: the database is reachable from this machine, never the LAN.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U papermind"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-papermind}"]
       interval: 2s
       timeout: 3s
       retries: 15
 
   qdrant:
-    image: qdrant/qdrant:latest
+    # The same version and digest the test stack runs, so a failure in CI
+    # reproduces locally. It used to be `latest`, which meant a Qdrant
+    # release could break ingestion on someone's machine with no commit to
+    # point at.
+    image: qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      # Loopback only: document vectors stay on this machine by default.
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_storage:/qdrant/storage
     environment:
       # Exposed on localhost:6333 for host runs and on qdrant:6333 inside compose.
       QDRANT__SERVICE__GRPC_PORT: 6334
+      # No API key is set here on purpose: an empty value would still switch
+      # Qdrant into auth-required mode and lock out keyless local clients.
+      # Remote deployments add `-f compose.qdrant-auth.yaml` with QDRANT_API_KEY
+      # exported; the backend refuses a remote QDRANT_URL without that key.
 
 volumes:
   pgdata:

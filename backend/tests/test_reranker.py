@@ -9,9 +9,39 @@ All branches use fakes injected through constructors: the cross-encoder is a
 fake model object, the index a fake store, so pytest stays fast and offline.
 """
 
-from services.retrieval.reranker import RerankerService
+import sys
+import types
+
+from services.models import PINNED_MODEL_REVISIONS
+from services.retrieval.reranker import Reranker, RerankerService
 from services.retrieval.vector_service import VectorService
-from evaluation import evaluator
+
+
+def _load_kwargs(reranker):
+    """
+    Run the real lazy load against a stand-in for sentence-transformers.
+
+    Returns the keyword arguments the loader would hand the library, without
+    downloading weights: the point is the arguments, not the model.
+    """
+    recorded = {}
+
+    def _cross_encoder(model_name, **kwargs):
+        recorded.update(kwargs)
+        return IdentityModel()
+
+    module = types.ModuleType("sentence_transformers")
+    module.CrossEncoder = _cross_encoder  # type: ignore[attr-defined]
+    original = sys.modules.get("sentence_transformers")
+    sys.modules["sentence_transformers"] = module
+    try:
+        reranker._get_model()
+    finally:
+        if original is None:
+            del sys.modules["sentence_transformers"]
+        else:
+            sys.modules["sentence_transformers"] = original
+    return recorded
 
 
 class FakeIndex:
@@ -79,6 +109,11 @@ def make_service(matches, reranker=None) -> VectorService:
     return VectorService(FakeIndex(matches), reranker)
 
 
+def test_local_service_implements_reranker_interface():
+    """The production adapter satisfies the reranker interface used by retrieval."""
+    assert isinstance(make_reranker(), Reranker)
+
+
 class TestRerankerGate:
     """TestRerankerGate."""
 
@@ -86,7 +121,9 @@ class TestRerankerGate:
         """Do test flag off preserves legacy order."""
         service = make_service(_matches(10), make_reranker(enabled=False))
 
-        sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="test query")
+        sources = service.query_vectors(
+            [0.1] * 8, "doc.pdf", query_text="test query"
+        ).sources
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
 
     def test_flag_on_reranked_order_differs_deduped_and_score_ordered(self):
@@ -97,7 +134,7 @@ class TestRerankerGate:
 
         sources_on = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="test query"
-        )
+        ).sources
         # InvertingModel gives chunk 9 highest, so top 5 should be 9..5
         assert [s["content"] for s in sources_on] == [
             f"chunk {i}" for i in range(9, 4, -1)
@@ -145,16 +182,17 @@ class TestRerankerGate:
         )
         before = dup_service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
-        )
+        ).sources
         assert len(before) == 2  # deduped legacy still 2
         deduped = dup_service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=True
-        )
+        ).sources
         assert len(deduped) == 2
         assert deduped[0]["content"] == "dup"
         assert deduped[0]["score"] == 0.9
 
     def test_explicit_rerank_param_overrides_flag(self):
+        """Do test explicit rerank param overrides flag."""
         # Flag says true but explicit False preserves legacy
         """Do test explicit rerank param overrides flag."""
         service = make_service(
@@ -163,12 +201,12 @@ class TestRerankerGate:
 
         legacy = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=False
-        )
+        ).sources
         assert [s["content"] for s in legacy] == [f"chunk {i}" for i in range(5)]
 
         reranked = service.query_vectors(
             [0.1] * 8, "doc.pdf", query_text="q", rerank=True
-        )
+        ).sources
         assert [s["content"] for s in reranked] != [s["content"] for s in legacy]
 
     def test_no_query_text_never_reranks(self):
@@ -192,6 +230,7 @@ class TestRerankerGate:
         assert calls == []
 
     def test_entirely_local_cpu_no_api(self):
+        """Do test entirely local cpu no api."""
         # Ensure rerank path does not hit network: the fake model is the only
         # provider touched
         """Do test entirely local cpu no api."""
@@ -223,178 +262,43 @@ class TestRerankerGate:
         )
         service = make_service(_matches(5), reranker_svc)
 
-        sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="q")
+        sources = service.query_vectors([0.1] * 8, "doc.pdf", query_text="q").sources
         assert [s["content"] for s in sources] == [f"chunk {i}" for i in range(5)]
         assert "degraded" in capsys.readouterr().out.lower()
 
 
-class TestEvaluatorReranker:
-    """TestEvaluatorReranker."""
+class TestModelLoad:
+    """The cross-encoder the reranker asks sentence-transformers for."""
 
-    def test_evaluator_retrieve_respects_flag(self):
-        """Do test evaluator retrieve respects flag."""
-
-        class FakeIdx:
-            """FakeIdx."""
-
-            def query(self, vector, top_k, include_metadata, filter, **kwargs):
-                """Do query."""
-                return {"matches": _matches(10)}
-
-        idx = FakeIdx()
-
-        def embed(texts):
-            """Do embed."""
-            return [[0.1] * 4 for _ in texts]
-
-        off = evaluator.retrieve(
-            embed(["q"])[0],
-            "doc.pdf",
-            idx,
-            k=5,
-            query_text="q",
-            rerank=False,
-            reranker=make_reranker(enabled=True, model=InvertingModel()),
+    def test_it_loads_the_revision_its_settings_name(self):
+        """Do test it loads the revision its settings name."""
+        kwargs = _load_kwargs(
+            RerankerService("cross-encoder/ms-marco-MiniLM-L6-v2", True)
         )
-        assert [s["content"] for s in off] == [f"chunk {i}" for i in range(5)]
 
-        on = evaluator.retrieve(
-            embed(["q"])[0],
-            "doc.pdf",
-            idx,
-            k=5,
-            query_text="q",
-            rerank=True,
-            reranker=make_reranker(enabled=True, model=InvertingModel()),
+        assert (
+            kwargs["revision"]
+            == PINNED_MODEL_REVISIONS["cross-encoder/ms-marco-MiniLM-L6-v2"]
         )
-        assert [s["content"] for s in on] == [f"chunk {i}" for i in range(9, 4, -1)]
 
-    def test_hit5_faithfulness_logged_with_and_without_reranking_and_latency_delta(
-        self, capsys
-    ):
-        # Minimal fixture where reranking flips order but we can still measure hit@5
-        """Do test hit5 faithfulness logged with and without reranking and latency delta."""
-
-        class MemIdx:
-            """MemIdx."""
-
-            def __init__(self):
-                """Initialize."""
-                self.vectors = []
-
-            def upsert(self, vectors):
-                """Do upsert."""
-                self.vectors.extend(vectors)
-
-            def query(self, vector, top_k, include_metadata, filter, **kwargs):
-                # return in insertion order with descending scores
-                """Do query."""
-                name = (filter or {}).get("pdf_name")
-                scored = [v for v in self.vectors if v["metadata"]["pdf_name"] == name]
-                scored.sort(key=lambda m: m.get("score", 0), reverse=True)
-                # adapt to evaluator shape: dict with matches list of dicts with metadata/score
-                return {
-                    "matches": [
-                        {"score": v.get("score", 0), "metadata": v["metadata"]}
-                        for v in scored[:top_k]
-                    ]
-                }
-
-            def delete(self, **kwargs):
-                """Do delete."""
-                return {}
-
-        idx = MemIdx()
-        # Two vectors: gold in second position legacy, first after rerank
-        idx.vectors = [
-            {
-                "score": 0.9,
-                "metadata": {
-                    "content": "irrelevant filler",
-                    "pdf_name": "doc.pdf",
-                    "chunk_index": 0,
-                },
-            },
-            {
-                "score": 0.8,
-                "metadata": {
-                    "content": "gold snippet alpha",
-                    "pdf_name": "doc.pdf",
-                    "chunk_index": 1,
-                },
-            },
-        ]
-        for i in range(48):
-            idx.vectors.append(
-                {
-                    "score": 0.7 - i * 0.01,
-                    "metadata": {
-                        "content": f"filler {i}",
-                        "pdf_name": "doc.pdf",
-                        "chunk_index": 10 + i,
-                    },
-                }
+    def test_a_configured_revision_reaches_the_loader(self):
+        """Do test a configured revision reaches the loader."""
+        kwargs = _load_kwargs(
+            RerankerService(
+                "cross-encoder/ms-marco-MiniLM-L6-v2", True, revision="a" * 40
             )
-
-        fixture = {
-            "documents": [{"filename": "doc.pdf"}],
-            "questions": [
-                {
-                    "id": "q1",
-                    "document": "doc.pdf",
-                    "question": "gold alpha",
-                    "expected_answer": "x",
-                    "gold_snippets": ["gold snippet alpha"],
-                }
-            ],
-        }
-
-        def embed(texts):
-            """Do embed."""
-            return [[0.1] * 4 for _ in texts]
-
-        def gen(q, ctx):
-            """Do gen."""
-            return "answer"
-
-        # Flag off
-        report_off = evaluator.evaluate(
-            fixture,
-            idx,
-            embed,
-            gen,
-            judge_fn=None,
-            k=5,
-            rerank=False,
-            reranker=make_reranker(enabled=True, model=IdentityModel()),
         )
-        assert report_off.retrieval.hit_rate in (0.0, 1.0)
 
-        # Flag on with inverting model — should change order but still deduped/score-ordered
-        capsys.readouterr()  # clear
-        report_on = evaluator.evaluate(
-            fixture,
-            idx,
-            embed,
-            gen,
-            judge_fn=None,
-            k=5,
-            rerank=True,
-            reranker=make_reranker(enabled=True, model=InvertingModel()),
-        )
-        out = capsys.readouterr().out
-        assert "rerank" in out.lower()
+        assert kwargs["revision"] == "a" * 40
 
-        # Comparison helper logs hit@5/faithfulness delta and latency for 50 docs
-        comp = evaluator.evaluate_with_rerank_comparison(
-            fixture,
-            idx,
-            embed,
-            gen,
-            judge_fn=None,
-            k=5,
-            reranker=make_reranker(enabled=True, model=InvertingModel()),
+    def test_it_does_not_execute_code_from_the_model_repository(self):
+        """The MiniLM cross-encoder is a stock BERT architecture."""
+        kwargs = _load_kwargs(
+            RerankerService("cross-encoder/ms-marco-MiniLM-L6-v2", True)
         )
-        assert "off" in comp and "on" in comp and "latency_delta_ms" in comp
-        cap = capsys.readouterr().out
-        assert "latency" in cap.lower() or "delta" in cap.lower()
+
+        assert kwargs["trust_remote_code"] is False
+
+    def test_an_unpinned_model_loads_no_revision_at_all(self):
+        """Do test an unpinned model loads no revision at all."""
+        assert "revision" not in _load_kwargs(RerankerService("acme/unknown", True))

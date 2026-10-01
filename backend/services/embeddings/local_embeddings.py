@@ -7,9 +7,13 @@ downloaded on first use and cached to the Hugging Face cache directory
 that cache to a persistent volume so the download only happens once.
 
 The model supports 8192 context and Matryoshka truncation to 1024d, which
-matches the Qdrant collection (``qdrant_store._QDRANT_DENSE_SIZE``). Keeping
+matches the Qdrant collection (``qdrant_store.DENSE_SIZE``). Keeping
 dimensions at 1024 keeps storage and latency low (~15ms vs ~42ms at 3072)
 while preserving quality.
+
+Weights load at the commit recorded for the repository in
+:mod:`services.models`, and without executing code from the model
+repository, so an upstream push cannot change what an index holds.
 
 Tests never load the real model: a fake encoder is injected through the
 constructor, and the import of ``sentence_transformers`` is lazy so
@@ -19,14 +23,26 @@ generated.
 """
 
 import threading
+from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from services.concurrency import map_batches_concurrently
+from services.models import model_source
 
 # Local BGE-M3 has no provider-side cap; 100 keeps CPU peak memory sane.
 EMBED_BATCH_SIZE = 100
 
 
-class LocalEmbeddingService:
+class EmbeddingService(ABC):
+    """Turn text into dense vectors for indexing and retrieval."""
+
+    @abstractmethod
+    def embed_texts(self, texts):
+        """Return one vector for each input text."""
+        raise NotImplementedError
+
+
+class LocalEmbeddingService(EmbeddingService):
     """
     CPU embedding via BAAI/bge-m3.
 
@@ -36,17 +52,37 @@ class LocalEmbeddingService:
     through the constructor's ``model`` argument to avoid loading weights.
     """
 
-    def __init__(self, model_name: str, device: str = "cpu", model=None):
+    def __init__(
+        self,
+        model_name: str,
+        device: str = "cpu",
+        model=None,
+        revision: str = "",
+        trust_remote_code: bool = False,
+    ):
         """
         Bind the model name; the model itself loads lazily.
 
         ``model`` injects a pre-loaded (or fake) encoder; when omitted, the
-        real model loads lazily on first use.
+        real model loads lazily on first use. ``revision`` and
+        ``trust_remote_code`` are the operator's settings; both are resolved
+        through :mod:`services.models`, which is what pins the weights to a
+        commit and refuses unreviewed repository code.
         """
-        self._model_name = model_name
+        self._source = model_source(model_name, revision, trust_remote_code)
         self._device = device
         self._model = model
         self._lock = threading.Lock()
+
+    @property
+    def model_name(self) -> str:
+        """Return the repository this service loads."""
+        return self._source.model_id
+
+    @property
+    def revision(self) -> str:
+        """Return the commit this service loads, empty when unpinned."""
+        return self._source.revision
 
     def _get_model(self):
         if self._model is not None:
@@ -63,13 +99,17 @@ class LocalEmbeddingService:
                 ) from exc
 
             # ``device="cpu"`` keeps the free path CPU-only; no CUDA needed.
-            # ``trust_remote_code=True`` is required for BGE-M3's custom code.
+            # The revision and the code-execution policy come from
+            # ``services.models``; BGE-M3 loads through stock transformers
+            # classes, so no code from the model repository is executed.
             self._model = SentenceTransformer(
-                self._model_name, trust_remote_code=True, device=self._device
+                self._source.model_id,
+                **self._source.load_kwargs(),
+                device=self._device,
             )
             return self._model
 
-    def embed_texts(self, texts):
+    def embed_texts(self, texts, check: Callable[[], None] | None = None):
         """
         Embed any number of texts, batched and run concurrently.
 
@@ -90,6 +130,7 @@ class LocalEmbeddingService:
             batches,
             self._embed_batch,
             label=f"embed_texts: {len(texts)} texts",
+            before_batch=check,
         )
         all_values: list = []
         for result in results:

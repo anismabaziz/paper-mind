@@ -7,11 +7,13 @@ from typing import Any
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     create_engine,
     func,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -47,11 +49,119 @@ class FileRecord(Base):
         String(255), nullable=True, default=None
     )
     is_processed: Mapped[bool] = mapped_column(default=False)
+    index_generation: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
+    # JSON Index Manifest of the active generation, written when a job
+    # becomes ready and compared with the running configuration on read.
+    index_manifest: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    index_stale_reason: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    # When this Document's active Index Generation was activated, recorded
+    # with the manifest that generation was built against.
+    index_activated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     last_opened_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    deletion_state: Mapped[str] = mapped_column(String(16), default="active")
+    deletion_error: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None
+    )
+    deletion_attempts: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class IngestionJob(Base):
+    """Durable ingestion work for one stored document."""
+
+    __tablename__ = "ingestion_jobs"
+    __table_args__ = (
+        Index(
+            "uq_ingestion_jobs_one_active",
+            "file_id",
+            unique=True,
+            sqlite_where=text("state IN ('queued', 'running', 'cancelling')"),
+            postgresql_where=text("state IN ('queued', 'running', 'cancelling')"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), index=True)
+    generation: Mapped[int] = mapped_column(default=1)
+    state: Mapped[str] = mapped_column(String(16), default="queued")
+    stage: Mapped[str] = mapped_column(String(32), default="queued")
+    progress: Mapped[int] = mapped_column(default=0)
+    attempt: Mapped[int] = mapped_column(default=1)
+    error_category: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    worker_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    limits_json: Mapped[str] = mapped_column(Text, default="{}")
+    usage_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class IndexGenerationCleanup(Base):
+    """Durable work to remove a Document's superseded Index Generations."""
+
+    __tablename__ = "index_generation_cleanups"
+    __table_args__ = (
+        Index(
+            "uq_index_generation_cleanups_target",
+            "file_id",
+            "generation",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), index=True)
+    # Zero stands for vectors stored before generations were recorded.
+    generation: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    attempts: Mapped[int] = mapped_column(default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
 
 
@@ -75,6 +185,7 @@ class Conversation(Base):
     """Conversation tied to one stored document."""
 
     __tablename__ = "conversations"
+    __table_args__ = (Index("uq_conversations_file_id", "file_id", unique=True),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"))
@@ -83,36 +194,91 @@ class Conversation(Base):
     )
 
 
-class Message(Base):
-    """Message in a document conversation."""
+# A question is committed as a pending turn before the provider is called, so
+# an interrupted request can never leave it unanswered. Every other state is
+# terminal, including the states the migration writes for history the old
+# message log recorded imperfectly.
+TURN_PENDING = "pending"
+TURN_ANSWERED = "answered"
+TURN_FAILED = "failed"
+TURN_CANCELLED = "cancelled"
+# The app answered without a model call because the Document had no evidence.
+TURN_ABSTAINED = "abstained"
+TURN_UNANSWERED = "unanswered"
+TERMINAL_TURN_STATES = frozenset(
+    {
+        TURN_ANSWERED,
+        TURN_FAILED,
+        TURN_CANCELLED,
+        TURN_ABSTAINED,
+        TURN_UNANSWERED,
+    }
+)
 
-    __tablename__ = "messages"
+
+class Turn(Base):
+    """One ordered exchange in a conversation."""
+
+    __tablename__ = "turns"
+    __table_args__ = (
+        Index(
+            "uq_turns_conversation_sequence", "conversation_id", "sequence", unique=True
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
     conversation_id: Mapped[str] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE")
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
     )
-    sender: Mapped[str] = mapped_column(String(16))
-    text: Mapped[str] = mapped_column(String(8192))
+    sequence: Mapped[int] = mapped_column(Integer)
+    question: Mapped[str | None] = mapped_column(
+        String(8192), nullable=True, default=None
+    )
+    # Unbounded: a chat answer runs to the model's output budget, and a
+    # fixed-width column would turn a long answer into a failed write rather
+    # than a stored one. The budget in the model catalog is what keeps the
+    # answer a readable length.
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    status: Mapped[str] = mapped_column(String(16), default=TURN_PENDING)
+    failure_reason: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, default=None
+    )
+    # Why the app answered without a model call, as a code the interface and
+    # the evaluation both read rather than a sentence to parse.
+    abstention_reason: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default=None
+    )
+    # The claims the answer made and the Citation Sources each one named, as
+    # JSON. Stored with the answer so a reloaded transcript cites the same
+    # Passages, in the same order, as the stream did.
+    claims: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
 
 
 class Source(Base):
-    """Citation source attached to a message."""
+    """Citation source attached to an answered turn."""
 
     __tablename__ = "sources"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
-    message_id: Mapped[str] = mapped_column(
-        ForeignKey("messages.id", ondelete="CASCADE")
-    )
+    turn_id: Mapped[str] = mapped_column(ForeignKey("turns.id", ondelete="CASCADE"))
     content: Mapped[str] = mapped_column(String(8192))
     document: Mapped[str] = mapped_column(String(255))
     chunk_index: Mapped[int] = mapped_column()
     score: Mapped[float] = mapped_column()
     page: Mapped[int | None] = mapped_column(Integer, default=None, nullable=True)
+    # The id the model was shown this Passage under, and where the Passage
+    # ranked in retrieval. Both are read back so a reloaded answer still cites
+    # the passages the claims name.
+    source_id: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default=None
+    )
+    rank: Mapped[int | None] = mapped_column(Integer, default=None, nullable=True)
 
 
 def _engine_kwargs(url: str):

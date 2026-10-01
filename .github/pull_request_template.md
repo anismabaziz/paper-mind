@@ -51,6 +51,9 @@ Commands executed and results:
 - [ ] Documentation or shared demo data is updated if the behavior requires
       it.
 - [ ] The diff contains no change unrelated to the ticket.
+- [ ] If this changes a dependency, a model revision, or a container digest,
+      the pull request carries an evaluation comparison against the last
+      published report, or says explicitly that the numbers did not move.
 
 ## Backend / Python (if relevant)
 

@@ -3,13 +3,17 @@ import {
   getFiles,
   uploadFile,
   deleteFile,
-  processFile,
   checkIsProcessed,
+  retryIngestionJob,
+  cancelIngestionJob,
   getMessages,
   getFileMeta,
   markFileOpened,
+  reindexFile,
 } from "@/services/files";
+import type { IDeleteFile } from "@/services/files";
 import type { File as DbFile } from "@/types/db";
+import { isIngestionActive } from "@/types/db";
 
 // All per-document keys live under the "files" prefix so a single
 // invalidateQueries({ queryKey: ["files"] }) after upload/delete/process
@@ -21,13 +25,17 @@ export const fileKeys = {
   meta: (name: string) => ["files", name, "meta"] as const,
 };
 
+const ACTIVE_POLL_MS = 2000;
+
 export function useFiles() {
   return useQuery({
     queryKey: ["files"],
     queryFn: getFiles,
     refetchInterval: (q) => {
-      const hasUnprocessed = q.state.data?.files.some((f) => !f.is_processed);
-      return hasUnprocessed ? 3000 : false;
+      const hasActive = q.state.data?.files.some(
+        (f) => isIngestionActive(f.ingestion?.state) || (!f.is_processed && !f.ingestion)
+      );
+      return hasActive ? ACTIVE_POLL_MS : false;
     },
   });
 }
@@ -41,7 +49,11 @@ export function useFileStatus(file: Pick<DbFile, "name"> | null | undefined) {
     queryKey: fileKeys.status(file?.name ?? ""),
     queryFn: () => checkIsProcessed(file as DbFile),
     enabled: !!file,
-    refetchInterval: (q) => (q.state.data?.is_processed ? false : 3000),
+    refetchInterval: (q) => {
+      if (isIngestionActive(q.state.data?.ingestion?.state)) return ACTIVE_POLL_MS;
+      if (q.state.data?.is_processed) return false;
+      return q.state.error ? ACTIVE_POLL_MS : false;
+    },
   });
 }
 
@@ -62,7 +74,6 @@ export function useFileMeta(file: Pick<DbFile, "name"> | null | undefined) {
 }
 
 type UploadResult = Awaited<ReturnType<typeof uploadFile>>;
-type ProcessResult = Awaited<ReturnType<typeof processFile>>;
 
 type MutationCallbacks<TData, TVariables> = {
   onSuccess?: (data: TData, variables: TVariables) => void | Promise<void>;
@@ -83,26 +94,65 @@ export function useUploadFile(options?: MutationCallbacks<UploadResult, File>) {
   });
 }
 
-export function useDeleteFile() {
+export function useDeleteFile(options?: MutationCallbacks<IDeleteFile, DbFile>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteFile,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["files"] });
-    },
-  });
-}
-
-export function useProcessFile(options?: MutationCallbacks<ProcessResult, DbFile>) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: processFile,
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
       void options?.onSuccess?.(data, variables);
     },
     onError: (err, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
       options?.onError?.(err, variables);
+    },
+  });
+}
+
+export function useRetryIngestion(
+  options?: MutationCallbacks<Awaited<ReturnType<typeof retryIngestionJob>>, string>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: retryIngestionJob,
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: fileKeys.status(name) });
+    },
+    onError: (err, name) => {
+      options?.onError?.(err, name);
+    },
+  });
+}
+
+export function useCancelIngestion(
+  options?: MutationCallbacks<Awaited<ReturnType<typeof cancelIngestionJob>>, string>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: cancelIngestionJob,
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: fileKeys.status(name) });
+    },
+    onError: (err, name) => {
+      options?.onError?.(err, name);
+    },
+  });
+}
+
+export function useReindex(
+  options?: MutationCallbacks<Awaited<ReturnType<typeof reindexFile>>, string>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: reindexFile,
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: fileKeys.status(name) });
+    },
+    onError: (err, name) => {
+      options?.onError?.(err, name);
     },
   });
 }

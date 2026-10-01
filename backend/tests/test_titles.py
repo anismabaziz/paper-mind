@@ -15,6 +15,8 @@ from app import create_app
 from composition import Services
 from db import Base, FileRecord
 from repositories import build_repositories
+from tests.ingestion_helpers import build_test_worker
+from services.retrieval.base import RetrievalResult
 from services.titles import derive_title, is_hex_like_title
 
 
@@ -76,7 +78,7 @@ class FakeVectorService:
         pass
 
     def query_vectors(self, *a, **k):
-        return []
+        return RetrievalResult(sources=[], method="dense", outcome="empty")
 
     def delete_by_filename(self, *a, **k):
         pass
@@ -102,7 +104,7 @@ class FakeEmbed:
 class FakeChatFactory:
     def __call__(self, creds):
         class _P:
-            def stream_response(self, q, ctx):
+            def stream_response(self, q, ctx, history=""):
                 yield "hi"
 
         return _P()
@@ -267,11 +269,19 @@ def test_vectors_still_keyed_on_filename_not_title():
         chat_provider_factory=FakeChatFactory(),
     )
     app = create_app(settings_obj, services=svc)
+    app.config.update(
+        TEST_REPOSITORIES=fresh_repositories,
+        TEST_STORAGE=storage,
+        TEST_PARSER=svc.parser,
+        TEST_EMBEDDINGS=svc.embedding_service,
+        TEST_VECTORS=vectors,
+    )
     cl = app.test_client()
     data = {"file": (io.BytesIO(pdf), "titled.pdf")}
     stored = cl.post(
         "/upload", data=data, content_type="multipart/form-data"
     ).get_json()["file"]
     cl.post("/process-file", json={"filename": stored["name"]})
+    build_test_worker(app).drain()
     assert vectors.last_filename == stored["name"]
     assert vectors.last_filename != stored["title"]

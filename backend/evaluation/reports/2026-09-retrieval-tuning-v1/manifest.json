@@ -1,0 +1,685 @@
+{
+  "dataset": {
+    "cases": 16,
+    "held_back": [
+      "skating-failure-provider"
+    ],
+    "reviewed_on": "2026-09-27",
+    "split": "tuning",
+    "version": "2026-09-labeled-cases-v1"
+  },
+  "documents": [
+    {
+      "filename": "papermind-rag-primer.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e",
+      "version": "2"
+    },
+    {
+      "filename": "papermind-eval-methods.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae",
+      "version": "1"
+    },
+    {
+      "filename": "papermind-team-notes.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6",
+      "version": "1"
+    },
+    {
+      "filename": "bruening-2018-wearable-jump-monitor-figure-skating.pdf",
+      "license": "CC BY 4.0",
+      "origin": "Bruening et al., PLOS ONE, 2018, doi:10.1371/journal.pone.0206162",
+      "sha256": "11349a78036284774230762bdcafa9f38ee19ec4a7115a46acb4d47ab9ddbf46",
+      "version": "1"
+    }
+  ],
+  "environment": {
+    "machine": "arm64",
+    "packages": {
+      "qdrant-client": "1.19.0",
+      "sentence-transformers": "6.0.1",
+      "sqlalchemy": "2.0.52",
+      "tiktoken": "0.14.0"
+    },
+    "platform": "macOS-26.3-arm64-arm-64bit",
+    "python": "3.11.13",
+    "retrieval": {
+      "candidate_depth": 50,
+      "collection_schema": "named-dense-sparse-v1",
+      "context_sources": 5,
+      "rrf_k": 60,
+      "sparse_tokenizer": "lowercase-regex-stopwords-v1"
+    }
+  },
+  "evidence": {
+    "abstention": {
+      "measured": false,
+      "measured_in": [],
+      "not_measured": [
+        {
+          "experiment": "baseline",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "dense-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "sparse-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "hybrid-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "rerank-on",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-10",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-none",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-deterministic",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-256-25",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-1024-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        }
+      ]
+    },
+    "answers": {
+      "measured": false,
+      "measured_in": [],
+      "not_measured": [
+        {
+          "experiment": "baseline",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "dense-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "sparse-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "hybrid-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "rerank-on",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-10",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-none",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-deterministic",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-256-25",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-1024-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        }
+      ]
+    },
+    "citations": {
+      "measured": false,
+      "measured_in": [],
+      "not_measured": [
+        {
+          "experiment": "baseline",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "dense-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "sparse-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "hybrid-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "rerank-on",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-10",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-none",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-deterministic",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-256-25",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-1024-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        }
+      ]
+    },
+    "cost": {
+      "measured": false,
+      "measured_in": [],
+      "not_measured": [
+        {
+          "experiment": "baseline",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "dense-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "sparse-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "hybrid-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "rerank-on",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-10",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-none",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-deterministic",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-256-25",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-1024-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        }
+      ]
+    },
+    "deterministic": {
+      "measured": true,
+      "measured_in": [
+        "baseline",
+        "dense-only",
+        "sparse-only",
+        "hybrid-only",
+        "rerank-on",
+        "depth-10",
+        "depth-100",
+        "expansion-none",
+        "expansion-deterministic",
+        "chunk-256-25",
+        "chunk-1024-100"
+      ],
+      "not_measured": []
+    },
+    "human_calibration": {
+      "measured": false,
+      "measured_in": [],
+      "not_measured": [
+        {
+          "experiment": "baseline",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "dense-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "sparse-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "hybrid-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "rerank-on",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-10",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-none",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-deterministic",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-256-25",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-1024-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        }
+      ]
+    },
+    "model_graded": {
+      "measured": false,
+      "measured_in": [],
+      "not_measured": [
+        {
+          "experiment": "baseline",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "dense-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "sparse-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "hybrid-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "rerank-on",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-10",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-none",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-deterministic",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-256-25",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-1024-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        }
+      ]
+    },
+    "provider_failures": {
+      "measured": false,
+      "measured_in": [],
+      "not_measured": [
+        {
+          "experiment": "baseline",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "dense-only",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "sparse-only",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "hybrid-only",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "rerank-on",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "depth-10",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "depth-100",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "expansion-none",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "expansion-deterministic",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "chunk-256-25",
+          "reason": "no provider was called, so no call could fail"
+        },
+        {
+          "experiment": "chunk-1024-100",
+          "reason": "no provider was called, so no call could fail"
+        }
+      ]
+    },
+    "tokens": {
+      "measured": false,
+      "measured_in": [],
+      "not_measured": [
+        {
+          "experiment": "baseline",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "dense-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "sparse-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "hybrid-only",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "rerank-on",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-10",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "depth-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-none",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "expansion-deterministic",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-256-25",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        },
+        {
+          "experiment": "chunk-1024-100",
+          "reason": "retrieval-only measurement, nothing asked a model"
+        }
+      ]
+    }
+  },
+  "experiments": [
+    {
+      "changes": {},
+      "decided_on": "tuning",
+      "family": "baseline",
+      "id": "baseline",
+      "question": "What does the shipped configuration do?"
+    },
+    {
+      "changes": {
+        "method": "dense"
+      },
+      "decided_on": "tuning",
+      "family": "retrieval-method",
+      "id": "dense-only",
+      "question": "What does dense retrieval alone find, and what does it miss?"
+    },
+    {
+      "changes": {
+        "method": "sparse"
+      },
+      "decided_on": "tuning",
+      "family": "retrieval-method",
+      "id": "sparse-only",
+      "question": "Do the rare terms and figures in a question carry the answer?"
+    },
+    {
+      "changes": {
+        "method": "hybrid"
+      },
+      "decided_on": "tuning",
+      "family": "retrieval-method",
+      "id": "hybrid-only",
+      "question": "Does combining both representations beat either one alone?"
+    },
+    {
+      "changes": {
+        "rerank": true
+      },
+      "decided_on": "tuning",
+      "family": "rerank",
+      "id": "rerank-on",
+      "question": "What does reranking the candidates buy, in seconds?"
+    },
+    {
+      "changes": {
+        "candidate_depth": 10
+      },
+      "decided_on": "tuning",
+      "family": "candidate-depth",
+      "id": "depth-10",
+      "question": "Can the reranker and the context window live on fewer candidates?"
+    },
+    {
+      "changes": {
+        "candidate_depth": 100
+      },
+      "decided_on": "tuning",
+      "family": "candidate-depth",
+      "id": "depth-100",
+      "question": "Do more candidates than the fifty the application fetches bring in anything the reader would otherwise miss?"
+    },
+    {
+      "changes": {
+        "query_expansion": "none"
+      },
+      "decided_on": "tuning",
+      "family": "query-expansion",
+      "id": "expansion-none",
+      "question": "What does a follow-up retrieve on its own?"
+    },
+    {
+      "changes": {
+        "query_expansion": "deterministic"
+      },
+      "decided_on": "tuning",
+      "family": "query-expansion",
+      "id": "expansion-deterministic",
+      "question": "Does carrying the earlier questions forward find the passage?"
+    },
+    {
+      "changes": {
+        "chunk_overlap_tokens": 25,
+        "chunk_size_tokens": 256
+      },
+      "decided_on": "tuning",
+      "family": "chunking",
+      "id": "chunk-256-25",
+      "question": "Do smaller chunks read more precisely?"
+    },
+    {
+      "changes": {
+        "chunk_overlap_tokens": 100,
+        "chunk_size_tokens": 1024
+      },
+      "decided_on": "tuning",
+      "family": "chunking",
+      "id": "chunk-1024-100",
+      "question": "Do larger chunks carry whole tables and sections?"
+    }
+  ],
+  "measurements_digest": "c5061d23410f08cd30dbbed068ca1df9a9934fb7d6d0feda901e7833b207d525",
+  "models": {
+    "embedding": {
+      "id": "BAAI/bge-m3",
+      "revision": ""
+    },
+    "generator": null,
+    "judge": null,
+    "reranker": {
+      "id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "revision": ""
+    }
+  },
+  "prompts": {
+    "citation": "grounded-claims-v1",
+    "judge_rubric": null
+  },
+  "report_version": "1",
+  "results": [
+    {
+      "experiment": "baseline",
+      "family": "baseline",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "dense-only",
+      "family": "retrieval-method",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "sparse-only",
+      "family": "retrieval-method",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "hybrid-only",
+      "family": "retrieval-method",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "rerank-on",
+      "family": "rerank",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "depth-10",
+      "family": "candidate-depth",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "depth-100",
+      "family": "candidate-depth",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "expansion-none",
+      "family": "query-expansion",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "expansion-deterministic",
+      "family": "query-expansion",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "chunk-256-25",
+      "family": "chunking",
+      "questions": 16,
+      "split": "tuning"
+    },
+    {
+      "experiment": "chunk-1024-100",
+      "family": "chunking",
+      "questions": 16,
+      "split": "tuning"
+    }
+  ],
+  "retrieval_methods": [],
+  "revision": {
+    "dirty": false,
+    "files_changed": 0,
+    "revision": "d85d2514c9acf4de2e45a4453da5dfe184dde116",
+    "subject": "fix: report how far a re-run's numbers moved, not only whether the setup matched"
+  },
+  "settings": {
+    "chunk_overlap_tokens": 50,
+    "chunk_size_tokens": 512,
+    "context_token_budget": 6000,
+    "embedding_model": "BAAI/bge-m3",
+    "index_name": "pdf-index",
+    "max_expansion_chars": 2000,
+    "prior_turns_token_budget": 1200,
+    "query_rewrite": false,
+    "recent_turns": 4,
+    "rerank_enabled": false,
+    "rerank_model": "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  }
+}

@@ -1,0 +1,501 @@
+{
+  "configurations": [
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "baseline",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "baseline",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": 0.0,
+        "retrieval_seconds_p95": 0.0,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0,
+        "ndcg": 0.0
+      },
+      "reference": true
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 4.637939000000003,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "chunk-1024-100",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "chunking",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.004866126000706572,
+        "retrieval_seconds_p95": -0.011288229248748394,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.125,
+        "ndcg": 0.066832715120413
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": -0.8818219999999997,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "chunk-256-25",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "chunking",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.0027503550081746653,
+        "retrieval_seconds_p95": -0.01721003149577882,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0625,
+        "ndcg": 0.07296157584902618
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "dense-only",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "retrieval-method",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.003154042497044429,
+        "retrieval_seconds_p95": 0.003139895747153787,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0,
+        "ndcg": 0.04017021370067497
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "depth-10",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "candidate-depth",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.0018101470050169155,
+        "retrieval_seconds_p95": -0.017824458998802584,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0,
+        "ndcg": 0.02306689040178389
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "depth-100",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "candidate-depth",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.0034813545062206686,
+        "retrieval_seconds_p95": -0.023517729005106958,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0,
+        "ndcg": 0.0
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "expansion-deterministic",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "query-expansion",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.004396771502797492,
+        "retrieval_seconds_p95": -0.023221270497742807,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0625,
+        "ndcg": 0.024178300452158852
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "expansion-none",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "query-expansion",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.004444521000550594,
+        "retrieval_seconds_p95": -0.02292592749290634,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0,
+        "ndcg": 0.02306689040178389
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "hybrid-only",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "retrieval-method",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.004187459511740599,
+        "retrieval_seconds_p95": -0.023518312242231332,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0,
+        "ndcg": 0.0
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "rerank-on",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "rerank",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": 0.12132404099975247,
+        "retrieval_seconds_p95": 0.8868528025013802,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.125,
+        "ndcg": 0.14267131386122212
+      },
+      "reference": false
+    },
+    {
+      "cases": {
+        "after": 16,
+        "before": 16
+      },
+      "cost": {
+        "indexed_seconds": 0.0,
+        "input_tokens": null,
+        "output_tokens": null,
+        "per_case_usd": null,
+        "usd": null
+      },
+      "experiment": "sparse-only",
+      "failures": {
+        "after": {},
+        "before": {}
+      },
+      "family": "retrieval-method",
+      "latency": {
+        "first_token_seconds_p50": null,
+        "first_token_seconds_p95": null,
+        "retrieval_seconds_p50": -0.008382833999348804,
+        "retrieval_seconds_p95": -0.026304104507289594,
+        "total_seconds_p50": null,
+        "total_seconds_p95": null
+      },
+      "quality": {
+        "correctness": null,
+        "faithfulness": null,
+        "hit_rate": 0.0,
+        "ndcg": 0.02349356489433352
+      },
+      "reference": false
+    }
+  ],
+  "cost": {
+    "local": {
+      "billed_usd": 0.0,
+      "device": "cpu",
+      "documents": 4,
+      "embedding_model": "BAAI/bge-m3",
+      "indexed_seconds": 40.127809,
+      "rerank_applied": false,
+      "rerank_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "seconds_per_document": 10.031952
+    },
+    "provider": {
+      "input_cost_per_million_usd": null,
+      "input_tokens": 0,
+      "model": null,
+      "output_cost_per_million_usd": null,
+      "output_tokens": 0,
+      "per_case_usd": null,
+      "priced_cases": 0,
+      "usd": 0.0
+    },
+    "traces": {}
+  },
+  "performance": {
+    "evaluation": {
+      "cold_start": {
+        "first_token_seconds": {},
+        "retrieval_seconds": {},
+        "total_seconds": {}
+      },
+      "steady_state": {
+        "first_token_seconds": {},
+        "retrieval_seconds": {
+          "p50": 0.01380020900251111,
+          "p95": 0.037004135501774726,
+          "samples": 16
+        },
+        "total_seconds": {}
+      }
+    },
+    "traces": {
+      "measured": false,
+      "reason": "no recorded traces were read for this report"
+    }
+  },
+  "provenance": {
+    "citation_prompt": "grounded-claims-v1",
+    "configurations": [
+      "baseline",
+      "chunk-1024-100",
+      "chunk-256-25",
+      "dense-only",
+      "depth-10",
+      "depth-100",
+      "expansion-deterministic",
+      "expansion-none",
+      "hybrid-only",
+      "rerank-on",
+      "sparse-only"
+    ],
+    "dataset": "2026-09-labeled-cases-v1",
+    "dirty": false,
+    "embedding": {
+      "id": "BAAI/bge-m3",
+      "revision": ""
+    },
+    "generator": null,
+    "index": {
+      "bruening-2018-wearable-jump-monitor-figure-skating.pdf": 1,
+      "papermind-eval-methods.pdf": 1,
+      "papermind-rag-primer.pdf": 1,
+      "papermind-team-notes.pdf": 1
+    },
+    "judge": null,
+    "judge_rubric": null,
+    "questions": 16,
+    "reranker": {
+      "id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "revision": ""
+    },
+    "revision": "d85d2514c9acf4de2e45a4453da5dfe184dde116",
+    "split": "tuning",
+    "subject": "fix: report how far a re-run's numbers moved, not only whether the setup matched"
+  },
+  "quality": {
+    "abstention": null,
+    "answers": {},
+    "citations": {},
+    "failures": {
+      "cases": [
+        "primer-stages",
+        "primer-hit-rate",
+        "primer-overlap",
+        "skating-jump-counts",
+        "skating-sensor-placement",
+        "skating-participants",
+        "skating-candidate-counts",
+        "skating-pps-across-sections",
+        "eval-metrics-list",
+        "eval-recall-vs-hit-rate",
+        "eval-table-sparse-recall",
+        "eval-cold-start",
+        "eval-unanswerable-model",
+        "notes-run-record",
+        "notes-five-outcomes",
+        "notes-rerank-cost"
+      ],
+      "graders": {},
+      "outcomes": {}
+    },
+    "retrieval": {
+      "hit_rate": 0.8125,
+      "mrr": 0.6927083333333334,
+      "ndcg": 0.693404643347406,
+      "questions": 16,
+      "recall": 0.8125
+    },
+    "unmeasured": {
+      "abstention": "retrieval-only measurement, nothing asked a model",
+      "answers": "retrieval-only measurement, nothing asked a model",
+      "citations": "retrieval-only measurement, nothing asked a model"
+    }
+  }
+}
