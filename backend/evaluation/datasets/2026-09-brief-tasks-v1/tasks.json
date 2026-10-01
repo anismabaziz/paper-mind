@@ -1,0 +1,168 @@
+{
+  "version": "2026-09-brief-tasks-v1",
+  "reviewed_on": "2026-10-01",
+  "documents": [
+    {
+      "filename": "papermind-rag-primer.pdf",
+      "version": "2",
+      "sha256": "91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "license": "CC0 1.0 (public domain)"
+    },
+    {
+      "filename": "papermind-eval-methods.pdf",
+      "version": "1",
+      "sha256": "07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "license": "CC0 1.0 (public domain)"
+    },
+    {
+      "filename": "papermind-team-notes.pdf",
+      "version": "1",
+      "sha256": "dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "license": "CC0 1.0 (public domain)"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "brief-cross-lookup-hit-rate",
+      "documents": ["papermind-rag-primer.pdf", "papermind-eval-methods.pdf"],
+      "category": "cross_lookup",
+      "question": "What do both documents say hit rate at k measures?",
+      "expected_answer": "The share of questions for which at least one gold passage appears in the top k results; the mean over the set is the share of questions the system can reach at all.",
+      "expected_evidence": [
+        {"document": "papermind-rag-primer.pdf", "snippet": "Hit rate at k is"},
+        {"document": "papermind-eval-methods.pdf", "snippet": "Hit rate at k asks whether any of the passages that answer a question appeared in the first k results"}
+      ],
+      "rubric": "A correct brief cites both documents and says hit rate is whether a gold passage appeared in the top k, averaged as the share of reachable questions.",
+      "expects": {
+        "needs_both_docs": true,
+        "expects_conflict": false,
+        "expects_gap": false,
+        "expects_abstention": false,
+        "needs_page_citation": false,
+        "needs_compare": false
+      }
+    },
+    {
+      "id": "brief-agreement-recall-stricter",
+      "documents": ["papermind-rag-primer.pdf", "papermind-eval-methods.pdf"],
+      "category": "agreement",
+      "question": "Do the two documents agree on when recall is the stricter measure, and what do they each say?",
+      "expected_answer": "Yes. Both say recall is stricter when a question needs more than one gold passage: the primer calls it the stricter of the two, and the methods note says recall notices a missing passage where hit rate is satisfied by the other.",
+      "expected_evidence": [
+        {"document": "papermind-rag-primer.pdf", "snippet": "Recall is the stricter of the two whenever a question has more than one gold chunk"},
+        {"document": "papermind-eval-methods.pdf", "snippet": "recall is the metric that notices one of them is missing where hit rate is satisfied by the other"}
+      ],
+      "rubric": "A correct brief states the agreement explicitly, cites one passage from each document, and keeps the claim supported rather than contested.",
+      "expects": {
+        "needs_both_docs": true,
+        "expects_conflict": false,
+        "expects_gap": false,
+        "expects_abstention": false,
+        "needs_page_citation": false,
+        "needs_compare": true
+      }
+    },
+    {
+      "id": "brief-disagreement-single-representation",
+      "documents": ["papermind-rag-primer.pdf", "papermind-eval-methods.pdf"],
+      "category": "disagreement",
+      "question": "Between dense-only and sparse-only retrieval in Table 1, which finds more of the gold passages and which reaches more questions?",
+      "expected_answer": "Sparse finds more of the gold passages (recall 0.70 against 0.62) while dense reaches more questions outright (hit rate 0.71 against 0.66); neither wins on both, so the finding is contested between the two measures.",
+      "expected_evidence": [
+        {"document": "papermind-eval-methods.pdf", "snippet": "Dense only 0.71 0.62 0.58 0.55 41 ms"},
+        {"document": "papermind-eval-methods.pdf", "snippet": "Sparse only 0.66 0.70 0.61 0.60 12 ms"},
+        {"document": "papermind-rag-primer.pdf", "snippet": "Recall is the stricter of the two whenever a question has more than one gold chunk"}
+      ],
+      "rubric": "A correct brief reports both directions with their numbers, cites the two table rows, and marks the claim contested rather than averaging the two measures into one winner.",
+      "expects": {
+        "needs_both_docs": false,
+        "expects_conflict": true,
+        "expects_gap": false,
+        "expects_abstention": false,
+        "needs_page_citation": false,
+        "needs_compare": true
+      }
+    },
+    {
+      "id": "brief-missing-evidence-model",
+      "documents": ["papermind-rag-primer.pdf", "papermind-eval-methods.pdf"],
+      "category": "missing_evidence",
+      "question": "What embedding model does the primer recommend for production, and what does it say about chunk overlap?",
+      "expected_answer": "The primer names no embedding model, so that half cannot be answered from the pair; it does say overlap between consecutive chunks reduces the chance that a fact sitting across a cut boundary is lost entirely.",
+      "expected_evidence": [
+        {"document": "papermind-rag-primer.pdf", "snippet": "Overlap between consecutive chunks reduces the chance that a fact sitting across a cut boundary is lost"}
+      ],
+      "rubric": "A correct brief answers the overlap half with its citation, leaves the model half as an explicit gap or unresolved claim, and does not invent a model name from outside the pair.",
+      "expects": {
+        "needs_both_docs": false,
+        "expects_conflict": false,
+        "expects_gap": true,
+        "expects_abstention": false,
+        "needs_page_citation": false,
+        "needs_compare": false
+      }
+    },
+    {
+      "id": "brief-unanswerable-hardware-cost",
+      "documents": ["papermind-rag-primer.pdf", "papermind-team-notes.pdf"],
+      "category": "unanswerable",
+      "question": "What did the monitor hardware cost, and what was the total budget for the study?",
+      "expected_answer": "Neither document covers hardware cost or study budget, so there is nothing to write from.",
+      "expected_evidence": [],
+      "absent_terms": ["cost", "budget", "USD", "$"],
+      "rubric": "A correct brief abstains or answers that neither document covers this, cites nothing, and adds no figure from outside the pair.",
+      "expects": {
+        "needs_both_docs": false,
+        "expects_conflict": false,
+        "expects_gap": false,
+        "expects_abstention": true,
+        "needs_page_citation": false,
+        "needs_compare": false
+      }
+    },
+    {
+      "id": "brief-page-citation-rerank-table",
+      "documents": ["papermind-eval-methods.pdf", "papermind-team-notes.pdf"],
+      "category": "page_citation",
+      "question": "Cite the exact page where Table 1 reports hybrid plus rerank nDCG 0.90 at 96 ms, and say what the team notes conclude about that cost.",
+      "expected_answer": "Table 1 reports Hybrid + rerank at 0.94 hit, 0.93 recall, 0.88 MRR, 0.90 nDCG at 96 ms; the team notes say the reranker costs 38 ms and returns 0.90 nDCG against 0.81 without it.",
+      "expected_evidence": [
+        {"document": "papermind-eval-methods.pdf", "snippet": "Hybrid + rerank 0.94 0.93 0.88 0.90 96 ms", "page": 2},
+        {"document": "papermind-team-notes.pdf", "snippet": "it costs 38 ms and returns 0.90 nDCG against 0.81 without it", "page": 2}
+      ],
+      "rubric": "A correct brief cites the table row with its page number and the notes passage with its page number; a citation naming the right text on the wrong page fails.",
+      "expects": {
+        "needs_both_docs": true,
+        "expects_conflict": false,
+        "expects_gap": false,
+        "expects_abstention": false,
+        "needs_page_citation": true,
+        "needs_compare": false
+      }
+    },
+    {
+      "id": "brief-compare-rerank-worth",
+      "documents": ["papermind-eval-methods.pdf", "papermind-team-notes.pdf"],
+      "category": "agreement",
+      "question": "How much latency does reranking add over hybrid without it, and do both documents agree it is only worth it when the reader reads the answer?",
+      "expected_answer": "38 ms, from 58 ms to 96 ms; both documents agree the cost is only worth it when the reader will read the answer rather than skim.",
+      "expected_evidence": [
+        {"document": "papermind-eval-methods.pdf", "snippet": "Hybrid 0.88 0.84 0.79 0.81 58 ms"},
+        {"document": "papermind-eval-methods.pdf", "snippet": "Hybrid + rerank 0.94 0.93 0.88 0.90 96 ms"},
+        {"document": "papermind-team-notes.pdf", "snippet": "it costs 38 ms and returns 0.90 nDCG against 0.81 without it"}
+      ],
+      "rubric": "A correct brief gives 96 ms against 58 ms (38 ms more), cites both table rows and the notes, and arranges the comparison rather than quoting one side only.",
+      "expects": {
+        "needs_both_docs": true,
+        "expects_conflict": false,
+        "expects_gap": false,
+        "expects_abstention": false,
+        "needs_page_citation": false,
+        "needs_compare": true
+      }
+    }
+  ]
+}

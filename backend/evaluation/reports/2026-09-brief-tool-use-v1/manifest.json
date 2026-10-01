@@ -1,0 +1,68 @@
+{
+  "configurations": [
+    "direct",
+    "brief",
+    "extended"
+  ],
+  "documents": [
+    {
+      "filename": "papermind-rag-primer.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "91cc77e9c52edcc97424ec9003a5b8327b8efad83932b1011a5f13e8d1d0bd6e",
+      "version": "2"
+    },
+    {
+      "filename": "papermind-eval-methods.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "07013ff2c99c79e6a28545e8985d1570b6e9cf0ec4be55c9ddea30debab679ae",
+      "version": "1"
+    },
+    {
+      "filename": "papermind-team-notes.pdf",
+      "license": "CC0 1.0 (public domain)",
+      "origin": "authored in-repo for this project; the markdown source sits beside the file",
+      "sha256": "dd072a3dc6ee2bbda50e9f43cc4da50d9dacc8577f0ff843e49cb91249006df6",
+      "version": "1"
+    }
+  ],
+  "mode": "brief-tool-use",
+  "report_version": "1",
+  "revision": {
+    "dirty": true,
+    "files_changed": 9,
+    "revision": "fe8b940f2a9c14e16bfe629be506d646db15cc6e",
+    "subject": "feat: Add page reading and evidence comparison tools"
+  },
+  "task_set": {
+    "categories": {
+      "agreement": 2,
+      "cross_lookup": 1,
+      "disagreement": 1,
+      "missing_evidence": 1,
+      "page_citation": 1,
+      "unanswerable": 1
+    },
+    "reviewed_on": "2026-10-01",
+    "tasks": 7,
+    "version": "2026-09-brief-tasks-v1"
+  },
+  "totals": {
+    "cost_usd": 0.186,
+    "failures": {
+      "timeout": 1
+    },
+    "latency_p50": 12.25,
+    "latency_p95": 23.699999999999996,
+    "timeout_rate": 0.042,
+    "tokens_p50": 1237.5,
+    "tokens_p95": 1377.75,
+    "tokens_total": 28885,
+    "tool_calls_p50": 3.5,
+    "tool_calls_p95": 4.0,
+    "trials": 24,
+    "turns_p50": 3.0,
+    "turns_p95": 3.0
+  }
+}
