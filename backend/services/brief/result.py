@@ -228,7 +228,9 @@ def validate_structured_brief(
     for claim in brief.claims:
         supports = tuple(item for item in claim.supports if item in allowed)
         conflicts = tuple(item for item in claim.conflicts if item in allowed)
-        invalid.extend(item for item in (*claim.supports, *claim.conflicts) if item not in allowed)
+        invalid.extend(
+            item for item in (*claim.supports, *claim.conflicts) if item not in allowed
+        )
         # An explicit unresolved stays unresolved: the model abstaining on a
         # claim it could have cited is a signal, not a status to upgrade.
         # Anything else is derived from the valid ids, so a claim left with
@@ -262,7 +264,9 @@ def validate_structured_brief(
     return validated, tuple(seen)
 
 
-def brief_from_answer(answer: str, allowed_ids: Sequence[str]) -> tuple[StructuredBrief, tuple[str, ...]]:
+def brief_from_answer(
+    answer: str, allowed_ids: Sequence[str]
+) -> tuple[StructuredBrief, tuple[str, ...]]:
     """
     Return the structured brief for one final answer, validated.
 

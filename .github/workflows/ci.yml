@@ -135,7 +135,7 @@ jobs:
       # opens when a bound is crossed, and it is the reason to keep the run.
       - name: Upload the rendered reports
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e112508b939b8d59410638fdb16b1d # v4.6.2
+        uses: actions/upload-artifact@v4
         with:
           name: evaluation-reports
           path: backend/evaluation/reports/*/digest.*
@@ -213,7 +213,7 @@ jobs:
 
       - name: Upload failure artifacts
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e112508b939b8d59410638fdb16b1d # v4.6.2
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-results
           path: frontend/test-results/

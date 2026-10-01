@@ -119,9 +119,13 @@ def _wait_ready(base: str, filename: str, timeout_s: float = 600.0) -> None:
     deadline = time.monotonic() + timeout_s
     last = ""
     while time.monotonic() < deadline:
-        status, data = _request(base, "POST", "/file/is-processed", {"filename": filename})
+        status, data = _request(
+            base, "POST", "/file/is-processed", {"filename": filename}
+        )
         if status == 200 and data is not None:
-            last = f"{data.get('is_processed')}/{data.get('ingestion', {}).get('state')}"
+            last = (
+                f"{data.get('is_processed')}/{data.get('ingestion', {}).get('state')}"
+            )
             if data.get("is_processed") is True:
                 return
             if data.get("ingestion", {}).get("state") == "failed":
@@ -135,7 +139,9 @@ def _wait_ready(base: str, filename: str, timeout_s: float = 600.0) -> None:
 def main() -> int:
     """Upload missing samples, wait for indexing, store one abstained turn."""
     parser = argparse.ArgumentParser(description="Seed licensed sample documents")
-    parser.add_argument("--base-url", default=os.getenv("PAPERMIND_API_URL", "http://127.0.0.1:3000"))
+    parser.add_argument(
+        "--base-url", default=os.getenv("PAPERMIND_API_URL", "http://127.0.0.1:3000")
+    )
     parser.add_argument("--timeout-s", type=float, default=600.0)
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
@@ -144,7 +150,9 @@ def main() -> int:
         files = _get(base, "/files").get("files", [])
     except Exception as exc:
         print(f"Seed failed: backend not reachable at {base}: {exc}", file=sys.stderr)
-        print("Fix: run ./papermind.sh up first, then retry with --seed.", file=sys.stderr)
+        print(
+            "Fix: run ./papermind.sh up first, then retry with --seed.", file=sys.stderr
+        )
         return 1
 
     seeded = 0
@@ -158,7 +166,10 @@ def main() -> int:
         print(f"  upload   {doc.name} ({SEED_LICENSES[doc.name]})")
         content = doc.read_bytes()
         status, data = _request(
-            base, "POST", "/upload", files={"file": (doc.name, content, "application/pdf")}
+            base,
+            "POST",
+            "/upload",
+            files={"file": (doc.name, content, "application/pdf")},
         )
         if status != 200:
             print(f"  FAILED   {doc.name}: upload -> {status}: {data}", file=sys.stderr)
@@ -184,7 +195,9 @@ def main() -> int:
             with urllib.request.urlopen(
                 urllib.request.Request(
                     f"{base}/response",
-                    data=json.dumps({"filename": primer["name"], "query": query}).encode(),
+                    data=json.dumps(
+                        {"filename": primer["name"], "query": query}
+                    ).encode(),
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 ),
@@ -193,7 +206,9 @@ def main() -> int:
                 response.read()
         except urllib.error.HTTPError as exc:
             if exc.code == 400:
-                print("  sample   skipped: no provider key saved yet (open Settings, then rerun)")
+                print(
+                    "  sample   skipped: no provider key saved yet (open Settings, then rerun)"
+                )
             else:
                 print(f"  FAILED   sample exchange -> HTTP {exc.code}", file=sys.stderr)
                 return 1

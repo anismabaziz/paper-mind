@@ -96,14 +96,19 @@ def _get(base: str, path: str) -> tuple[int, dict]:
 def main() -> int:
     """Check health, documents, and proof via abstention or cited answer."""
     parser = argparse.ArgumentParser(description="Smoke-test a local workspace")
-    parser.add_argument("--base-url", default=os.getenv("PAPERMIND_API_URL", "http://127.0.0.1:3000"))
+    parser.add_argument(
+        "--base-url", default=os.getenv("PAPERMIND_API_URL", "http://127.0.0.1:3000")
+    )
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
 
     status, health = _get(base, "/health")
     if status != 200:
         print(f"Smoke FAILED: /health -> {status} at {base}", flush=True)
-        print("Fix: run ./papermind.sh up; unavailable services mean infra never started.", flush=True)
+        print(
+            "Fix: run ./papermind.sh up; unavailable services mean infra never started.",
+            flush=True,
+        )
         return 1
 
     status, listing = _get(base, "/files")
@@ -113,11 +118,16 @@ def main() -> int:
     files = listing.get("files", [])
     if not files:
         print("Smoke FAILED: workspace holds no documents.", flush=True)
-        print("Fix: rerun ./papermind.sh up --seed to index the licensed samples.", flush=True)
+        print(
+            "Fix: rerun ./papermind.sh up --seed to index the licensed samples.",
+            flush=True,
+        )
         return 1
 
     filename = files[0]["name"]
-    nonsense = "xqzzy plugh nonexistent term 987654321 what color is this imaginary word?"
+    nonsense = (
+        "xqzzy plugh nonexistent term 987654321 what color is this imaginary word?"
+    )
     status, sse = _post(base, "/response", {"filename": filename, "query": nonsense})
     if status != 200:
         # A workspace with no saved provider key refuses chat at the settings
@@ -126,21 +136,36 @@ def main() -> int:
         # deterministic and machine-readable, so it counts as the keyless
         # proof; saving a key unlocks the abstention and cited-answer proofs.
         if is_keyless_refusal(status, sse):
-            print("Smoke passed: keyless workspace fails closed (no_provider_configured).")
-            print("Save a provider key in Settings, then rerun for the abstention proof.")
+            print(
+                "Smoke passed: keyless workspace fails closed (no_provider_configured)."
+            )
+            print(
+                "Save a provider key in Settings, then rerun for the abstention proof."
+            )
             return 0
-        print(f"Smoke FAILED: expected an abstained stream, got HTTP {status}: {sse[:300]}", flush=True)
+        print(
+            f"Smoke FAILED: expected an abstained stream, got HTTP {status}: {sse[:300]}",
+            flush=True,
+        )
         return 1
     name, terminal = parse_sse_terminal(sse)
     proof = classify_proof(terminal)
     if proof == "abstention":
-        print(f"Smoke passed: deterministic abstention ({terminal.get('reason')}) on {files[0].get('original_filename')}.")
+        print(
+            f"Smoke passed: deterministic abstention ({terminal.get('reason')}) on {files[0].get('original_filename')}."
+        )
         return 0
     if proof == "cited-answer":
         print(f"Smoke passed: cited answer with {len(terminal['sources'])} source(s).")
         return 0
-    print(f"Smoke FAILED: terminal event {name!r}: {json.dumps(terminal)[:500]}", flush=True)
-    print("Fix: check worker logs (backend/data/.local/worker.log) and Qdrant at http://127.0.0.1:6333.", flush=True)
+    print(
+        f"Smoke FAILED: terminal event {name!r}: {json.dumps(terminal)[:500]}",
+        flush=True,
+    )
+    print(
+        "Fix: check worker logs (backend/data/.local/worker.log) and Qdrant at http://127.0.0.1:6333.",
+        flush=True,
+    )
     return 1
 
 

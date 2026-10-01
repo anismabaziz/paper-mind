@@ -57,6 +57,11 @@ def test_up_covers_the_full_stack():
 def test_output_gives_recovery_guidance():
     """Every failure mode points at its fix."""
     text = _text()
-    for token in ("missing tools", "occupied ports", "invalid secrets", "unavailable services"):
+    for token in (
+        "missing tools",
+        "occupied ports",
+        "invalid secrets",
+        "unavailable services",
+    ):
         assert token.lower() in text.lower(), f"script must guide recovery for {token}"
     assert "Fix:" in text, "recovery guidance must name the fix with `Fix:`"

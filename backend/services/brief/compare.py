@@ -201,16 +201,15 @@ def _differences(
         for other in held:
             if other.evidence_id != item.evidence_id:
                 others |= set(terms[other.evidence_id])
-        distinctive = [
-            term for term in terms[item.evidence_id] if term not in others
-        ][:_MAX_TERMS]
+        distinctive = [term for term in terms[item.evidence_id] if term not in others][
+            :_MAX_TERMS
+        ]
         if distinctive:
             entries.append(
                 {
                     "evidence_ids": [item.evidence_id],
                     "detail": (
-                        f"Terms only {item.evidence_id} uses: "
-                        f"{', '.join(distinctive)}."
+                        f"Terms only {item.evidence_id} uses: {', '.join(distinctive)}."
                     ),
                 }
             )
@@ -237,9 +236,7 @@ def _contradictions(
         cue = _contrast_cue(left.content) or _contrast_cue(right.content)
         if cue is None:
             continue
-        first, second = (
-            (left, right) if _contrast_cue(left.content) else (right, left)
-        )
+        first, second = (left, right) if _contrast_cue(left.content) else (right, left)
         found.append(
             {
                 "evidence_ids": [left.evidence_id, right.evidence_id],

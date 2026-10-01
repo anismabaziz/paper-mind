@@ -114,9 +114,7 @@ class OtlpExporter:
             "resourceSpans": [
                 {
                     "resource": {
-                        "attributes": _attributes(
-                            {"service.name": self._service_name}
-                        )
+                        "attributes": _attributes({"service.name": self._service_name})
                     },
                     "scopeSpans": [
                         {
@@ -166,9 +164,7 @@ class OtlpExporter:
 
 def _attributes(values: dict[str, Any]) -> list[dict[str, Any]]:
     """Return attributes in the OTLP key/value shape, typed by their value."""
-    return [
-        {"key": str(key), "value": _value(value)} for key, value in values.items()
-    ]
+    return [{"key": str(key), "value": _value(value)} for key, value in values.items()]
 
 
 def _value(value: Any) -> dict[str, Any]:

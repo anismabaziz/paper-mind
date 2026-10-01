@@ -171,7 +171,11 @@ class TestMissingEvidence:
                     "One claim is grounded, one is not.",
                     [
                         {"claim": "A keeps data.", "supports": ["E1"], "conflicts": []},
-                        {"claim": "B deletes everything.", "supports": [], "conflicts": []},
+                        {
+                            "claim": "B deletes everything.",
+                            "supports": [],
+                            "conflicts": [],
+                        },
                     ],
                 )
             ),

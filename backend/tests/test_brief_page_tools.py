@@ -47,12 +47,9 @@ __all__ = [
     "two_documents",
 ]
 
-RETENTION_A = (
-    "retention improves with spaced practice sessions every week in trials"
-)
+RETENTION_A = "retention improves with spaced practice sessions every week in trials"
 RETENTION_B = (
-    "retention does not improve with spaced practice sessions every week "
-    "in trials"
+    "retention does not improve with spaced practice sessions every week in trials"
 )
 
 
@@ -157,9 +154,7 @@ class TestPageReading:
         """A Page read is admitted under a stable id the brief can cite."""
         documents = two_documents(client, app)
         script_pages(app, documents, RETENTION_A, RETENTION_B)
-        fake_brief.brief(
-            read_page_tool("c1", "A", 1), brief_turn(text="A says so.")
-        )
+        fake_brief.brief(read_page_tool("c1", "A", 1), brief_turn(text="A says so."))
 
         evidence = last(brief(client, documents))[1]["evidence"]
         payload = tool_payload(fake_brief, "page")["page"]
@@ -174,15 +169,11 @@ class TestPageReading:
         assert evidence[0]["method"] == "page"
         assert evidence[0]["content"] == RETENTION_A
 
-    def test_a_page_read_is_scoped_to_the_named_document(
-        self, client, app, fake_brief
-    ):
+    def test_a_page_read_is_scoped_to_the_named_document(self, client, app, fake_brief):
         """A Page of B is B's text, not whichever Document came first."""
         documents = two_documents(client, app)
         script_pages(app, documents, RETENTION_A, RETENTION_B)
-        fake_brief.brief(
-            read_page_tool("c1", "B", 1), brief_turn(text="B says so.")
-        )
+        fake_brief.brief(read_page_tool("c1", "B", 1), brief_turn(text="B says so."))
 
         evidence = last(brief(client, documents))[1]["evidence"]
 
@@ -276,9 +267,7 @@ class TestPageReading:
         documents = two_documents(client, app)
         long_page = "retention " * 700
         app.config["TEST_PARSER"].script_pages(long_page)
-        fake_brief.brief(
-            read_page_tool("c1", "A", 1), brief_turn(text="A says so.")
-        )
+        fake_brief.brief(read_page_tool("c1", "A", 1), brief_turn(text="A says so."))
 
         brief(client, documents)
         result = tool_payload(fake_brief, "page")
@@ -289,9 +278,7 @@ class TestPageReading:
         assert payload["total_chars"] == len(long_page)
         assert "truncated" in result["note"]
 
-    def test_a_blank_page_collects_no_evidence(
-        self, client, app, fake_brief
-    ):
+    def test_a_blank_page_collects_no_evidence(self, client, app, fake_brief):
         """A Page with no text is an honest empty result, not a citation."""
         documents = two_documents(client, app)
         app.config["TEST_PARSER"].script_pages("", "back matter")
@@ -341,9 +328,7 @@ class TestPageReading:
         assert refusals(recorded_traces) == ["out_of_scope"]
         assert last(stream)[0] == "abstained"
 
-    def test_page_text_can_be_cited_in_the_final_brief(
-        self, client, app, fake_brief
-    ):
+    def test_page_text_can_be_cited_in_the_final_brief(self, client, app, fake_brief):
         """A Page read joins the evidence a claim may rest on, through retrieval or through comparison alike."""
         documents = two_documents(client, app)
         script_pages(app, documents, RETENTION_A, RETENTION_B)
@@ -375,9 +360,7 @@ class TestPageReading:
 class TestEvidenceComparison:
     """What compare_evidence arranges, and what it never collects."""
 
-    def test_comparison_collects_nothing_new(
-        self, client, app, fake_brief
-    ):
+    def test_comparison_collects_nothing_new(self, client, app, fake_brief):
         """Arranging evidence is not retrieving: the ledger holds what the searches found, and the comparison links it rather than adding to it."""
         documents = two_documents(client, app)
         script_passages(app, RETENTION_A, RETENTION_B)
@@ -405,9 +388,7 @@ class TestEvidenceComparison:
             "contradictions",
         }
 
-    def test_every_comparison_entry_links_held_evidence(
-        self, client, app, fake_brief
-    ):
+    def test_every_comparison_entry_links_held_evidence(self, client, app, fake_brief):
         """No entry may introduce an id the tools never returned: the whole comparison is traceable to what the brief holds."""
         documents = two_documents(client, app)
         script_passages(app, RETENTION_A, RETENTION_B)

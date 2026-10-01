@@ -102,9 +102,7 @@ def fingerprint(value: str | None) -> dict[str, Any]:
     return {
         "redacted": REDACTED,
         "chars": len(text),
-        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[
-            :_FINGERPRINT_CHARS
-        ],
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:_FINGERPRINT_CHARS],
     }
 
 
