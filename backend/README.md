@@ -24,6 +24,22 @@ Same table as the top-level README (kept here so env docs stay local):
 ## Setup (one command, from a clean clone)
 
 ```bash
+# from the repo root: secrets, infra, migrations, worker, API, frontend
+./papermind.sh up --seed
+./papermind.sh smoke   # proves setup with a cited answer or an abstention
+./papermind.sh down    # stops processes and containers, keeps volumes
+```
+
+`up` is idempotent. Rerunning it reuses the generated Postgres password and
+`APP_SECRET`, keeps Docker volumes and uploads, and restarts anything that
+died after an interrupted run. `--seed` uploads the two CC0 sample PDFs and
+stores one abstained turn, so no provider key is needed to see a working
+conversation. Each failure prints what broke and the fix (missing tool,
+occupied port, bad secret, or a service that never came up).
+
+Manual setup still works when you want each piece by hand:
+
+```bash
 # from the repo root — generate local-only secrets once, then start infra
 backend/scripts/bootstrap-local.sh
 docker compose -f backend/compose.yaml up -d
