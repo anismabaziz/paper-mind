@@ -10,7 +10,7 @@ the spend is decided while it runs.
 
 The reach is fixed here, not by the model. ``resolve`` takes two Documents and
 refuses the brief for anything that would make the pair unreadable; the model is
-then shown the pair under two labels and given two tools, both of which can only
+then shown the pair under two labels and given four tools, all of which can only
 read inside it. The spend is bounded by :class:`BriefBudget`, checked before
 each turn rather than after it, so a brief that runs out of turns or of time
 stops with what it has instead of being cut off mid-answer.
@@ -38,6 +38,7 @@ from services.accounts.chat_settings_service import ModelCapabilities
 from services.answering import AnswerEvent, Refusal
 from services.brief import cancellation
 from services.brief.budget import BriefBudget, BriefLimits
+from services.brief.compare import QUOTED_CHARS, compare_items
 from services.brief.evidence import EvidenceLedger
 from services.brief.prompts import (
     BRIEF_PROMPT_VERSION,
@@ -47,10 +48,14 @@ from services.brief.prompts import (
 from services.brief.result import brief_from_answer
 from services.brief.scope import BriefScope
 from services.brief.tools import (
+    COMPARE_EVIDENCE,
+    READ_PAGE,
     READ_PASSAGES,
+    REFUSED_INVALID_ARGUMENTS,
     REFUSED_OUT_OF_SCOPE,
     REFUSED_REPEATED,
     REFUSED_UNKNOWN_EVIDENCE,
+    REFUSED_UNKNOWN_PAGE,
     REFUSED_CANCELLED,
     REFUSED_NOT_RUN,
     REFUSED_UNKNOWN_TOOL,
@@ -85,6 +90,10 @@ from services.telemetry.spans import error_category
 log = logging.getLogger(__name__)
 
 MAX_QUESTION_CHARS = 8192
+
+#: How much of one Page a read_page call shows. Enough to carry the Page's
+#: argument, bounded so a long Page cannot cost the brief a whole Document.
+PAGE_TEXT_CHARS = 4000
 
 #: How much fallback context a failed one-shot call is allowed to quote.
 _FALLBACK_TOKENS_PER_CHAR = 0.25
@@ -121,6 +130,15 @@ class ResolvedBrief:
     cancel: threading.Event
 
 
+@dataclass(frozen=True)
+class PageTarget:
+    """One Page read the brief may make: the Document, the Page, its pages."""
+
+    document: Any
+    page: int
+    pages: tuple[str, ...]
+
+
 class BriefService:
     """
     Runs one bounded Research Brief over two Documents.
@@ -139,6 +157,8 @@ class BriefService:
         vector_service: Any,
         tracer: Any = None,
         clock: Callable[[], float] | None = None,
+        storage: Any = None,
+        parser: Any = None,
     ) -> None:
         """
         Bind the brief to the dependencies the app serves with.
@@ -147,6 +167,9 @@ class BriefService:
         the one the running configuration asks for, so a deployment configures
         observability in settings rather than in each caller. ``clock`` is the
         brief's monotonic reading; left out, every brief reads the same clock.
+        ``storage`` and ``parser`` are what a Page read parses; left out, a
+        Page read fails rather than reading from anywhere else, because there
+        is nowhere else a brief is allowed to read from.
         """
         self._settings = settings
         self._repositories = repositories
@@ -154,6 +177,8 @@ class BriefService:
         self._vectors = vector_service
         self._tracer = tracer if tracer is not None else tracer_for(settings)
         self._clock_override = clock
+        self._storage = storage
+        self._parser = parser
 
     def _now(self) -> float:
         """
@@ -431,11 +456,25 @@ class BriefService:
             if refusal is not None:
                 resolved.trace.refused_tool(span, refusal.reason)
                 return refusal.to_result()
+            target: PageTarget | None = None
+            if call.name == READ_PAGE:
+                # Resolved before the charge, so a refused Page costs a turn
+                # but not one of the brief's tool calls: it read nothing.
+                target, refusal = self._page_target(resolved, call)
+                if refusal is not None:
+                    resolved.trace.refused_tool(span, refusal.reason)
+                    return refusal.to_result()
+                assert target is not None
             # Charged after the checks, so a refused call costs a turn but not
             # one of the brief's tool calls: it searched nothing.
             budget.charge_tool_call(fingerprint)
             if call.name == SEARCH_PASSAGES:
                 payload = self._search(resolved, call, span)
+            elif call.name == READ_PAGE:
+                assert target is not None
+                payload = self._read_page(resolved, call, target, span)
+            elif call.name == COMPARE_EVIDENCE:
+                payload = self._compare(resolved, call, span)
             else:
                 payload = self._read(resolved, call, span)
             return render_result(payload)
@@ -455,7 +494,12 @@ class BriefService:
         call is refused before a search spends a retrieval against a budget that
         has already been spent on it.
         """
-        if call.name not in (SEARCH_PASSAGES, READ_PASSAGES):
+        if call.name not in (
+            SEARCH_PASSAGES,
+            READ_PASSAGES,
+            READ_PAGE,
+            COMPARE_EVIDENCE,
+        ):
             return refuse(REFUSED_UNKNOWN_TOOL)
         spec = next(item for item in TOOL_SPECS if item.name == call.name)
         invalid = validate_arguments(spec, call.arguments)
@@ -463,11 +507,19 @@ class BriefService:
             return invalid
         if budget.repeats_call(fingerprint) >= budget.limits.max_repeated_calls:
             return refuse(REFUSED_REPEATED)
-        if call.name == SEARCH_PASSAGES:
+        if call.name in (SEARCH_PASSAGES, READ_PAGE):
             if resolved.scope.document_for_label(call.arguments["label"]) is None:
                 return refuse(REFUSED_OUT_OF_SCOPE)
         else:
-            for evidence_id in call.arguments["evidence_ids"]:
+            evidence_ids = call.arguments["evidence_ids"]
+            if call.name == COMPARE_EVIDENCE and len(set(evidence_ids)) != len(
+                evidence_ids
+            ):
+                # Comparing evidence with itself is not a comparison: the
+                # schema asks for distinct ids, and a repeated one is refused
+                # rather than arranged.
+                return refuse(REFUSED_INVALID_ARGUMENTS)
+            for evidence_id in evidence_ids:
                 if resolved.ledger.get(evidence_id) is None:
                     return refuse(REFUSED_UNKNOWN_EVIDENCE)
         return None
@@ -549,6 +601,147 @@ class BriefService:
                 for item in held
             ]
         }
+
+    def _page_target(
+        self, resolved: ResolvedBrief, call: Any
+    ) -> tuple[PageTarget | None, ToolRefusal | None]:
+        """
+        Return the Page one read_page call may read, or why it may not.
+
+        The label was already checked against the scope; what is checked here
+        needs the Document itself. The file must still exist, its active index
+        generation must still be the one the scope was resolved with — a
+        Document reindexed since the brief started is no longer the Document
+        the model was shown — and the Page must lie within the Document's own
+        bounds. A Page that fails any of these is refused before anything is
+        charged for reading it.
+        """
+        document = resolved.scope.document_for_label(call.arguments["label"])
+        if document is None:  # checked in _check
+            return None, refuse(REFUSED_OUT_OF_SCOPE)
+        file_record = self.files.get_file(document.filename) or {}
+        if not file_record:
+            return None, refuse(REFUSED_OUT_OF_SCOPE)
+        # The active generation must still be the one the scope was resolved
+        # with: a Document reindexed since the brief started is no longer the
+        # Document the model was shown, whatever its generation now reads.
+        if file_record.get("index_generation") != document.index_generation:
+            return None, refuse(REFUSED_OUT_OF_SCOPE)
+        if self._storage is None or self._parser is None:
+            raise RuntimeError("page reading is not configured for this brief")
+        try:
+            file_bytes = self._storage.open(document.filename)
+            pages = tuple(
+                self._parser.resolve(document.filename, file_bytes).extract_pages(
+                    file_bytes
+                )
+            )
+        except Exception:
+            return None, refuse(REFUSED_OUT_OF_SCOPE)
+        page = call.arguments["page"]
+        if not isinstance(page, int) or isinstance(page, bool):
+            return None, refuse(REFUSED_UNKNOWN_PAGE)
+        if page < 1 or page > len(pages):
+            return None, refuse(REFUSED_UNKNOWN_PAGE)
+        return PageTarget(document=document, page=page, pages=pages), None
+
+    def _read_page(
+        self,
+        resolved: ResolvedBrief,
+        call: Any,
+        target: PageTarget,
+        span: Any,
+    ) -> dict[str, Any]:
+        """
+        Read one Page of a scoped Document and admit it as evidence.
+
+        The Page text is bounded before it is admitted, so a long Page cannot
+        cost the brief a whole Document. The admitted evidence carries the
+        Document, the Page, and its provenance, which is what lets the final
+        brief cite Page text with the same ids it cites Passages with.
+        """
+        started = resolved.trace.clock()
+        raw = target.pages[target.page - 1] or ""
+        total_chars = len(raw)
+        text = raw[:PAGE_TEXT_CHARS]
+        truncated = total_chars > PAGE_TEXT_CHARS
+        latency_ms = round((resolved.trace.clock() - started) * 1000, 3)
+        if not text.strip():
+            resolved.trace.read(span, evidence_ids=[])
+            return {
+                "page": {
+                    "evidence_id": None,
+                    "label": target.document.label,
+                    "page": target.page,
+                    "page_count": len(target.pages),
+                    "text": "",
+                    "truncated": False,
+                    "total_chars": total_chars,
+                },
+                "note": "That Page has no text.",
+            }
+        evidence = resolved.ledger.admit_page(
+            document=target.document, page=target.page, content=text
+        )
+        resolved.trace.paged(
+            span,
+            evidence_id=evidence.evidence_id,
+            label=target.document.label,
+            document_id=target.document.document_id,
+            page=target.page,
+            page_count=len(target.pages),
+            latency_ms=latency_ms,
+            truncated=truncated,
+        )
+        return {
+            "page": {
+                "evidence_id": evidence.evidence_id,
+                "label": evidence.label,
+                "page": evidence.page,
+                "page_count": len(target.pages),
+                "text": evidence.content,
+                "truncated": truncated,
+                "total_chars": total_chars,
+            },
+            "note": (
+                "Cite this Page with its evidence id. "
+                + (
+                    "The Page was truncated to its first part."
+                    if truncated
+                    else "This is the Page in full."
+                )
+            ),
+        }
+
+    def _compare(
+        self, resolved: ResolvedBrief, call: Any, span: Any
+    ) -> dict[str, Any]:
+        """
+        Arrange held evidence side by side, collecting nothing new.
+
+        Every id was already checked against the ledger, so everything named
+        here is evidence the brief holds. Fully quoted evidence is marked
+        read, because the comparison shows its text in full; evidence longer
+        than the quote keeps whatever it had been shown. The ledger itself is
+        unchanged otherwise: a comparison links evidence, it never admits it.
+        """
+        held = [
+            evidence
+            for evidence_id in call.arguments["evidence_ids"]
+            if (evidence := resolved.ledger.get(evidence_id)) is not None
+        ]
+        started = resolved.trace.clock()
+        comparison = compare_items(held)
+        latency_ms = round((resolved.trace.clock() - started) * 1000, 3)
+        for item in held:
+            if len(item.content) <= QUOTED_CHARS:
+                resolved.ledger.read(item.evidence_id)
+        resolved.trace.compared(
+            span,
+            evidence_ids=[item.evidence_id for item in held],
+            latency_ms=latency_ms,
+        )
+        return comparison
 
     def _model_metadata(self, resolved: ResolvedBrief) -> dict[str, Any]:
         """Return the model that ran this brief, as the client persists it."""

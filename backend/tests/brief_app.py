@@ -30,6 +30,8 @@ __all__ = [
     "BriefTurn",
     "brief_turn",
     "call_tool",
+    "compare_tool",
+    "read_page_tool",
     "read_tool",
     "search_tool",
     "app",
@@ -152,6 +154,18 @@ def search_tool(call_id: str, label: str, query: str = "retention") -> BriefTurn
 def read_tool(call_id: str, *evidence_ids: str) -> BriefTurn:
     """Return a turn that asks the brief to read Passages it already holds."""
     return call_tool(call_id, "read_passages", {"evidence_ids": list(evidence_ids)})
+
+
+def read_page_tool(call_id: str, label: str, page: int = 1) -> BriefTurn:
+    """Return a turn that asks the brief to read one Page of a Document."""
+    return call_tool(call_id, "read_page", {"label": label, "page": page})
+
+
+def compare_tool(call_id: str, *evidence_ids: str) -> BriefTurn:
+    """Return a turn that asks the brief to compare evidence it already holds."""
+    return call_tool(
+        call_id, "compare_evidence", {"evidence_ids": list(evidence_ids)}
+    )
 
 
 @pytest.fixture

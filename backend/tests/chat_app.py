@@ -146,9 +146,53 @@ class _Vectors:
 class _Parser:
     """Single-chunk stand-in for the parse-and-chunk pipeline."""
 
+    def __init__(self):
+        """Start with two scripted pages per document."""
+        self._default_pages = [
+            "First page about retention and spaced practice.",
+            "Second page about attrition and massed practice.",
+        ]
+        self._pages_by_file: dict[str, list[str]] = {}
+
+    def script_pages(self, *pages: str) -> None:
+        """Return exactly these pages for every document parsed next."""
+        self._default_pages = list(pages)
+        self._pages_by_file = {}
+
+    def script_document_pages(self, pages_by_file: dict[str, list[str]]) -> None:
+        """Return these pages per stored filename."""
+        self._pages_by_file = {
+            filename: list(pages) for filename, pages in pages_by_file.items()
+        }
+
     def get_chunk_objects(self, filename, file_bytes):
         """Return one chunk."""
         return [CHUNK]
+
+    def resolve(self, filename, file_bytes=None):
+        """Return a parser bound to one filename, as the ingestor does."""
+        return _ResolvedParser(self, filename)
+
+    def _pages_for(self, filename: str) -> list[str]:
+        """Return the scripted pages for one stored filename."""
+        return list(self._pages_by_file.get(filename, self._default_pages))
+
+
+class _ResolvedParser:
+    """One document's view of the scripted parser."""
+
+    def __init__(self, parser: _Parser, filename: str):
+        """Bind the scripted pages to one stored filename."""
+        self._parser = parser
+        self._filename = filename
+
+    def extract_pages(self, file_bytes) -> list[str]:
+        """Return the scripted pages for the bound document."""
+        return self._parser._pages_for(self._filename)
+
+    def extract_text(self, file_bytes) -> str:
+        """Return the scripted pages joined, as flat text."""
+        return "\n".join(self._parser._pages_for(self._filename))
 
 
 class _Embeddings:

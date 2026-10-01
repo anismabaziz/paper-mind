@@ -39,6 +39,8 @@ def register_research_routes(app: Flask, services: "Services") -> None:
         embedding_service=services.embedding_service,
         vector_service=services.vector_service,
         tracer=services.tracer,
+        storage=services.storage,
+        parser=services.parser,
     )
 
     @app.route("/research", methods=["POST"])

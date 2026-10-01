@@ -1,8 +1,8 @@
 """
-The two tools a Research Brief may call, and what happens to every other call.
+The four tools a Research Brief may call, and what happens to every other call.
 
 A brief is allowed to look things up inside the two Documents it was given and
-nowhere else. That is enforced by having exactly two tools and giving them no
+nowhere else. That is enforced by having exactly four tools and giving them no
 argument that names anything outside the pair: there is no tool that opens a
 site, reads a file the user did not select, changes App Settings, or deletes
 anything, because there is no code here that would do it. A model that asks for
@@ -16,9 +16,11 @@ would be the model reading a Document it never named. So every argument is
 checked against the declared schema, and a call that does not fit is refused and
 recorded rather than repaired.
 
-Neither tool writes anything. ``search_passages`` retrieves, ``read_passages``
-returns text the brief already holds, and neither touches the store, the files,
-or the settings.
+No tool writes anything. ``search_passages`` retrieves, ``read_passages``
+returns text the brief already holds, ``read_page`` returns the text of one
+Page of a labelled Document, and ``compare_evidence`` arranges evidence the
+brief already holds side by side. None touches the store, the files, or the
+settings.
 """
 
 from __future__ import annotations
@@ -31,6 +33,8 @@ from services.llm.tools import ToolSpec
 
 SEARCH_PASSAGES = "search_passages"
 READ_PASSAGES = "read_passages"
+READ_PAGE = "read_page"
+COMPARE_EVIDENCE = "compare_evidence"
 
 #: Why a call was refused. These are recorded and shown, never swallowed, so a
 #: run that could not search says which of these it hit.
@@ -38,6 +42,7 @@ REFUSED_UNKNOWN_TOOL = "unknown_tool"
 REFUSED_INVALID_ARGUMENTS = "invalid_arguments"
 REFUSED_OUT_OF_SCOPE = "out_of_scope"
 REFUSED_UNKNOWN_EVIDENCE = "unknown_evidence"
+REFUSED_UNKNOWN_PAGE = "unknown_page"
 REFUSED_REPEATED = "repeated_call"
 #: Not a bad call: the reader stopped the brief before this one ran.
 REFUSED_CANCELLED = "cancelled"
@@ -46,8 +51,8 @@ REFUSED_NOT_RUN = "not_run"
 
 REFUSAL_MESSAGES: dict[str, str] = {
     REFUSED_UNKNOWN_TOOL: (
-        "No such tool. A research brief can only call search_passages and "
-        "read_passages."
+        "No such tool. A research brief can only call search_passages, "
+        "read_passages, read_page, and compare_evidence."
     ),
     REFUSED_INVALID_ARGUMENTS: (
         "Those arguments do not match the tool's schema. Call the tool again "
@@ -61,6 +66,10 @@ REFUSAL_MESSAGES: dict[str, str] = {
         "No evidence with that id was collected in this brief. Use an id from "
         "the search results you were given."
     ),
+    REFUSED_UNKNOWN_PAGE: (
+        "That Page does not exist in the labelled Document. Request a Page "
+        "within its bounds: the first Page is 1."
+    ),
     REFUSED_REPEATED: (
         "That exact call has already been made. Search with a different query, "
         "or read evidence you have not read yet."
@@ -71,7 +80,7 @@ REFUSAL_MESSAGES: dict[str, str] = {
     ),
 }
 
-#: The schema both tools declare, written once so the two providers and the
+#: The schemas the tools declare, written once so the two providers and the
 #: validator below agree on what a valid call is.
 SEARCH_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -111,6 +120,46 @@ READ_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+#: A Page number the schema accepts before the Document's own bounds are
+#: checked. The Document decides what exists — this only stops an absurd
+#: integer from reaching it.
+READ_PAGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8,
+            "description": "The labelled Document to read a Page from: A or B.",
+        },
+        "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000,
+            "description": "The 1-indexed Page to read from that Document.",
+        },
+    },
+    "required": ["label", "page"],
+    "additionalProperties": False,
+}
+
+COMPARE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "evidence_ids": {
+            "type": "array",
+            "items": {"type": "string", "pattern": r"^E[0-9]+$"},
+            "minItems": 2,
+            "maxItems": 10,
+            "description": (
+                "Ids already collected in this brief to compare side by side."
+            ),
+        },
+    },
+    "required": ["evidence_ids"],
+    "additionalProperties": False,
+}
+
 SEARCH_TOOL = ToolSpec(
     name=SEARCH_PASSAGES,
     description=(
@@ -130,7 +179,30 @@ READ_TOOL = ToolSpec(
     parameters=READ_SCHEMA,
 )
 
-TOOL_SPECS = (SEARCH_TOOL, READ_TOOL)
+READ_PAGE_TOOL = ToolSpec(
+    name=READ_PAGE,
+    description=(
+        "Read the text of one Page of one of the two labelled Documents, "
+        "given its label and 1-indexed Page number. Read-only: it returns "
+        "the Page text, truncated when the Page is long, and admits it as "
+        "evidence you may cite."
+    ),
+    parameters=READ_PAGE_SCHEMA,
+)
+
+COMPARE_TOOL = ToolSpec(
+    name=COMPARE_EVIDENCE,
+    description=(
+        "Compare two or more pieces of evidence already collected in this "
+        "brief, given their ids. Read-only: it arranges the named evidence "
+        "side by side with its similarities, differences, and candidate "
+        "contradictions, each linked to the evidence ids it came from. It "
+        "collects no new evidence; judge the comparison in the brief."
+    ),
+    parameters=COMPARE_SCHEMA,
+)
+
+TOOL_SPECS = (SEARCH_TOOL, READ_TOOL, READ_PAGE_TOOL, COMPARE_TOOL)
 
 
 @dataclass(frozen=True)
@@ -154,11 +226,11 @@ def validate_arguments(spec: ToolSpec, arguments: dict[str, Any]) -> ToolRefusal
     """
     Return the refusal when these arguments do not fit the schema, else None.
 
-    This checks the subset of JSON Schema the two tools declare, which is
+    This checks the subset of JSON Schema the tools declare, which is
     deliberately small: object type, required keys, an exact key set, and the
-    type, length, pattern, and enum each property names. A schema this module
-    cannot fully check would be a schema a model could slip past, so the two
-    tools declare nothing beyond what is checked here.
+    type, length, pattern, range, and enum each property names. A schema this module
+    cannot fully check would be a schema a model could slip past, so the tools
+    declare nothing beyond what is checked here.
     """
     schema = spec.parameters
     if schema.get("type") != "object":
@@ -208,6 +280,17 @@ def _valid_value(value: Any, schema: dict[str, Any]) -> bool:
         if item_schema is None:
             return True
         return all(_valid_value(item, item_schema) for item in value)
+    if kind == "integer":
+        # A bool is an int in Python but never a Page number the model meant.
+        if not isinstance(value, int) or isinstance(value, bool):
+            return False
+        if "minimum" in schema and value < schema["minimum"]:
+            return False
+        if "maximum" in schema and value > schema["maximum"]:
+            return False
+        if "enum" in schema and value not in schema["enum"]:
+            return False
+        return True
     # A declared property this module cannot check would be a hole, so an
     # unrecognised kind is refused rather than passed through.
     return False
