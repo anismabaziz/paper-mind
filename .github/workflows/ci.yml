@@ -177,6 +177,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Generate ephemeral test credentials
+        run: |
+          TEST_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "POSTGRES_TEST_USER=papermind_test" >> "$GITHUB_ENV"
+          echo "POSTGRES_TEST_DB=papermind_test" >> "$GITHUB_ENV"
+          echo "POSTGRES_TEST_PASSWORD=$TEST_PASSWORD" >> "$GITHUB_ENV"
+          echo "FULL_STACK_DATABASE_URL=postgresql+psycopg://papermind_test:$TEST_PASSWORD@127.0.0.1:55432/papermind_test" >> "$GITHUB_ENV"
+          echo "FULL_STACK_QDRANT_URL=http://127.0.0.1:56333" >> "$GITHUB_ENV"
+
       - name: Start Postgres and Qdrant
         run: docker compose -f ../backend/compose.test.yaml up -d --wait
         # The Playwright webServer starts the deterministic browser backend
