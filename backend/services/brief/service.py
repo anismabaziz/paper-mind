@@ -44,6 +44,7 @@ from services.brief.prompts import (
     BRIEF_SYSTEM_INSTRUCTION,
     build_brief_prompt,
 )
+from services.brief.result import brief_from_answer
 from services.brief.scope import BriefScope
 from services.brief.tools import (
     READ_PASSAGES,
@@ -549,6 +550,14 @@ class BriefService:
             ]
         }
 
+    def _model_metadata(self, resolved: ResolvedBrief) -> dict[str, Any]:
+        """Return the model that ran this brief, as the client persists it."""
+        model = resolved.request.model
+        return {
+            "provider": getattr(model, "provider", ""),
+            "model": getattr(model, "id", ""),
+        }
+
     def _complete(
         self, resolved: ResolvedBrief, budget: BriefBudget, answer: str, turn: int
     ) -> Iterator[AnswerEvent]:
@@ -560,6 +569,11 @@ class BriefService:
         is the same distinction the chat path draws, and it costs no model call:
         the answer is discarded rather than stored, because storing it would put
         an uncitable result in the transcript as though it were evidence-backed.
+
+        A brief that did collect evidence is parsed into its structured shape
+        before it is sent: the summary stays readable as the answer, and the
+        claims, gaps, and abstention status travel beside it so each part can be
+        checked against the evidence ids this run collected.
         """
         if not answer:
             yield from self._provider_failure(
@@ -582,9 +596,12 @@ class BriefService:
                     ),
                     "reason": NO_EVIDENCE,
                     "documents": resolved.scope.to_dict(),
+                    "prompt_version": BRIEF_PROMPT_VERSION,
+                    "model": self._model_metadata(resolved),
                 },
             )
             return
+        structured, invalid_ids = brief_from_answer(answer, resolved.ledger.ids())
         resolved.trace.budget(budget, evidence=resolved.ledger.held())
         resolved.trace.outcome(COMPLETE, turns=turn)
         yield AnswerEvent(
@@ -592,10 +609,16 @@ class BriefService:
             {
                 "done": True,
                 "status": COMPLETE,
-                "answer": answer,
+                "answer": structured.summary or answer.strip(),
+                "brief": structured.to_dict(),
+                "claims": [claim.to_dict() for claim in structured.claims],
+                "gaps": list(structured.gaps),
+                "abstained": structured.abstained,
+                "invalid_citations": list(invalid_ids),
                 "evidence": resolved.ledger.to_dict(),
                 "documents": resolved.scope.to_dict(),
                 "prompt_version": BRIEF_PROMPT_VERSION,
+                "model": self._model_metadata(resolved),
                 "budget": budget.usage(),
             },
         )
@@ -627,6 +650,8 @@ class BriefService:
                     "reason": NO_EVIDENCE,
                     "documents": resolved.scope.to_dict(),
                     "stopped_by": stopped_by,
+                    "prompt_version": BRIEF_PROMPT_VERSION,
+                    "model": self._model_metadata(resolved),
                 },
             )
             return
@@ -642,9 +667,19 @@ class BriefService:
                     f"({stopped_by.replace('_', ' ')}). The evidence below is "
                     "what it collected."
                 ),
+                "brief": {
+                    "summary": "",
+                    "claims": [],
+                    "gaps": [],
+                    "abstained": False,
+                },
+                "claims": [],
+                "gaps": [],
+                "abstained": False,
                 "evidence": resolved.ledger.to_dict(),
                 "documents": resolved.scope.to_dict(),
                 "prompt_version": BRIEF_PROMPT_VERSION,
+                "model": self._model_metadata(resolved),
                 "budget": budget.usage(),
             },
         )
@@ -675,8 +710,19 @@ class BriefService:
                 ),
                 "category": ("timeout" if category == "timeout" else "provider"),
                 "status": INCOMPLETE,
+                "brief": {
+                    "summary": "",
+                    "claims": [],
+                    "gaps": [],
+                    "abstained": False,
+                },
+                "claims": [],
+                "gaps": [],
+                "abstained": False,
                 "evidence": resolved.ledger.to_dict(),
                 "documents": resolved.scope.to_dict(),
+                "prompt_version": BRIEF_PROMPT_VERSION,
+                "model": self._model_metadata(resolved),
                 "budget": budget.usage(),
             },
         )

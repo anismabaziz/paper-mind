@@ -24,7 +24,7 @@ from services.prompts import sanitize
 #: Bumped whenever the brief instruction changes what the model is asked for.
 #: Returned on every brief and recorded in its trace, so two briefs are only
 #: comparable if both were asked the same way.
-BRIEF_PROMPT_VERSION = "brief-evidence-v1"
+BRIEF_PROMPT_VERSION = "brief-structured-v1"
 
 BRIEF_SYSTEM_INSTRUCTION = (
     "You answer a cross-document research question by reading two selected "
@@ -40,7 +40,17 @@ BRIEF_SYSTEM_INSTRUCTION = (
     "the tools returned to you. Never invent an id, and never cite an id that "
     "did not appear in a tool result. When the two documents do not settle a "
     "claim, say what each one says and what remains unresolved, rather than "
-    "averaging them into agreement."
+    "averaging them into agreement. "
+    "When you have finished reading, write the brief as prose followed by a "
+    "structured block: the line <brief>, then one JSON object with the keys "
+    '"summary" (one paragraph), "claims" (an ordered list of objects with '
+    '"claim", "supports" and "conflicts" lists of evidence ids such as E1), '
+    '"gaps" (questions the documents could not settle), and "abstained" '
+    "(true only when no evidence supports an answer), then the line </brief>. "
+    "Keep supporting and conflicting evidence on separate lists: a claim both "
+    "papers speak to is contested, not averaged. A claim no collected evidence "
+    "supports belongs in gaps as unresolved rather than completed from your "
+    "own knowledge."
 )
 
 
