@@ -30,6 +30,15 @@ from typing import Any, Iterable
 #: retrieval of one Document, these accumulate across a whole brief.
 EVIDENCE_PREFIX = "E"
 
+#: How a Page read is recorded as the method that collected it. Distinct from
+#: a retrieval method because no search ranked it: the model named the Page.
+PAGE_METHOD = "page"
+
+#: What marks page-level evidence as not one chunk of an index. A Page read
+#: covers a whole Page rather than one indexed chunk, so its chunk index is
+#: outside the range any chunk of the Document carries.
+PAGE_CHUNK_INDEX = -1
+
 #: How much of a Passage a search shows. Enough for the model to judge whether a
 #: Passage is worth reading, and bounded so a search's cost does not scale with
 #: how long the Passages it matched happen to be. The rest is what
@@ -167,6 +176,45 @@ class EvidenceLedger:
     def get(self, evidence_id: str) -> Evidence | None:
         """Return the evidence an id names, or None when it names nothing held."""
         return self._evidence.get(str(evidence_id).strip().upper())
+
+    def admit_page(
+        self,
+        *,
+        document: Any,
+        page: int,
+        content: str,
+    ) -> Evidence:
+        """
+        Admit the text of one Page as evidence under a stable id.
+
+        A Page read twice is one piece of evidence, not two: the same Page of
+        the same Document keeps the id it was first given, so a citation
+        written before a re-read still names the same text. The Page is
+        admitted as read, because the tool shows its text in full rather than
+        as an excerpt.
+        """
+        content_hash = _content_hash(content)
+        key = (document.document_id, f"page:{int(page)}:{content_hash}")
+        existing = self._by_hash.get(key)
+        if existing is not None:
+            return self._evidence[existing]
+        evidence = Evidence(
+            evidence_id=f"{EVIDENCE_PREFIX}{len(self._evidence) + 1}",
+            label=document.label,
+            document_id=document.document_id,
+            title=document.title,
+            document=document.filename,
+            chunk_index=PAGE_CHUNK_INDEX,
+            page=int(page),
+            rank=len(self._evidence) + 1,
+            position=len(self._evidence) + 1,
+            method=PAGE_METHOD,
+            content=content,
+            read=True,
+        )
+        self._evidence[evidence.evidence_id] = evidence
+        self._by_hash[key] = evidence.evidence_id
+        return evidence
 
     def ids(self) -> tuple[str, ...]:
         """Return every evidence id this brief holds, in admission order."""

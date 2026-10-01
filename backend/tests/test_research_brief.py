@@ -316,17 +316,22 @@ def without_capability():
 class TestToolReach:
     """What the model may call, and what it may not."""
 
-    def test_the_model_is_offered_exactly_the_two_read_tools(
+    def test_the_model_is_offered_exactly_the_four_read_tools(
         self, client, app, fake_brief
     ):
-        """The whole tool surface is two retrieval tools and nothing else."""
+        """The whole tool surface is four read-only tools and nothing else."""
         documents = two_documents(client, app)
         fake_brief.brief(search_tool("c1", "A"), brief_turn(text="They agree."))
 
         brief(client, documents)
 
         _, tools, instruction, _ = fake_brief.turns[0]
-        assert tools == ["search_passages", "read_passages"]
+        assert tools == [
+            "search_passages",
+            "read_passages",
+            "read_page",
+            "compare_evidence",
+        ]
         assert "no tool to browse the web" in instruction
         assert "delete" in instruction
 

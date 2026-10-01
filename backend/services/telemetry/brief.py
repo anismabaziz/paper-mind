@@ -233,6 +233,42 @@ class BriefTrace:
         """Record which held Passages the model asked to read."""
         span.record(evidence_ids=evidence_ids)
 
+    def paged(
+        self,
+        span: Span,
+        *,
+        evidence_id: str,
+        label: str,
+        document_id: str,
+        page: int,
+        page_count: int,
+        latency_ms: float,
+        truncated: bool,
+    ) -> None:
+        """
+        Record what one Page read returned, as provenance rather than as text.
+
+        The evidence id the Page was admitted under, its label, and its Page
+        number are the whole record: enough to see what the model was shown,
+        without the trace holding a copy of either Document.
+        """
+        span.record(
+            label=label,
+            document_id=document_id,
+            evidence_ids=[evidence_id],
+            ranks=[{"evidence_id": evidence_id, "rank": 1, "page": page}],
+            page=page,
+            page_count=page_count,
+            latency_ms=latency_ms,
+            truncated=truncated,
+        )
+
+    def compared(
+        self, span: Span, *, evidence_ids: list[str], latency_ms: float = 0.0
+    ) -> None:
+        """Record which held evidence the model asked to compare."""
+        span.record(evidence_ids=evidence_ids, latency_ms=latency_ms)
+
     def budget(
         self,
         budget: BriefBudget,
