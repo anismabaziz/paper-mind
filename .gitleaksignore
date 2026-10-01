@@ -1,5 +1,0 @@
-# Fake provider-shaped fixtures in redaction tests. The values never left the
-# test process and the file now builds them from fragments so no literal
-# secret is committed; this entry silences the historic commit that held the
-# literal before the split.
-a29dac1469487456e45c84e4d49c2f601b96c134:backend/tests/test_telemetry_redaction.py:generic-api-key:92
