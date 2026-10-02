@@ -107,3 +107,18 @@ export function toApiError(e: unknown): unknown {
 function fallbackFor(status: number): string {
   return `Request failed (${status})`;
 }
+
+/**
+ * The wording to show for a failed request.
+ *
+ * A failure from the backend already arrives as an `ApiError` holding the
+ * server's own wording, so this mostly hands that back. Anything else, a
+ * request that never reached the server or a bug in this app, falls back to
+ * the caller's wording. Returns empty string when there is nothing to show,
+ * so callers can filter on it to decide whether anything renders.
+ */
+export function getErrorMessage(e: unknown, fallback = ""): string {
+  if (e instanceof ApiError) return e.message;
+  if (e instanceof Error && e.message) return e.message;
+  return fallback;
+}

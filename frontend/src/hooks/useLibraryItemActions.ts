@@ -1,4 +1,5 @@
 import { useDeleteFile, useRetryIngestion, useCancelIngestion, useReindex } from "./useFiles";
+import { getErrorMessage } from "@/lib/api-error";
 import { libraryItemStatus } from "@/features/library/library-item-status";
 import type { LibraryFailure } from "@/features/library/LibraryFailures";
 import type { LibraryRow } from "@/features/library/LibraryList";
@@ -72,9 +73,9 @@ export function useLibraryItemActions({
     });
 
   const failures = ([
-    { key: "retry", heading: "Retry failed", detail: messageOf(retryMutation.error), reset: () => retryMutation.reset() },
-    { key: "cancel", heading: "Cancellation failed", detail: messageOf(cancelMutation.error), reset: () => cancelMutation.reset() },
-    { key: "reindex", heading: "Reindex failed", detail: messageOf(reindexMutation.error), reset: () => reindexMutation.reset() },
+    { key: "retry", heading: "Retry failed", detail: getErrorMessage(retryMutation.error), reset: () => retryMutation.reset() },
+    { key: "cancel", heading: "Cancellation failed", detail: getErrorMessage(cancelMutation.error), reset: () => cancelMutation.reset() },
+    { key: "reindex", heading: "Reindex failed", detail: getErrorMessage(reindexMutation.error), reset: () => reindexMutation.reset() },
   ] satisfies LibraryFailure[]).filter((failure) => Boolean(failure.detail));
 
   return {
@@ -83,7 +84,7 @@ export function useLibraryItemActions({
     deleteFailure: deleteMutation.isError
       ? {
           target: deleteMutation.variables as DbFile | undefined,
-          detail: deleteMutation.error instanceof Error ? deleteMutation.error.message : null,
+          detail: getErrorMessage(deleteMutation.error) || null,
           pending: deleteMutation.isPending,
           onRetry: () => {
             const target = deleteMutation.variables as DbFile | undefined;
@@ -93,9 +94,4 @@ export function useLibraryItemActions({
         }
       : null,
   };
-}
-
-/** A failed request's own wording, or nothing at all so nothing renders. */
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "";
 }

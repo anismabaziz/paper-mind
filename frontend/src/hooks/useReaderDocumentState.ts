@@ -1,4 +1,5 @@
 import { useFileStatus, useFileMeta, useDeleteFile, useRetryIngestion, useCancelIngestion } from "./useFiles";
+import { getErrorMessage } from "@/lib/api-error";
 import { readerStatusLine } from "@/features/reader/reader-status";
 import {
   isIngestionActive,
@@ -56,36 +57,31 @@ export function useReaderDocumentState(
     /** A failed status check with an earlier answer still counts as stale. */
     statusStale: statusQuery.isError && Boolean(statusQuery.data),
     statusMissing: statusQuery.isError && !statusQuery.data,
-    statusErrorText: messageOf(statusQuery.error),
+    statusErrorText: getErrorMessage(statusQuery.error) || null,
     refetchStatus: () => void statusQuery.refetch(),
     outline: metaQuery.data?.outline ?? [],
     outlinePageCount: metaQuery.data?.pageCount ?? null,
     outlineState: metaQuery.isError ? ("error" as const) : metaQuery.isLoading ? ("loading" as const) : ("ready" as const),
-    outlineErrorText: messageOf(metaQuery.error),
+    outlineErrorText: getErrorMessage(metaQuery.error) || null,
     refetchOutline: () => void metaQuery.refetch(),
     retry: {
       pending: retryMutation.isPending,
       failed: retryMutation.isError,
-      detail: messageOf(retryMutation.error),
+      detail: getErrorMessage(retryMutation.error) || null,
       run: () => file && retryMutation.mutate(file.name),
     },
     cancel: {
       pending: cancelMutation.isPending,
       failed: cancelMutation.isError,
-      detail: messageOf(cancelMutation.error),
+      detail: getErrorMessage(cancelMutation.error) || null,
       run: () => file && cancelMutation.mutate(file.name),
     },
     remove: {
       pending: deleteMutation.isPending,
       failed: deleteMutation.isError,
-      detail: messageOf(deleteMutation.error),
+      detail: getErrorMessage(deleteMutation.error) || null,
       run: () => file && deleteMutation.mutate(file),
       dismiss: () => deleteMutation.reset(),
     },
   };
-}
-
-/** A failed request's own wording, or nothing at all so nothing renders. */
-function messageOf(error: unknown): string | null {
-  return error instanceof Error ? error.message : null;
 }

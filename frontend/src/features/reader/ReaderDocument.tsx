@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { clonePdfData } from "@/lib/pdf-buffer";
 import { isDetached } from "@/lib/bytes";
 import { pdfDocumentOptions, pdfWorkerSrc } from "@/lib/pdf-assets";
+import { getErrorMessage } from "@/lib/api-error";
 import { PdfError, PdfLoading } from "./PdfStates";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc();
@@ -91,7 +92,7 @@ export default function ReaderDocument({
         if (!cancelled) setInternalData(new Uint8Array(buf));
       } catch (e) {
         if (cancelled || controller.signal.aborted) return;
-        setFetchError(e instanceof Error ? e.message : "Failed to load PDF");
+        setFetchError(getErrorMessage(e, "Failed to load PDF"));
       }
     }
 

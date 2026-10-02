@@ -1,4 +1,5 @@
 import { Loader2, RefreshCw } from "lucide-react";
+import { getErrorMessage } from "@/lib/api-error";
 import { useReindex } from "@/hooks/useFiles";
 import usePdfStore from "@/store/pdf-state";
 import type { DocumentIndex } from "@/types/db";
@@ -48,7 +49,7 @@ export default function StaleIndexNotice({ index }: { index: DocumentIndex }) {
       </p>
       {reindex.isError && (
         <p className="mt-2 text-[0.65rem] text-destructive">
-          {reindex.error instanceof Error ? reindex.error.message : "The reindex could not be queued."}
+          {getErrorMessage(reindex.error, "The reindex could not be queued.")}
         </p>
       )}
       <button

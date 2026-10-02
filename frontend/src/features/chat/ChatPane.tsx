@@ -1,4 +1,5 @@
 import { useFileStatus, useFileMessages, useReindex } from "@/hooks/useFiles";
+import { getErrorMessage } from "@/lib/api-error";
 import { useChatConversation } from "@/hooks/useChatConversation";
 import usePdfStore from "@/store/pdf-state";
 import { isIndexStale, isIngestionActive } from "@/types/db";
@@ -63,7 +64,7 @@ export function ChatPane() {
           statusError={
             file && checkProcessedQuery.isError && !checkProcessedQuery.data
               ? {
-                  text: messageOf(checkProcessedQuery.error),
+                  text: getErrorMessage(checkProcessedQuery.error) || null,
                   onRetry: () => void checkProcessedQuery.refetch(),
                 }
               : null
@@ -76,12 +77,11 @@ export function ChatPane() {
           conversationError={
             file && messagesQuery.isError
               ? {
-                  text: messageOf(messagesQuery.error),
+                  text: getErrorMessage(messagesQuery.error) || null,
                   onRetry: () => void messagesQuery.refetch(),
                 }
               : null
-          }
-          showPrompts={Boolean(
+          }          showPrompts={Boolean(
             file &&
               isProcessed &&
               !isIndexing &&
@@ -156,9 +156,4 @@ export function ChatPane() {
       />
     </section>
   );
-}
-
-/** A failed request's own wording, or nothing at all so nothing renders. */
-function messageOf(error: unknown): string | null {
-  return error instanceof Error ? error.message : null;
 }

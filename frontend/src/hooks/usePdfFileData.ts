@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getErrorMessage } from "@/lib/api-error";
 
 // Single owner of a Document's fetched bytes. The source is never handed to
 // pdf.js directly — each Renderer clones it (see lib/pdf-buffer) because the
@@ -34,7 +35,7 @@ export function usePdfFileData(file: { id: string; url: string } | null) {
       } catch (e) {
         if (cancelled || controller.signal.aborted) return;
         setData(null);
-        setError(e instanceof Error ? e.message : "Failed to load PDF");
+        setError(getErrorMessage(e, "Failed to load PDF"));
       }
     }
     load();

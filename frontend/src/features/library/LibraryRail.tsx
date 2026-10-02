@@ -8,6 +8,7 @@ import useSettingsUi from "@/store/settings-ui";
 import useBriefUi from "@/store/brief-ui";
 import useMobileUi from "@/store/mobile-ui";
 import { isBriefBlocked, isBriefReadable } from "@/services/research";
+import { getErrorMessage } from "@/lib/api-error";
 import type { LibraryFailure } from "./LibraryFailures";
 import LibraryFailures, { DeleteFailure } from "./LibraryFailures";
 import LibraryList from "./LibraryList";
@@ -57,7 +58,7 @@ export function LibraryRail() {
       queryClient.invalidateQueries({ queryKey: ["files"] });
     },
     onError: (err) => {
-      setUploadError(err instanceof Error ? err.message : String(err));
+      setUploadError(getErrorMessage(err, "Upload failed. Try again."));
     },
   });
 
@@ -122,7 +123,7 @@ export function LibraryRail() {
                   ? "empty"
                   : "ready"
           }
-          errorText={messageOf(filesQuery.error)}
+          errorText={getErrorMessage(filesQuery.error)}
           onRetryLoad={() => filesQuery.refetch()}
           onUpload={() => fileInputRef.current?.click()}
           onShowLibrary={() => listing.setTab("library")}
@@ -136,9 +137,4 @@ export function LibraryRail() {
       />
     </aside>
   );
-}
-
-/** A failed request's own wording, or nothing at all so nothing renders. */
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "";
 }

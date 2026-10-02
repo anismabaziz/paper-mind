@@ -8,6 +8,7 @@ import {
   isBriefReadable,
 } from "@/services/research";
 import { getSettings } from "@/services/settings";
+import { getErrorMessage } from "@/lib/api-error";
 import { useFiles } from "@/hooks/useFiles";
 import { useBriefRun } from "@/hooks/useBriefRun";
 import type { File as DbFile } from "@/types/db";
@@ -89,7 +90,7 @@ function ResearchBriefDialogContent() {
   // listing's: the two answer different questions, and a reader told only
   // "something is wrong" learns nothing about what to do next.
   const serverReason =
-    scopeQuery.isError && scopeQuery.error instanceof Error ? scopeQuery.error.message : null;
+    scopeQuery.isError ? getErrorMessage(scopeQuery.error) || null : null;
   const reason = listingReason ?? serverReason;
   const canStart =
     listingReason === null &&
@@ -165,7 +166,7 @@ function ResearchBriefDialogContent() {
                     ? "tooFew"
                     : "ready"
             }
-            libraryError={messageOf(filesQuery.error)}
+            libraryError={getErrorMessage(filesQuery.error) || null}
             onRetryLibrary={() => filesQuery.refetch()}
             files={readable}
             selected={selected}
@@ -190,9 +191,4 @@ function ResearchBriefDialogContent() {
       </div>
     </div>
   );
-}
-
-/** A failed request's own wording, or nothing at all so nothing renders. */
-function messageOf(error: unknown): string | null {
-  return error instanceof Error ? error.message : null;
 }

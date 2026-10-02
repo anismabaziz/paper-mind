@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  BriefRequestError,
   briefStream,
   cancelBrief,
   loadBrief,
   saveBrief,
 } from "@/services/research";
+import { getErrorMessage } from "@/lib/api-error";
 import { NO_BUDGET, type Run } from "@/features/brief/brief-run";
 
 /**
@@ -153,11 +153,7 @@ export function useBriefRun({
         );
         return;
       }
-      setFailure(
-        error instanceof BriefRequestError || error instanceof Error
-          ? error.message
-          : "The brief could not be read. Try again.",
-      );
+      setFailure(getErrorMessage(error, "The brief could not be read. Try again."));
       setRun({ state: "idle" });
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;

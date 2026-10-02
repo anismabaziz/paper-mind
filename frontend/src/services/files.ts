@@ -1,5 +1,5 @@
 import client, { apiBaseUrl } from "./client";
-import { readError, readErrorResponse } from "@/lib/api-error";
+import { getErrorMessage, readError, readErrorResponse } from "@/lib/api-error";
 import { File as FileType, DocumentIndex, IngestionJob } from "@/types/db";
 
 interface IGetFiles {
@@ -167,10 +167,10 @@ export function classifyChatRequestError(error: unknown): {
   message: string;
   needsSettings: boolean;
 } {
-  const message =
-    error instanceof Error && error.message
-      ? error.message
-      : "The connection closed before the answer could be read.";
+  const message = getErrorMessage(
+    error,
+    "The connection closed before the answer could be read.",
+  );
   if (error instanceof StreamProtocolError)
     return { failure: "interrupted", message, needsSettings: false };
   if (SETTINGS_ERROR_PATTERNS.some((p) => message.includes(p))) {
