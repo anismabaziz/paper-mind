@@ -115,7 +115,7 @@ their vectors, and the database credentials that guard them must never reach
 another machine on the network unless you explicitly allow it.
 
 - Postgres (`5432`), Qdrant HTTP (`6333`), and Qdrant gRPC (`6334`) publish
-  on `127.0.0.1` only, in both `compose.yaml` and `compose.test.yaml`.
+  on `127.0.0.1` only, in `compose.yaml`.
 - The Postgres password is generated per machine by
   `backend/scripts/bootstrap-local.sh` into gitignored `backend/.infra.env`
   — no fixed default ships in source control.
@@ -165,21 +165,13 @@ each ingestion stage. Configure `MAX_INGESTION_PAGES`,
 `MAX_INGESTION_SECONDS`, and `MAX_INGESTION_MEMORY_BYTES` to bound work per
 job. `uv run python worker.py --once` drains the current queue and exits.
 
-## Tests
-
-The default suite is fast and uses fakes with in-memory SQLite:
+## Checks
 
 ```bash
-uv run pytest
+uv run ruff check . && uv run mypy
 ```
 
-The full-stack suite serves the Flask app over HTTP, starts pinned disposable Postgres and Qdrant containers, and applies every migration to a fresh database:
-
-```bash
-./run-full-stack-tests.sh
-```
-
-Its embedding, reranking, and chat providers are deterministic and local. The test uploads and parses the sample PDF, indexes it in Qdrant, streams an answer, inspects Postgres and Qdrant state, injects service failures, and removes all test data and containers on exit. No model API key is required.
+Ruff, format, and mypy are the gate.
 
 ## Auditing dependencies and models
 
@@ -309,7 +301,7 @@ the claims block the model wrote, which is stripped before the answer is stored
 but was billed for. The token totals and the dollar figure count the same cases:
 the ones that reached a model and answered.
 
-`uv run pytest` runs the whole thing offline against deterministic embedding,
+The harness runs the whole thing offline against deterministic embedding,
 vector store, and provider doubles. No Qdrant, no LLM, no paid calls.
 
 Live run, opt-in because it indexes real documents and (optionally) bills a

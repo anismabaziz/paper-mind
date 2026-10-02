@@ -12,13 +12,4 @@ export function clonePdfData(data: Uint8Array | null | undefined): { data: Uint8
   return { data: data.slice() };
 }
 
-// Bytes still held for one Document: the fetched source plus one clone per
-// mounted Document. Switching Documents must drop the previous set so only
-// the current Document counts.
-export function retainedBytes(buffers: Array<Uint8Array | null | undefined>): number {
-  let total = 0;
-  for (const buffer of buffers) {
-    if (buffer != null) total += buffer.byteLength;
-  }
-  return total;
-}
+

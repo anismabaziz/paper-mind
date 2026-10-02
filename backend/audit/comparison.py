@@ -38,7 +38,6 @@ DEPENDENCY_AND_MODEL_FILES = frozenset(
         "frontend/package.json",
         "backend/services/models.py",
         "backend/compose.yaml",
-        "backend/compose.test.yaml",
     }
 )
 

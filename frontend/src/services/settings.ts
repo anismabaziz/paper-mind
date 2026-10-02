@@ -18,8 +18,6 @@ export interface IModelCatalog {
   [provider: string]: IModelCapabilities[];
 }
 
-export type ISupportedModels = IModelCatalog;
-
 export interface ISettings {
   provider: string | null;
   model: string | null;
@@ -30,8 +28,6 @@ export interface ISettings {
 export async function getSettings() {
   return (await client.get<ISettings>("/settings")).data;
 }
-
-export type ISaveSettingsPayload = ISettingsCandidate;
 
 export async function saveSettings(
   payload: ISettingsCandidate,

@@ -62,8 +62,7 @@ Commands executed and results:
 - [ ] Lint passes (`ruff`, `flake8`, or your configured tool), or each
       pre-existing failure is unchanged and linked to an issue; the modified
       files pass the targeted check.
-- [ ] Tests pass (`pytest`, or your configured runner), or each pre-existing
-      failure is identified and linked to an issue in the proof.
+- [ ] Type-check passes (`mypy`, or your configured tool).
 - [ ] Allowed **and** denied access is covered when permissions change.
 - [ ] Migrations are provided and a dry-run check detects nothing missing.
 - [ ] Not applicable (justification):

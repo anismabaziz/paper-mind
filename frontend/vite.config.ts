@@ -1,4 +1,3 @@
-/// <reference types="vitest/config" />
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -43,14 +42,5 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
-  },
-  test: {
-    environment: "jsdom",
-    env: {
-      VITE_API_URL: "http://127.0.0.1:3000",
-    },
-    // Playwright browser tests live in e2e/ and run under `npm run test:e2e`,
-    // not Vitest.
-    exclude: ["e2e/**", "node_modules/**", "dist/**"],
   },
 });

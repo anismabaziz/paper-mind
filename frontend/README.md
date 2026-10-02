@@ -15,7 +15,4 @@ vendored from `pdfjs-dist` by `scripts/vendor-pdf-assets.mjs` (runs before
 `dev` and `build`); their licenses are listed in the root
 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 
-Checks: `npm run lint`, `npm test -- --run`, `npm run build` (type-checks
-first). Browser workflows live in `e2e/` and need the backing services:
-`docker compose -f ../backend/compose.test.yaml up -d --wait`, then
-`npm run test:e2e`.
+Checks: `npm run lint` and `npm run build` (type-checks first).

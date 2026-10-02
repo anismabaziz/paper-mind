@@ -75,21 +75,6 @@ export type IBriefLimits = Pick<
  */
 export type BriefStatus = "complete" | "incomplete";
 
-/** Why the server would not start a brief at all. */
-export type BriefRefusalCategory =
-  | "brief_scope_invalid"
-  | "file_not_found"
-  | "index_stale"
-  | "index_pending"
-  | "document_indexing"
-  | "document_deleting"
-  | "research_brief_unsupported_model"
-  | "no_provider_configured"
-  | "incomplete_settings"
-  | "unsupported_provider"
-  | "unsupported_model"
-  | "secrets_resave_required";
-
 export interface IBriefStart {
   briefId: string;
   documents: IBriefDocument[];
@@ -601,15 +586,6 @@ export function loadBrief(): ISavedBrief | null {
     return parsed as ISavedBrief;
   } catch {
     return null;
-  }
-}
-
-/** Forget the saved brief, so a new question starts clean. */
-export function clearSavedBrief(): void {
-  try {
-    localStorage.removeItem(SAVED_BRIEF_KEY);
-  } catch {
-    // Ignored: nothing to forget is also a clean start.
   }
 }
 

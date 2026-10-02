@@ -321,23 +321,15 @@ can run it. It cannot execute code, browse sites, change settings, or
 delete Documents. Measured behaviour is in
 [`2026-09-brief-tool-use-v1`](backend/evaluation/reports/2026-09-brief-tool-use-v1/).
 
-## Testing
-
-Run the fast suite against fakes and in-memory SQLite:
+## Checks
 
 ```bash
-cd backend
-uv run pytest
+cd backend && uv run ruff check . && uv run mypy
+cd ../frontend && npm run lint && npm run build
 ```
 
-Run the full HTTP workflow against disposable Postgres and Qdrant services:
-
-```bash
-cd backend
-./run-full-stack-tests.sh
-```
-
-The full-stack run applies every migration to an empty database, uses deterministic local embedding, reranking, and chat providers, and removes its database, collection, and containers when it finishes. It needs Docker but no model API keys or paid services.
+Lint, type-check, and the production build are the gate. CI runs the same
+three plus the evaluation report thresholds.
 
 The evaluator (`backend/evaluation/`) runs a versioned labeled case set
 (`backend/evaluation/datasets/`) through the production answer path and
@@ -428,8 +420,7 @@ silently ignored, and a scheduled job flags acceptances that no longer match
 anything — a decision that outlived the package it was about.
 
 **Images.** Postgres and Qdrant are pinned by digest in
-[`backend/compose.yaml`](backend/compose.yaml) and
-[`backend/compose.test.yaml`](backend/compose.test.yaml), so a re-pushed tag
+[`backend/compose.yaml`](backend/compose.yaml), so a re-pushed tag
 cannot swap the database out from under an existing volume. The tag stays in
 the reference as the readable label; the digest decides which bytes run. To
 move a pin forward, resolve the new index digest with
