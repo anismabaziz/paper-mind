@@ -23,7 +23,7 @@ from typing import Any
 
 from services.models import model_source
 from services.parsing.document_parser import PARSER_VERSION
-from services.retrieval.hybrid import SPARSE_METHOD, TOKENIZER_VERSION
+from services.retrieval.vector_service import SPARSE_METHOD, TOKENIZER_VERSION
 
 # Bumped whenever the Qdrant collection shape changes in a way that makes
 # previously stored points unusable.

@@ -41,6 +41,11 @@ class Services:
     @classmethod
     def from_settings(cls, app_settings: Settings) -> "Services":
         """Build the production graph from validated settings."""
+        embedding_service = LocalEmbeddingService(
+            app_settings.embedding.embedding_model,
+            revision=app_settings.embedding.revision,
+            trust_remote_code=app_settings.embedding.trust_remote_code,
+        )
         return cls(
             settings=app_settings,
             repositories=build_repositories(),
@@ -50,11 +55,7 @@ class Services:
                 app_settings.chunking.chunk_size_tokens,
                 app_settings.chunking.chunk_overlap_tokens,
             ),
-            embedding_service=LocalEmbeddingService(
-                app_settings.embedding.embedding_model,
-                revision=app_settings.embedding.revision,
-                trust_remote_code=app_settings.embedding.trust_remote_code,
-            ),
+            embedding_service=embedding_service,
             vector_service=VectorService(
                 get_vector_index(),
                 RerankerService(
@@ -63,6 +64,7 @@ class Services:
                     revision=app_settings.rerank.revision,
                     trust_remote_code=app_settings.rerank.trust_remote_code,
                 ),
+                embedding_service=embedding_service,
             ),
             chat_provider_factory=build_chat_provider,
             api_key_verifier=verify_api_key,

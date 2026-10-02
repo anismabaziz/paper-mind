@@ -36,7 +36,6 @@ def register_research_routes(app: Flask, services: "Services") -> None:
     brief_service = BriefService(
         settings=services.settings,
         repositories=services.repositories,
-        embedding_service=services.embedding_service,
         vector_service=services.vector_service,
         tracer=services.tracer,
         storage=services.storage,

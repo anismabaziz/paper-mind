@@ -194,13 +194,11 @@ def _one_case(
     stored = environment.stored_name(case.document)
     record = environment.repositories.files.get_file(stored) or {}
     question = _question_for(environment, case, experiment)
-    embedding = environment.embedding_service.embed_texts(question)[0]
     started = environment.clock()
-    result = environment.vector_service.query_vectors(
-        embedding,
+    result = environment.vector_service.retrieve(
+        question,
         stored,
         top_k=experiment.candidate_depth or FETCH_K,
-        query_text=question,
         rerank=_rerank_for(environment, experiment),
         method=experiment.method,
         generation=record.get("index_generation"),

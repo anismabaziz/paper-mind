@@ -154,7 +154,6 @@ class BriefService:
         *,
         settings: Any,
         repositories: Any,
-        embedding_service: Any,
         vector_service: Any,
         tracer: Any = None,
         clock: Callable[[], float] | None = None,
@@ -174,7 +173,6 @@ class BriefService:
         """
         self._settings = settings
         self._repositories = repositories
-        self._embeddings = embedding_service
         self._vectors = vector_service
         self._tracer = tracer if tracer is not None else tracer_for(settings)
         self._clock_override = clock
@@ -539,12 +537,10 @@ class BriefService:
         assert document is not None  # checked in _check
         query = call.arguments["query"]
         file_record = self.files.get_file(document.filename) or {}
-        embedding = self._embeddings.embed_texts(query)[0]
         started = resolved.trace.clock()
-        result: RetrievalResult = self._vectors.query_vectors(
-            embedding,
+        result: RetrievalResult = self._vectors.retrieve(
+            query,
             document.filename,
-            query_text=query,
             generation=file_record.get("index_generation"),
             include_legacy=file_record.get("index_generation") is None,
         )

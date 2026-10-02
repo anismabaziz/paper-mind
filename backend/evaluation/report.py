@@ -39,8 +39,12 @@ from services.answering import AnswerSettings
 from services.citations import PROMPT_VERSION
 from services.indexing.manifest import COLLECTION_SCHEMA_VERSION
 from services.models import model_source
-from services.retrieval.hybrid import RRF_K, TOKENIZER_VERSION
-from services.retrieval.vector_service import FETCH_K, MAX_RETRIEVED_SOURCES
+from services.retrieval.vector_service import (
+    FETCH_K,
+    MAX_RETRIEVED_SOURCES,
+    RRF_K,
+    TOKENIZER_VERSION,
+)
 
 #: Bumped when the shape of a report changes, so an old directory is not read
 #: as a current one.

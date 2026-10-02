@@ -15,6 +15,7 @@ from services.retrieval.base import (
 )
 from services.retrieval.hybrid import (
     DEFAULT_FETCH_K,
+    RRF_K,
     SPARSE_METHOD,
     TOKENIZER_VERSION,
     build_sparse_vector,
@@ -80,6 +81,17 @@ def matches_to_sources(matches, filename):
             }
         )
     return sources
+
+
+def estimate_sparse_bytes(text: str) -> int:
+    """
+    Return the stored byte estimate for one Passage's sparse vector.
+
+    The ingestion guard budgets output bytes without indexing anything, so it
+    asks here instead of building sparse vectors itself: the tokenizer and
+    the per-term width stay behind the retrieval seam.
+    """
+    return len(build_sparse_vector(text)["indices"]) * 16
 
 
 def build_vectors_from_chunks(
@@ -228,10 +240,23 @@ class VectorService:
 
     UPSERT_BATCH_SIZE = 100
 
-    def __init__(self, store: VectorStore, reranker: Reranker | None = None):
-        """Bind the store to index and query; the reranker is optional."""
+    def __init__(
+        self,
+        store: VectorStore,
+        reranker: Reranker | None = None,
+        *,
+        embedding_service,
+    ):
+        """
+        Bind the store to index and query; the reranker is optional.
+
+        ``embedding_service`` is what one Retrieval embeds its text with, so
+        a call takes text in and the embed-then-query pair cannot drift apart
+        across callers.
+        """
         self._store = store
         self._reranker = reranker
+        self._embeddings = embedding_service
 
     def upsert_chunks(
         self,
@@ -296,30 +321,33 @@ class VectorService:
         ]
         return self.upsert_chunks(embeddings, chunks, filename, generation=generation)
 
-    def query_vectors(
+    def retrieve(
         self,
-        embedding,
+        query_text,
         filename,
-        top_k=FETCH_K,
-        query_text=None,
-        rerank=None,
-        method: RetrievalMethod | None = None,
+        *,
         generation: int | None = None,
         include_legacy: bool = False,
+        top_k=FETCH_K,
+        method: RetrievalMethod | None = None,
+        rerank=None,
     ) -> RetrievalResult:
         """
         Return shaped sources with an explicit method and empty or success outcome.
 
-        Queries without usable sparse terms select dense retrieval and record
-        that choice in the result.
+        One text in, one embedding inside: the caller passes the question (the
+        answering path its expanded text, the brief path its raw tool query)
+        and never pre-embeds. Queries without usable sparse terms select dense
+        retrieval and record that choice in the result.
         """
         if method not in {None, "dense", "sparse", "hybrid"}:
             raise VectorStoreConfigurationError(
                 f"Unsupported retrieval method: {method}"
             )
 
+        embedding = self._embeddings.embed_texts(query_text)[0]
         sparse = None
-        if query_text is not None and method != "dense":
+        if method != "dense":
             sparse = build_sparse_vector(query_text)
             if not sparse["indices"]:
                 sparse = None

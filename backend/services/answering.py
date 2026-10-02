@@ -318,7 +318,6 @@ class AnswerService:
         *,
         settings: Settings,
         repositories: Any,
-        embedding_service: Any,
         vector_service: Any,
         tracer: Any = None,
         clock: Callable[[], float] = time.monotonic,
@@ -332,7 +331,6 @@ class AnswerService:
         """
         self._settings = settings
         self._repositories = repositories
-        self._embeddings = embedding_service
         self._vectors = vector_service
         self._tracer = tracer if tracer is not None else tracer_for(settings)
         self._clock = clock
@@ -552,11 +550,9 @@ class AnswerService:
             index_generation=file_record.get("index_generation"),
             expansion_method=expansion.method,
         ) as span:
-            query_embedding = self._embeddings.embed_texts(expansion.expanded_query)[0]
-            retrieval_result = self._vectors.query_vectors(
-                query_embedding,
+            retrieval_result = self._vectors.retrieve(
+                expansion.expanded_query,
                 request.filename,
-                query_text=expansion.expanded_query,
                 generation=file_record.get("index_generation"),
                 include_legacy=file_record.get("index_generation") is None,
             )

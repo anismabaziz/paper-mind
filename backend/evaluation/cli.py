@@ -267,16 +267,17 @@ def _environment(
     from services.retrieval.vector_service import VectorService
 
     settings_module.set_settings(app_settings)
+    embedding_service = LocalEmbeddingService(
+        app_settings.embedding.embedding_model,
+        revision=app_settings.embedding.revision,
+        trust_remote_code=app_settings.embedding.trust_remote_code,
+    )
     return build_environment(
         dataset,
         settings=app_settings,
         session_factory=None,
         storage=get_storage(),
-        embedding_service=LocalEmbeddingService(
-            app_settings.embedding.embedding_model,
-            revision=app_settings.embedding.revision,
-            trust_remote_code=app_settings.embedding.trust_remote_code,
-        ),
+        embedding_service=embedding_service,
         vector_service=VectorService(
             get_vector_index(),
             RerankerService(
@@ -289,6 +290,7 @@ def _environment(
                     else rerank_enabled
                 ),
             ),
+            embedding_service=embedding_service,
         ),
         chat_provider_factory=generator_factory(),
         documents_prefix=documents_prefix,

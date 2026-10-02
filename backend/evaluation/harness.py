@@ -61,7 +61,6 @@ class EvaluationEnvironment:
     repositories: Repositories
     storage: Any
     parser: DocumentIngestor
-    embedding_service: EmbeddingService
     vector_service: VectorService
     answer_service: AnswerService
     chat_provider_factory: Callable[[ChatCredentials], LLMProvider]
@@ -155,11 +154,9 @@ def require_hybrid_retrieval(
         raise VectorStoreConfigurationError(
             f"{filename} is not stored, so retrieval cannot be checked"
         )
-    embedding = environment.embedding_service.embed_texts(CONTRACT_PROBE_QUERY)[0]
-    result = environment.vector_service.query_vectors(
-        embedding,
+    result = environment.vector_service.retrieve(
+        CONTRACT_PROBE_QUERY,
         filename,
-        query_text=CONTRACT_PROBE_QUERY,
         generation=record.get("index_generation"),
         include_legacy=record.get("index_generation") is None,
     )
@@ -199,7 +196,6 @@ def build_environment(
     answer_service = AnswerService(
         settings=settings,
         repositories=repositories,
-        embedding_service=embedding_service,
         vector_service=vector_service,
         clock=clock,
     )
@@ -240,7 +236,6 @@ def build_environment(
         repositories=repositories,
         storage=storage,
         parser=parser,
-        embedding_service=embedding_service,
         vector_service=vector_service,
         answer_service=answer_service,
         chat_provider_factory=chat_provider_factory,

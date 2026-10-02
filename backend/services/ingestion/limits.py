@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from services.retrieval.hybrid import build_sparse_vector
+from services.retrieval.vector_service import estimate_sparse_bytes
 from settings import (
     DEFAULT_MAX_INGESTION_MEMORY_BYTES,
     DEFAULT_MAX_INGESTION_OUTPUT_BYTES,
@@ -145,8 +145,7 @@ def estimate_output_bytes(embeddings: list[Any], chunks: list[Any]) -> int:
             text = getattr(chunks[index], "text", "")
             if isinstance(text, str):
                 total += len(text.encode("utf-8"))
-                sparse = build_sparse_vector(text)
-                total += len(sparse["indices"]) * 16
+                total += estimate_sparse_bytes(text)
     return total
 
 
