@@ -537,7 +537,11 @@ export interface IBriefScope {
  * the brief will use come back with it.
  */
 export async function checkBriefScope(documents: string[], signal?: AbortSignal) {
-  const params = documents.flatMap((name) => ["documents", name]);
+  // One repeated `documents` key per Document. A flat array is serialised as
+  // indexed keys instead, so the server read the pair as no Documents at all
+  // and refused it as one that was never two.
+  const params = new URLSearchParams();
+  for (const name of documents) params.append("documents", name);
   const response = await client.get<IBriefScope>("/research/scope", { params, signal });
   return response.data;
 }
