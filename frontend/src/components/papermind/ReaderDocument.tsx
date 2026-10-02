@@ -6,6 +6,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import type { File as FileType } from "@/types/db";
 import { cn } from "@/lib/utils";
 import { clonePdfData } from "@/lib/pdf-buffer";
+import { isDetached } from "@/lib/bytes";
 import { pdfDocumentOptions, pdfWorkerSrc } from "@/lib/pdf-assets";
 import { FailureNotice } from "./FailureNotice";
 
@@ -39,6 +40,16 @@ function PdfLoading({ label = "Loading document…" }: { label?: string }) {
       <p className="font-mono text-xs text-ink-faint">{label}</p>
     </div>
   );
+}
+
+// A Document cannot be rendered from a detached buffer, so a source that pdf.js
+// spent is reported as no bytes rather than as a Document that loads blank.
+function cloneSource(data: Uint8Array | null): { data: Uint8Array } | null {
+  try {
+    return clonePdfData(data);
+  } catch {
+    return null;
+  }
 }
 
 function PdfError({ message, onRetry }: { message: string; onRetry?: () => void }) {
@@ -81,15 +92,20 @@ export default function ReaderDocument({
 
   // Each Document owns exactly one clone: pdf.js transfers the buffer to its
   // worker and detaches it, so the fetched source is never handed over
-  // directly. Remounting (including StrictMode remounts) clones again.
-  const [fileData, setFileData] = useState<{ data: Uint8Array } | null>(() => clonePdfData(data));
+  // directly. The clone remembers its source, so a re-render reuses it instead
+  // of building a copy of the same bytes — pdf.js reads a new `file` identity
+  // as a different Document and reloads what is already on its way.
+  const [clone, setClone] = useState<{ source: Uint8Array | null; data: { data: Uint8Array } | null }>(
+    () => ({ source: data, data: cloneSource(data) }),
+  );
   useEffect(() => {
-    try {
-      setFileData(clonePdfData(data));
-    } catch {
-      setFileData(null);
-    }
+    setClone((prev) => {
+      if (data == null) return prev.source === null ? prev : { source: null, data: null };
+      if (prev.source === data && prev.data !== null && !isDetached(prev.data.data)) return prev;
+      return { source: data, data: cloneSource(data) };
+    });
   }, [data, file.id]);
+  const fileData = clone.data;
 
   useEffect(() => {
     if (externalData !== undefined) return;
