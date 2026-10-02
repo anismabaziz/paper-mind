@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { cn } from "@/lib/utils";
 import { isDetached } from "@/lib/bytes";
 import { clonePdfData } from "@/lib/pdf-buffer";
 import { pdfDocumentOptions, pdfWorkerSrc } from "@/lib/pdf-assets";
 import { ThumbnailPlaceholder } from "./PageStripPlaceholder";
+import { FailureNotice } from "./FailureNotice";
 import {
   STRIP_THUMB_GAP,
   STRIP_THUMB_WIDTH,
@@ -12,6 +13,23 @@ import {
 } from "@/lib/page-strip-window";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc();
+
+// Built once. react-pdf reloads the whole Document whenever `options` changes
+// identity, and every load transfers the buffer to the worker — so a fresh
+// object each render made the second render ask pdf.js to load bytes that were
+// already detached, which rejects and blanks the strip.
+const documentOptions = pdfDocumentOptions();
+
+// A detached view renders blank, so it is never worth cloning: the caller
+// refetches instead and this reports "no bytes" until fresh ones arrive.
+function cloneSource(source: Uint8Array | null) {
+  if (!source || isDetached(source)) return null;
+  try {
+    return clonePdfData(source);
+  } catch {
+    return null;
+  }
+}
 
 type Props = {
   fileId: string;
@@ -30,18 +48,18 @@ export default function PageStrip({ fileId, source, pageCount, activePage, onSel
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Each Renderer gets its own copy: pdf.js transfers the buffer to the
   // worker and detaches it, so sharing one view would blank the sheet Renderer.
   // Remounting per Document (keyed on fileId) releases the previous clone.
-  const fileData = useMemo(() => {
-    if (!source || isDetached(source)) return null;
-    try {
-      return clonePdfData(source);
-    } catch {
-      return null;
-    }
+  // The clone remembers its source so re-renders never rebuild it — pdf.js
+  // reloads on a new identity and would be handed the spent copy again.
+  const [clone, setClone] = useState(() => ({ source, data: cloneSource(source) }));
+  useEffect(() => {
+    setClone((prev) => (prev.source === source ? prev : { source, data: cloneSource(source) }));
   }, [source]);
+  const fileData = clone.data;
 
   useEffect(() => {
     if (source && isDetached(source)) onBufferDetached();
@@ -91,6 +109,25 @@ export default function PageStrip({ fileId, source, pageCount, activePage, onSel
 
   const safeCount = Number.isFinite(pageCount) && pageCount > 0 ? Math.floor(pageCount) : 0;
   if (safeCount === 0) return <ThumbnailPlaceholder count={4} />;
+  // A failed load is not still loading, and the placeholder is
+  // indistinguishable from a working strip. Say what broke and offer the one
+  // action that clears it: the Document is remounted on a fresh clone, since
+  // the bytes it already handed pdf.js are spent.
+  if (loadError) {
+    return (
+      <div className="px-4 py-3" data-testid="page-strip-error">
+        <FailureNotice
+          title="Page thumbnails unavailable"
+          message={`${loadError} The pages themselves are still readable below.`}
+          actionLabel="Retry thumbnails"
+          onAction={() => {
+            setLoadError(null);
+            setClone({ source, data: cloneSource(source) });
+          }}
+        />
+      </div>
+    );
+  }
   if (!fileData) return <ThumbnailPlaceholder count={Math.min(safeCount, 8)} />;
 
   const { start, end } = pageStripWindow({
@@ -109,9 +146,10 @@ export default function PageStrip({ fileId, source, pageCount, activePage, onSel
       <Document
         key={`${fileId}-thumbs`}
         file={fileData}
-        options={pdfDocumentOptions()}
+        options={documentOptions}
         loading={<ThumbnailPlaceholder count={Math.min(safeCount, 8)} />}
-        error={<ThumbnailPlaceholder count={Math.min(safeCount, 8)} />}
+        error={null}
+        onLoadError={(error: Error) => setLoadError(error.message)}
       >
         <div className="flex gap-2">
           {leftSpacer > 0 && <div aria-hidden style={{ width: leftSpacer }} className="shrink-0" />}
