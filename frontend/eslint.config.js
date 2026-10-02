@@ -25,4 +25,14 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // A component that has to be scrolled to understand is a component with
+    // more than one thing in it. components/ui/ is vendored component code kept
+    // close to upstream, so it is not ours to reshape.
+    files: ['src/features/**/*.{ts,tsx}', 'src/components/*.{ts,tsx}'],
+    ignores: ['src/components/ui/**'],
+    rules: {
+      'max-lines': ['error', { max: 200 }],
+    },
+  },
 )

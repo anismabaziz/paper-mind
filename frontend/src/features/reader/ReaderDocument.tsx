@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { RotateCw } from "lucide-react";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import type { File as FileType } from "@/types/db";
@@ -8,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { clonePdfData } from "@/lib/pdf-buffer";
 import { isDetached } from "@/lib/bytes";
 import { pdfDocumentOptions, pdfWorkerSrc } from "@/lib/pdf-assets";
-import { FailureNotice } from "./FailureNotice";
+import { PdfError, PdfLoading } from "./PdfStates";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc();
 
@@ -34,14 +33,6 @@ type Props = {
   onRenderError?: () => void;
 };
 
-function PdfLoading({ label = "Loading document…" }: { label?: string }) {
-  return (
-    <div className="grid h-[760px] place-items-center bg-white">
-      <p className="font-mono text-xs text-ink-faint">{label}</p>
-    </div>
-  );
-}
-
 // A Document cannot be rendered from a detached buffer, so a source that pdf.js
 // spent is reported as no bytes rather than as a Document that loads blank.
 function cloneSource(data: Uint8Array | null): { data: Uint8Array } | null {
@@ -50,28 +41,6 @@ function cloneSource(data: Uint8Array | null): { data: Uint8Array } | null {
   } catch {
     return null;
   }
-}
-
-function PdfError({ message, onRetry }: { message: string; onRetry?: () => void }) {
-  return (
-    <div className="grid h-[760px] place-items-center bg-white p-6 text-center" data-testid="reader-render-error">
-      <div>
-        <FailureNotice
-          title="Could not render this document"
-          message={`${message} The document is still in your library — rendering it again usually clears this.`}
-        />
-        {onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="mt-3 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
-          >
-            <RotateCw className="size-3" /> Retry rendering
-          </button>
-        )}
-      </div>
-    </div>
-  );
 }
 
 export default function ReaderDocument({

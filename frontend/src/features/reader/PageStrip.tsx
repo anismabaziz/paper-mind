@@ -5,7 +5,7 @@ import { isDetached } from "@/lib/bytes";
 import { clonePdfData } from "@/lib/pdf-buffer";
 import { pdfDocumentOptions, pdfWorkerSrc } from "@/lib/pdf-assets";
 import { ThumbnailPlaceholder } from "./PageStripPlaceholder";
-import { FailureNotice } from "./FailureNotice";
+import { FailureNotice } from "@/components/FailureNotice";
 import {
   STRIP_THUMB_GAP,
   STRIP_THUMB_WIDTH,

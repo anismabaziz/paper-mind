@@ -1,10 +1,10 @@
 import { useCallback } from "react";
 import { useRef } from "react";
-import { LibraryRail } from "@/components/papermind/LibraryRail";
-import { ReaderPane } from "@/components/papermind/ReaderPane";
-import { ChatPane } from "@/components/papermind/ChatPane";
-import SettingsDialog from "./app/settings-dialog";
-import { ResearchBriefDialog } from "@/components/papermind/ResearchBriefDialog";
+import { LibraryRail } from "@/features/library/LibraryRail";
+import { ReaderPane } from "@/features/reader/ReaderPane";
+import { ChatPane } from "@/features/chat/ChatPane";
+import SettingsDialog from "@/features/settings/SettingsDialog";
+import { ResearchBriefDialog } from "@/features/brief/ResearchBriefDialog";
 import { useEscapeKey } from "@/hooks/useEscape";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import useMobileUi from "@/store/mobile-ui";
