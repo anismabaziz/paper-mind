@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify, request
 
+from errors import AppError
 from services.accounts.chat_settings_service import (
     SUPPORTED_MODELS,
     SettingsError,
@@ -14,11 +15,7 @@ from services.accounts.chat_settings_service import (
     supported_models_payload,
     verification_error_message,
 )
-from services.accounts.secrets_service import (
-    SecretsResaveRequiredError,
-    decrypt_api_key,
-    encrypt_api_key,
-)
+from services.accounts.secrets_service import decrypt_api_key, encrypt_api_key
 from services.llm.base import ChatCredentials
 
 if TYPE_CHECKING:
@@ -90,11 +87,6 @@ def _candidate_from_request() -> ChatCredentials:
     )
 
 
-def _error_response(message: str, status: int):
-    """Return a settings error that keeps the model catalog available."""
-    return jsonify({"error": message, **_catalog_payload()}), status
-
-
 def _recovery_message(detail: str | None, has_saved_settings: bool | None) -> str:
     """Explain that a failed candidate did not replace saved settings."""
     if has_saved_settings is False:
@@ -107,6 +99,29 @@ def _recovery_message(detail: str | None, has_saved_settings: bool | None) -> st
         f"{status} Check the provider details and API key, then try again. "
         f"{detail or ''}"
     ).rstrip()
+
+
+def _settings_error(
+    message: str,
+    category: str,
+    status: int = 400,
+    **details: object,
+) -> AppError:
+    """
+    Return a settings failure carrying the model catalog.
+
+    Every settings failure carries the catalog because the settings form is
+    built from it: a failure that returned none would leave someone unable to
+    correct the thing that just failed. It rides in the details rather than being
+    restated in each message, so the catalog is sent the same way whatever went
+    wrong.
+    """
+    return AppError(
+        message,
+        category=category,
+        status=status,
+        details={**details, **_catalog_payload()},
+    )
 
 
 def _verify_candidate(
@@ -151,48 +166,47 @@ def register_settings_routes(app: Flask, services: "Services") -> None:
     app_settings_repository = services.repositories.app_settings
     api_key_verifier = services.api_key_verifier
 
-    @app.route("/settings", methods=["GET"])
-    def get_settings_route():
+    def _read_stored():
+        """
+        Return the saved settings row, or raise why it could not be read.
+
+        The catalog goes out with the failure rather than being lost, because a
+        settings form that cannot be built is exactly what someone hitting this
+        needs to be spared: the stored settings are unreadable, but the catalog of
+        models they could choose from is not.
+        """
         try:
-            stored = app_settings_repository.get_app_settings()
+            return app_settings_repository.get_app_settings()
         except Exception as exc:
-            log.error("get_settings failed: %s", type(exc).__name__)
-            return _error_response(
+            log.error("reading stored settings failed: %s", type(exc).__name__)
+            raise _settings_error(
                 "Stored settings could not be read. Re-save your provider "
                 "settings, then try again.",
+                "settings_unreadable",
                 500,
-            )
+            ) from None
+
+    @app.route("/settings", methods=["GET"])
+    def get_settings_route():
+        stored = _read_stored()
         try:
             payload = _settings_payload(stored)
         except SettingsError as exc:
-            provider = stored.get("provider") if isinstance(stored, dict) else None
-            model = stored.get("model") if isinstance(stored, dict) else None
-            return jsonify(
-                {
-                    "provider": provider,
-                    "model": model,
-                    "masked_key": None,
-                    "error": str(exc),
-                    **_catalog_payload(),
-                    "needs_resave": True,
-                }
-            ), 400
-        except SecretsResaveRequiredError as exc:
-            log.warning("get_settings stale key derivation")
-            return jsonify(
-                {
-                    "error": str(exc),
-                    **_catalog_payload(),
-                    "needs_resave": True,
-                }
-            ), 400
-        except Exception as exc:
-            log.error("get_settings failed: %s", type(exc).__name__)
-            return _error_response(
-                "Stored settings could not be read. Re-save your provider "
-                "settings, then try again.",
-                500,
-            )
+            # The saved provider and model are echoed back because the row is
+            # still readable even though it cannot be used, and the form needs
+            # to show what is saved to let the reader replace it. A key this
+            # build cannot decrypt is not caught here: it already carries the
+            # re-save the reader needs, and the catalog rides along with it.
+            record = stored if isinstance(stored, dict) else {}
+            raise _settings_error(
+                str(exc),
+                "incomplete_settings",
+                400,
+                provider=record.get("provider"),
+                model=record.get("model"),
+                masked_key=None,
+                needs_resave=True,
+            ) from None
         return jsonify(payload), 200
 
     @app.route("/settings", methods=["PUT"])
@@ -200,47 +214,40 @@ def register_settings_routes(app: Flask, services: "Services") -> None:
         try:
             credentials = _candidate_from_request()
         except SettingsError as exc:
-            return _error_response(_recovery_message(str(exc), None), 400)
-        try:
-            stored = app_settings_repository.get_app_settings()
-        except Exception as exc:
-            log.error("save_settings read failed: %s", type(exc).__name__)
-            return _error_response(
-                "Stored settings could not be read. Re-save your provider "
-                "settings, then try again.",
-                500,
-            )
-        has_saved_settings = stored is not None
+            raise _settings_error(
+                _recovery_message(str(exc), None), "invalid_settings"
+            ) from None
+
+        has_saved_settings = _read_stored() is not None
 
         ok, error = _verify_candidate(credentials, api_key_verifier)
         if not ok:
-            return _error_response(_recovery_message(error, has_saved_settings), 400)
+            raise _settings_error(
+                _recovery_message(error, has_saved_settings),
+                "settings_verification_failed",
+            )
 
         try:
             encrypted = encrypt_api_key(credentials.api_key)
-        except Exception as exc:
-            log.error("encrypt_api_key failed: %s", type(exc).__name__)
-            return _error_response(
-                _recovery_message(
-                    "The candidate key could not be encrypted.", has_saved_settings
-                ),
-                500,
-            )
-        try:
             app_settings_repository.upsert_app_settings(
                 credentials.provider,
                 credentials.model,
                 encrypted,
             )
         except Exception as exc:
-            log.error("upsert_app_settings failed: %s", type(exc).__name__)
-            return _error_response(
+            # The candidate verified but could not be stored, so the app is left
+            # exactly as it was. Said plainly, because a reader who assumed the
+            # save went through would go on using the old settings.
+            log.error("storing verified settings failed: %s", type(exc).__name__)
+            raise _settings_error(
                 _recovery_message(
                     "The verified settings could not be stored. Try again.",
                     has_saved_settings,
                 ),
+                "settings_not_stored",
                 500,
-            )
+            ) from None
+
         _clear_llm_caches()
         return jsonify(
             {
@@ -256,26 +263,28 @@ def register_settings_routes(app: Flask, services: "Services") -> None:
         try:
             credentials = _candidate_from_request()
         except SettingsError as exc:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": _recovery_message(str(exc), None),
-                    **_catalog_payload(),
-                }
-            ), 400
-        try:
-            stored = app_settings_repository.get_app_settings()
-        except Exception as exc:
-            log.error("verify_settings read failed: %s", type(exc).__name__)
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "Stored settings could not be read.",
-                    **_catalog_payload(),
-                }
-            ), 500
-        has_saved_settings = stored is not None
+            raise _settings_error(
+                _recovery_message(str(exc), None),
+                "invalid_settings",
+                ok=False,
+            ) from None
+
+        has_saved_settings = _read_stored() is not None
         ok, error = _verify_candidate(credentials, api_key_verifier)
-        if not ok:
-            error = _recovery_message(error, has_saved_settings)
-        return jsonify({"ok": ok, "error": error, **_catalog_payload()}), 200
+        # A key that does not work is an answer, not a failure of the request: the
+        # request was understood and answered, and the answer is that the key was
+        # refused. A refused key therefore comes back in the same three keys every
+        # other failure uses, beside `ok`, so a caller reads one failure shape.
+        # A key that works is not a failure at all and carries no failure keys —
+        # only the reasons it could not be answered come back as errors.
+        if ok:
+            return (
+                jsonify({"ok": True, **_catalog_payload()}),
+                200,
+            )
+        raise _settings_error(
+            _recovery_message(error, has_saved_settings),
+            "settings_verification_failed",
+            400,
+            ok=False,
+        )

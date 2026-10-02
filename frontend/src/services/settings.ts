@@ -39,9 +39,15 @@ export async function saveSettings(
   return (await client.put<ISettings>("/settings", payload)).data;
 }
 
+/**
+ * What a settings verification answered.
+ *
+ * A key that works returns this. A key that does not, and any request the
+ * server could not answer at all, arrives as a thrown `ApiError` carrying the
+ * server's own wording — so there is no failed-result case to read here.
+ */
 export interface IVerifyResult {
-  ok: boolean;
-  error: string | null;
+  ok: true;
 }
 
 export interface ISettingsCandidate {

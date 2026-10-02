@@ -33,6 +33,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from errors import error_payload
 from services.abstention import NO_EVIDENCE
 from services.accounts.chat_settings_service import ModelCapabilities
 from services.answering import AnswerEvent, Refusal
@@ -896,10 +897,14 @@ class BriefService:
         yield AnswerEvent(
             "provider_error",
             {
-                "error": (
-                    "The language model could not continue this brief. Try again."
+                # The failure itself in the one shape every failure is sent in.
+                # What rides beside it is the brief as far as it got, so a reader
+                # who pressed stop because of the failure still has the evidence
+                # that was found before it.
+                **error_payload(
+                    "timeout" if category == "timeout" else "provider",
+                    "The language model could not continue this brief. Try again.",
                 ),
-                "category": ("timeout" if category == "timeout" else "provider"),
                 "status": INCOMPLETE,
                 "brief": {
                     "summary": "",

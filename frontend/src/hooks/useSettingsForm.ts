@@ -125,24 +125,23 @@ export function useSettingsForm(
     setTesting(true);
     setFeedback(null);
     try {
-      const result = await verifySettings(
+      // A key that works returns ok; a key that does not is reported as a
+      // failure in the one shape every failure uses, and arrives here as an
+      // ApiError carrying the server's own wording for it.
+      await verifySettings(
         { provider, model, api_key: apiKey },
         controller.signal,
       );
       if (!mountedRef.current || controller.signal.aborted) return;
-      setFeedback(
-        result.ok
-          ? {
-              kind: "success",
-              text: "Connection works. Save settings to make it active.",
-            }
-          : { kind: "error", text: result.error ?? "Connection failed." }
-      );
+      setFeedback({
+        kind: "success",
+        text: "Connection works. Save settings to make it active.",
+      });
     } catch (e) {
       if (mountedRef.current && !controller.signal.aborted) {
         setFeedback({
           kind: "error",
-          text: errorMessage(e, "Could not run the connection test."),
+          text: errorMessage(e, "Connection failed."),
         });
       }
     } finally {

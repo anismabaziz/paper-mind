@@ -2,36 +2,15 @@
 
 import logging
 import urllib.parse
-from typing import Any
+from typing import Any, NoReturn
 
-from flask import jsonify, request
+from flask import request
 
+from errors import GENERIC_MESSAGE, BadRequest, Conflict, refusal
+from services.answering import Refusal
 from services.deletion import deletion_block_payload
-from services.retrieval.base import (
-    VectorStoreConfigurationError,
-    VectorStoreUnavailableError,
-)
 
 log = logging.getLogger(__name__)
-
-
-def vector_store_error_response(error: Exception):
-    """Return the stable HTTP response for a vector-store failure category."""
-    if isinstance(error, VectorStoreUnavailableError):
-        return jsonify(
-            {
-                "error": "Vector store is unavailable",
-                "category": "vector_store_unavailable",
-            }
-        ), 503
-    if isinstance(error, VectorStoreConfigurationError):
-        return jsonify(
-            {
-                "error": "Vector store configuration is invalid",
-                "category": "vector_store_configuration",
-            }
-        ), 500
-    raise TypeError("Unsupported vector-store error")
 
 
 def file_url(storage: Any, filename: str) -> str:
@@ -39,20 +18,33 @@ def file_url(storage: Any, filename: str) -> str:
     return f"{request.host_url.rstrip('/')}{storage.url(filename)}"
 
 
-def traversal_check(storage: Any, filename: str):
-    """Return an invalid-filename response when storage rejects a name."""
+def check_filename(storage: Any, filename: str) -> None:
+    """
+    Refuse a stored filename the storage layer will not accept.
+
+    Raises rather than returning a response, so a route reads this as a guard it
+    either passes or stops on. Which routes run it no longer changes how the
+    refusal is worded or what category it carries.
+    """
     if hasattr(storage, "_path"):
         try:
             storage._path(filename)
         except ValueError:
             log.warning("traversal blocked for %r", filename)
-            return jsonify({"error": "Invalid filename"}), 400
+            raise _invalid_filename() from None
         except Exception:
+            # The storage layer raised something other than a rejection, which
+            # says nothing about whether the name is safe. Fall through to the
+            # check below, which does not depend on the storage implementation.
             pass
-    elif ".." in filename or filename.startswith(("/", "\\")):
+    if ".." in filename or filename.startswith(("/", "\\")):
         log.warning("traversal blocked for %r", filename)
-        return jsonify({"error": "Invalid filename"}), 400
-    return None
+        raise _invalid_filename()
+
+
+def _invalid_filename() -> BadRequest:
+    """Return the error for a filename the app refuses to act on."""
+    return BadRequest("Invalid filename", category="invalid_filename")
 
 
 def is_safe_filename(storage: Any, filename: str) -> bool:
@@ -68,9 +60,63 @@ def is_safe_filename(storage: Any, filename: str) -> bool:
     return ".." not in filename and not filename.startswith("/")
 
 
-def deletion_blocked_response(file_record: dict):
-    """Return the stable 409 response blocking work on a deleting document."""
-    return jsonify(deletion_block_payload(file_record)), 409
+def raise_refusal(result):
+    """
+    Return a result that is not a refusal, or raise the refusal it carries.
+
+    Chat and the Research Brief decide whether a request can be served before the
+    route is involved, and return that decision rather than raising it — the
+    evaluator reads the same refusal as a case outcome, so it is a value and not
+    an exception. Handing it here is what puts it through the same shape as every
+    other failure without making those services raise something the evaluator
+    would then have to catch.
+    """
+    if isinstance(result, Refusal):
+        raise refusal(result.error, result.category, result.status, **result.detail)
+    return result
+
+
+def raise_scope_refusal(detail: dict | None) -> NoReturn:
+    """
+    Raise the error for a Research Brief scope that cannot be run.
+
+    The scope check names its own status, category, and message — it has to,
+    because "Document A is being reindexed" and "select two different Documents"
+    are different failures with different recoveries. Everything beside those
+    three is context for the reader, such as which Document was named, and rides
+    along in the details.
+    """
+    detail = detail or {}
+    known = ("status", "category", "error")
+    raise refusal(
+        str(detail.get("error", GENERIC_MESSAGE)),
+        str(detail.get("category", "")),
+        int(detail.get("status", 400)),
+        **{key: value for key, value in detail.items() if key not in known},
+    )
+
+
+def deletion_blocked(file_record: dict) -> Conflict:
+    """
+    Return the error blocking work on a Document that is being deleted.
+
+    Built from the deletion payload rather than worded here, so a Document
+    refused for being mid-deletion reads identically whether a route, chat, or
+    the evaluator asked. A Document that failed to delete says so in its
+    category, because the recovery differs: that one must be retried rather than
+    waited out.
+    """
+    payload = deletion_block_payload(file_record)
+    details = {
+        key: value
+        for key, value in payload.items()
+        if key not in ("error", "category")
+    }
+    return Conflict(
+        payload["error"],
+        category=payload["category"],
+        details=details,
+    )
 
 
 def scrub_api_key_from_text(text: str | None, api_key: str | None) -> str | None:

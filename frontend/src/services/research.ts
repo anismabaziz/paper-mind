@@ -1,4 +1,5 @@
 import client, { apiBaseUrl } from "./client";
+import { readError } from "@/lib/api-error";
 import { StreamProtocolError, isRecord, readEventStream } from "./files";
 import type { DocumentIndex, File as DbFile } from "@/types/db";
 import { isIndexStale, isIngestionActive } from "@/types/db";
@@ -347,9 +348,12 @@ function dispatch(
       });
       return true;
     case "provider_error": {
-      const category = data.category === "timeout" ? "timeout" : "provider";
+      // Read through the shared reader, so a failure inside a stream is
+      // understood the same way as one that arrived with a status code.
+      const failure = readError(data, "The brief could not continue.");
+      const category = failure.category === "timeout" ? "timeout" : "provider";
       handlers.onProviderError?.({
-        message: readString(data, "error", name),
+        message: failure.message,
         category,
         status: "incomplete",
         evidence: readEvidence(data),
@@ -425,21 +429,20 @@ const SETTINGS_CATEGORIES: ReadonlySet<string> = new Set([
 const MODEL_CATEGORY = "research_brief_unsupported_model";
 
 async function refusalOf(response: Response): Promise<BriefRequestError> {
-  const body = (await response.json().catch(() => null)) as
-    | Record<string, unknown>
-    | null;
-  const message =
-    typeof body?.error === "string"
-      ? body.error
-      : `The brief could not start (${response.status}).`;
-  const category = typeof body?.category === "string" ? body.category : "";
-  const missing = Array.isArray(body?.missing_capabilities)
-    ? body.missing_capabilities.filter((item): item is string => typeof item === "string")
+  const body = await response.json().catch(() => null);
+  const failure = readError(body, `The brief could not start (${response.status}).`);
+  // Which capabilities the chosen model lacks rides in the failure's details,
+  // named after what it holds rather than repeated at the top level.
+  const raw = failure.details.missing_capabilities;
+  const missing = Array.isArray(raw)
+    ? raw.filter((item): item is string => typeof item === "string")
     : [];
-  if (category === MODEL_CATEGORY) return new BriefRequestError(message, "scope", missing);
+  if (failure.category === MODEL_CATEGORY) {
+    return new BriefRequestError(failure.message, "scope", missing);
+  }
   return new BriefRequestError(
-    message,
-    SETTINGS_CATEGORIES.has(category) ? "settings" : "scope",
+    failure.message,
+    SETTINGS_CATEGORIES.has(failure.category) ? "settings" : "scope",
     missing,
   );
 }

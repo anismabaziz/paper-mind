@@ -5,12 +5,12 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from routes.common import traversal_check
+from errors import BadRequest, Conflict
+from routes.common import check_filename, raise_refusal, raise_scope_refusal
 from routes.credentials import resolve_stored_provider
-from services.answering import Refusal
-from services.brief.scope import resolve_scope
 from services.brief import cancellation
 from services.brief.budget import BriefLimits
+from services.brief.scope import resolve_scope
 from services.brief.service import BriefRequest, BriefService
 
 if TYPE_CHECKING:
@@ -59,15 +59,18 @@ def register_research_routes(app: Flask, services: "Services") -> None:
         question = data.get("question")
         documents = data.get("documents")
         if not isinstance(question, str) or not question.strip():
-            return jsonify({"error": "A research question is required"}), 400
+            # Named the way the brief service names the same refusal, so the
+            # category a caller switches on does not depend on whether the
+            # question was refused before or after it reached the service.
+            raise BadRequest(
+                "A research question is required", category="invalid_question"
+            )
         if not isinstance(documents, list) or not all(
             isinstance(name, str) for name in documents
         ):
-            return jsonify({"error": "Two Documents are required"}), 400
+            raise BadRequest("Two Documents are required")
         for filename in documents:
-            guard = traversal_check(services.storage, filename)
-            if guard is not None:
-                return guard
+            check_filename(services.storage, filename)
 
         # Read per request rather than captured at boot: a ceiling the operator
         # changes should apply to the next brief, not to the next restart.
@@ -79,27 +82,24 @@ def register_research_routes(app: Flask, services: "Services") -> None:
             limit=limits.documents,
         )
         if scope is None:
-            refusal = _scope_refusal(scope_refusal)
-            return jsonify(refusal.to_dict()), refusal.status
+            raise_scope_refusal(scope_refusal)
 
         binding = resolve_stored_provider(
             services.repositories.app_settings, services.chat_provider_factory
         )
-        if isinstance(binding, Refusal):
-            return jsonify(binding.to_dict()), binding.status
 
-        resolved = brief_service.resolve(
-            BriefRequest(
-                filenames=scope.filenames,
-                question=question,
-                provider=binding.provider,
-                model=binding.model,
-                limits=limits,
-            ),
-            scope,
+        resolved = raise_refusal(
+            brief_service.resolve(
+                BriefRequest(
+                    filenames=scope.filenames,
+                    question=question,
+                    provider=binding.provider,
+                    model=binding.model,
+                    limits=limits,
+                ),
+                scope,
+            )
         )
-        if isinstance(resolved, Refusal):
-            return jsonify(resolved.to_dict()), resolved.status
 
         return Response(
             stream_with_context(
@@ -123,17 +123,11 @@ def register_research_routes(app: Flask, services: "Services") -> None:
         data = request.get_json(silent=True) or {}
         brief_id = data.get("brief_id")
         if not isinstance(brief_id, str) or not brief_id:
-            return jsonify({"error": "A brief id is required"}), 400
-        stopped = cancellation.cancel(brief_id)
-        if not stopped:
-            return (
-                jsonify(
-                    {
-                        "error": "That brief is not running.",
-                        "category": "brief_not_running",
-                    }
-                ),
-                409,
+            raise BadRequest("A brief id is required")
+        if not cancellation.cancel(brief_id):
+            raise Conflict(
+                "That brief is not running.",
+                category="brief_not_running",
             )
         return jsonify({"brief_id": brief_id, "cancelled": True}), 200
 
@@ -158,23 +152,7 @@ def register_research_routes(app: Flask, services: "Services") -> None:
             limit=limits.documents,
         )
         if scope is None:
-            refusal = _scope_refusal(scope_refusal)
-            return jsonify(refusal.to_dict()), refusal.status
+            raise_scope_refusal(scope_refusal)
         return jsonify(
             {"documents": scope.to_dict(), "document_count": limits.documents}
         ), 200
-
-
-def _scope_refusal(detail: dict | None) -> Refusal:
-    """Return the refusal a rejected scope is reported as."""
-    detail = detail or {}
-    return Refusal(
-        int(detail.get("status", 400)),
-        str(detail.get("category", "")),
-        str(detail.get("error", "Internal server error")),
-        {
-            key: value
-            for key, value in detail.items()
-            if key not in ("status", "category", "error")
-        },
-    )

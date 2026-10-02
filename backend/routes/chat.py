@@ -5,9 +5,10 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from routes.common import traversal_check
+from errors import refusal
+from routes.common import check_filename, raise_refusal
 from routes.credentials import resolve_stored_provider
-from services.answering import AnswerRequest, AnswerService, Refusal
+from services.answering import AnswerRequest, AnswerService
 
 if TYPE_CHECKING:
     from composition import Services
@@ -35,28 +36,27 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
         query = data.get("query")
         filename = data.get("filename")
         if not query or not filename:
-            return jsonify({"error": "Query and Filename are required"}), 400
+            # Named the way the answering service names the same refusal, so a
+            # caller that cannot ask sees one category whether the question was
+            # rejected before it reached the model or while being resolved.
+            raise refusal("Query and Filename are required", "invalid_query")
 
-        guard = traversal_check(services.storage, filename)
-        if guard is not None:
-            return guard
+        check_filename(services.storage, filename)
 
         binding = resolve_stored_provider(
             app_settings_repository, chat_provider_factory
         )
-        if isinstance(binding, Refusal):
-            return jsonify(binding.to_dict()), binding.status
 
-        resolved = answer_service.resolve(
-            AnswerRequest(
-                filename=filename,
-                query=query,
-                provider=binding.provider,
-                model=binding.model,
+        resolved = raise_refusal(
+            answer_service.resolve(
+                AnswerRequest(
+                    filename=filename,
+                    query=query,
+                    provider=binding.provider,
+                    model=binding.model,
+                )
             )
         )
-        if isinstance(resolved, Refusal):
-            return jsonify(resolved.to_dict()), resolved.status
 
         return Response(
             stream_with_context(
@@ -69,23 +69,17 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
 
     @app.route("/messages", methods=["GET"])
     def get_messages():
-        try:
-            filename = request.args.get("filename")
-            if not filename:
-                return jsonify({"error": "Filename is required"}), 400
-            guard = traversal_check(services.storage, filename)
-            if guard is not None:
-                return guard
-            file_record = files_repository.get_file(filename)
-            if not file_record:
-                return jsonify({"messages": []}), 200
-            conversation_id = conversations_repository.get_conversation_id(
-                file_record["id"]
-            )
-            if not conversation_id:
-                return jsonify({"messages": []}), 200
-            messages = conversations_repository.get_messages(conversation_id)
-            return jsonify({"messages": messages}), 200
-        except Exception:
-            log.exception("get_messages failed for %r", request.args.get("filename"))
-            return jsonify({"error": "Internal server error"}), 500
+        filename = request.args.get("filename")
+        if not filename:
+            raise refusal("Filename is required")
+        check_filename(services.storage, filename)
+        file_record = files_repository.get_file(filename)
+        if not file_record:
+            return jsonify({"messages": []}), 200
+        conversation_id = conversations_repository.get_conversation_id(
+            file_record["id"]
+        )
+        if not conversation_id:
+            return jsonify({"messages": []}), 200
+        messages = conversations_repository.get_messages(conversation_id)
+        return jsonify({"messages": messages}), 200

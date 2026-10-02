@@ -25,6 +25,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from errors import error_payload
 from services.abstention import Abstention, abstention_for
 from services.accounts.chat_settings_service import ModelCapabilities
 from services.chat_context import build_chat_context, build_model_rewriter
@@ -94,24 +95,17 @@ class Refusal:
     """
     Why a question was not answered, before any stream started.
 
-    ``status`` and ``to_dict`` are what a client is told. ``category`` is empty
-    for a failure the app cannot classify, because a guess would be worse than
-    silence. The evaluator reads the same refusal as a case outcome, so a
-    Document that cannot be asked about is never scored as though it had
-    produced a poor answer.
+    A value rather than an exception, because the evaluator reads the same refusal
+    as a case outcome: a Document that cannot be asked about is never scored as
+    though it had produced a poor answer. A route that gets one hands it to
+    ``routes.common.raise_refusal``, which turns it into the failure the client
+    reads, so nothing here has to know what that shape is.
     """
 
     status: int
     category: str
     error: str
     detail: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return the refusal payload a client reads."""
-        payload: dict[str, Any] = {"error": self.error}
-        if self.category:
-            payload["category"] = self.category
-        return {**payload, **self.detail}
 
 
 @dataclass(frozen=True)
@@ -678,7 +672,7 @@ class AnswerService:
         )
         yield AnswerEvent(
             event_name,
-            {"error": failure.message, "category": failure.category},
+            error_payload(failure.category, failure.message),
         )
 
     def _abstain(
@@ -711,7 +705,7 @@ class AnswerService:
             resolved.trace.persistence(PERSISTENCE_ERROR, turn_id=resolved.turn_id)
             yield AnswerEvent(
                 "persistence_error",
-                {"error": "The answer could not be saved. Please ask again."},
+                error_payload(UNSAVED.category, UNSAVED.message),
             )
             return
         if not recorded:
@@ -727,7 +721,7 @@ class AnswerService:
             )
             yield AnswerEvent(
                 "persistence_error",
-                {"error": UNSAVED.message, "category": UNSAVED.category},
+                error_payload(UNSAVED.category, UNSAVED.message),
             )
             return
         resolved.trace.identify(abstention_reason=abstention.reason)

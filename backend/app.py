@@ -2,11 +2,12 @@
 
 import logging
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_cors import CORS
 
 import settings
 from composition import Services
+from errors import register_domain_errors, register_error_handlers
 from routes import register_routes
 
 log = logging.getLogger(__name__)
@@ -21,7 +22,13 @@ def create_app(
     settings.validate(app_settings)
     services = services or Services.from_settings(app_settings)
 
+    # Registered before the routes so that a route raising one of the domain's
+    # own errors is reported through the central handler rather than by
+    # whichever route happened to anticipate it.
+    register_domain_errors()
+
     app = Flask(__name__)
+    register_error_handlers(app)
     app.config["MAX_CONTENT_LENGTH"] = app_settings.upload.max_upload_bytes
     origins = [
         origin.strip()
@@ -35,16 +42,6 @@ def create_app(
         return jsonify({"response": "OK"}), 200
 
     register_routes(app, services)
-
-    @app.errorhandler(413)
-    def handle_413(_error):
-        log.warning("request entity too large: %s", request.path)
-        return jsonify({"error": "File too large"}), 413
-
-    @app.errorhandler(500)
-    def handle_500(_error):
-        log.exception("internal server error for %s", request.path)
-        return jsonify({"error": "Internal server error"}), 500
 
     return app
 

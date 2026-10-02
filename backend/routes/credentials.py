@@ -8,9 +8,9 @@ incomplete row, and an unsupported model are caught, and each of them has to be
 caught before a request reaches a model — so it lives here rather than in one
 route, and both routes that call a model resolve it the same way.
 
-The failure it returns is a :class:`~services.answering.Refusal` rather than an
-HTTP response, so the same decision can be reported as a refusal from either
-route and neither of them invents its own wording for a broken key.
+The failure it raises is one of this project's own errors rather than an HTTP
+response, so the same decision is reported in the same shape whichever route
+made it, and neither of them invents its own wording for a broken key.
 """
 
 from __future__ import annotations
@@ -19,66 +19,54 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from errors import BadRequest
 from services.accounts.chat_settings_service import (
     SUPPORTED_MODELS,
     ModelCapabilities,
     SettingsError,
     model_for,
 )
-from services.accounts.secrets_service import (
-    SecretsResaveRequiredError,
-    decrypt_api_key,
-)
-from services.answering import Refusal
+from services.accounts.secrets_service import decrypt_api_key
 from services.llm.base import ChatCredentials, LLMProvider
 
 log = logging.getLogger(__name__)
 
-NO_PROVIDER = Refusal(
-    400,
-    "no_provider_configured",
-    "No chat provider configured. Add a provider and API key in Settings.",
-)
-INCOMPLETE_SETTINGS = Refusal(
-    400,
-    "incomplete_settings",
-    "Saved provider settings are incomplete. Re-save your provider settings in "
-    "Settings.",
-)
-UNSUPPORTED_PROVIDER = Refusal(
-    400,
-    "unsupported_provider",
-    "Saved provider settings use an unsupported provider. Choose a current "
-    "provider in Settings.",
-)
-UNSUPPORTED_MODEL = Refusal(
-    400,
-    "unsupported_model",
-    "Saved provider settings use an unsupported model. Choose a current model "
-    "in Settings.",
-)
-KEY_UNREADABLE = Refusal(
-    500,
-    "",
-    "Stored API key could not be decrypted. Re-save your provider settings, "
-    "then try again.",
-)
+#: The four ways stored settings can stop a request from reaching a model. Kept
+#: as factories rather than as built errors because raising an exception attaches
+#: the frame it was raised in to it, and one shared instance would hold that
+#: traceback for every request it ever served.
+def no_provider() -> BadRequest:
+    """Return the error for there being no saved provider at all."""
+    return BadRequest(
+        "No chat provider configured. Add a provider and API key in Settings.",
+        category="no_provider_configured",
+    )
 
 
-def _resave_required(message: str) -> Refusal:
-    """
-    Return the refusal for a key this build can no longer decrypt.
+def incomplete_settings() -> BadRequest:
+    """Return the error for a saved settings row that cannot be read."""
+    return BadRequest(
+        "Saved provider settings are incomplete. Re-save your provider "
+        "settings in Settings.",
+        category="incomplete_settings",
+    )
 
-    The client is told so explicitly, because the recovery is a re-save and
-    nothing else: retrying unchanged fails the same way every time. The wording
-    comes from the failure itself, which is what tells a user whether their key
-    was encrypted by an older version or is simply not there.
-    """
-    return Refusal(
-        400,
-        "secrets_resave_required",
-        message,
-        {"needs_resave": True},
+
+def unsupported_provider() -> BadRequest:
+    """Return the error for a saved provider this build does not serve."""
+    return BadRequest(
+        "Saved provider settings use an unsupported provider. Choose a current "
+        "provider in Settings.",
+        category="unsupported_provider",
+    )
+
+
+def unsupported_model() -> BadRequest:
+    """Return the error for a saved model this build does not serve."""
+    return BadRequest(
+        "Saved provider settings use an unsupported model. Choose a current "
+        "model in Settings.",
+        category="unsupported_model",
     )
 
 
@@ -99,21 +87,24 @@ class ProviderBinding:
 def resolve_stored_provider(
     app_settings_repository: Any,
     chat_provider_factory: Any,
-) -> ProviderBinding | Refusal:
-    """Return the bound provider and its catalog record, or the refusal instead."""
-    try:
-        stored = app_settings_repository.get_app_settings()
-    except Exception as exc:
-        log.error("stored settings read failed: %s", type(exc).__name__)
-        return Refusal(500, "", "Stored settings could not be read.")
+) -> ProviderBinding:
+    """
+    Return the bound provider and its catalog record, or raise why there is none.
+
+    Raises rather than returning a failure because every outcome here other than
+    a usable provider is an error, and there is no route for which the error is
+    not the answer. The messages live here so that a missing key reads the same
+    whether it was hit asking a question or starting a brief.
+    """
+    stored = app_settings_repository.get_app_settings()
     if not stored:
-        return NO_PROVIDER
+        raise no_provider()
     try:
         provider = stored["provider"]
         model = stored["model"]
         ciphertext = stored["encrypted_api_key"]
     except (AttributeError, KeyError, TypeError):
-        return INCOMPLETE_SETTINGS
+        raise incomplete_settings() from None
     if (
         not isinstance(provider, str)
         or not provider
@@ -122,21 +113,16 @@ def resolve_stored_provider(
         or not isinstance(ciphertext, str)
         or not ciphertext
     ):
-        return INCOMPLETE_SETTINGS
-    try:
-        api_key = decrypt_api_key(ciphertext)
-    except SecretsResaveRequiredError as exc:
-        log.warning("stale key derivation")
-        return _resave_required(str(exc))
-    except Exception as exc:
-        log.error("stored key decrypt failed: %s", type(exc).__name__)
-        return KEY_UNREADABLE
+        raise incomplete_settings()
+    # A key this build cannot decrypt is re-raised as-is: the central handler
+    # already reports it as needing a re-save, which is the whole recovery.
+    api_key = decrypt_api_key(ciphertext)
     if provider not in SUPPORTED_MODELS:
-        return UNSUPPORTED_PROVIDER
+        raise unsupported_provider()
     try:
         model_definition = model_for(provider, model)
     except SettingsError:
-        return UNSUPPORTED_MODEL
+        raise unsupported_model() from None
     credentials = ChatCredentials(
         provider=provider,
         model=model,
@@ -146,10 +132,7 @@ def resolve_stored_provider(
     )
     try:
         bound = chat_provider_factory(credentials)
-    except ValueError as exc:
-        log.warning("provider build refused: %s", type(exc).__name__)
-        return UNSUPPORTED_PROVIDER
-    except Exception as exc:
-        log.error("provider build failed: %s", type(exc).__name__)
-        return Refusal(500, "", "Internal server error")
+    except ValueError:
+        log.warning("provider build refused for %s", provider)
+        raise unsupported_provider() from None
     return ProviderBinding(provider=bound, model=model_definition)

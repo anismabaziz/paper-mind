@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getSettings, type IModelCatalog } from "@/services/settings";
+import { ApiError } from "@/lib/api-error";
 import FormFeedback from "@/features/settings/FormFeedback";
 import { useEscapeKey } from "@/hooks/useEscape";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
@@ -175,8 +176,12 @@ function useSupportedModels(
   return useMemo(() => {
     const loaded = settings?.supported_models;
     if (loaded) return loaded;
-    const fromError = (error as { response?: { data?: { supported_models?: IModelCatalog } } })
-      ?.response?.data?.supported_models;
-    return fromError ?? {};
+    // A failed load usually carries the catalog precisely so the reader is not
+    // locked out of the settings they can still see. The backend sends it in the
+    // failure's details on every settings failure, including the ones where the
+    // stored row itself could not be read.
+    return (error instanceof ApiError ? error.details.supported_models : undefined) as
+      | IModelCatalog
+      | undefined ?? {};
   }, [error, settings]);
 }

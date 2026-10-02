@@ -1,4 +1,5 @@
 import client, { apiBaseUrl } from "./client";
+import { readError, readErrorResponse } from "@/lib/api-error";
 import { File as FileType, DocumentIndex, IngestionJob } from "@/types/db";
 
 interface IGetFiles {
@@ -277,18 +278,20 @@ function dispatch(
       return false;
     case "provider_error":
     case "citation_error": {
-      const category = data.category;
-      if (!FAILURE_CATEGORIES.includes(category as ChatFailureCategory)) {
+      const failure = readError(data, `The ${name} event had no message.`);
+      if (!FAILURE_CATEGORIES.includes(failure.category as ChatFailureCategory)) {
         throw new StreamProtocolError(`The ${name} event has no category.`);
       }
       handlers.onProviderError?.(
-        readString(data, "error", name),
-        category as ChatFailureCategory,
+        failure.message,
+        failure.category as ChatFailureCategory,
       );
       return true;
     }
     case "persistence_error":
-      handlers.onPersistenceError?.(readString(data, "error", name));
+      handlers.onPersistenceError?.(
+        readError(data, "The answer could not be saved.").message,
+      );
       return true;
     case "cancelled":
       handlers.onCancelled?.(readString(data, "reason", name));
@@ -395,8 +398,11 @@ export async function chatStream(
   });
 
   if (!response.ok || !response.body) {
-    const message = await response.json().catch(() => null);
-    throw new Error(message?.error ?? `Request failed (${response.status})`);
+    const failure = await readErrorResponse(
+      response,
+      `Request failed (${response.status})`,
+    );
+    throw new Error(failure.message);
   }
 
   await readEventStream(
