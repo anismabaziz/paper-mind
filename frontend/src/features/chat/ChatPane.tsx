@@ -7,6 +7,7 @@ import ChatComposer from "./ChatComposer";
 import ChatConversationStates from "./ChatConversationStates";
 import ChatMessageItem from "./ChatMessageItem";
 import StaleIndexNotice from "./StaleIndexNotice";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * The reading companion: questions about the open Document, and the passages
@@ -121,17 +122,18 @@ export function ChatPane() {
         )}
 
         {chat.thinking && chat.messages[chat.messages.length - 1]?.sender !== "bot" && (
-          <div className="rise-in">
+          <div className="rise-in" role="status" aria-label="Reading passages">
             <p className="label-meta mb-2">Reading passages…</p>
             <div className="space-y-2">
               {[90, 76, 58].map((w, i) => (
-                <span
+                <Skeleton
                   key={i}
-                  className="block h-2 animate-pulse rounded-full bg-ink/10"
+                  className="h-2 rounded-full bg-ink/10"
                   style={{ width: `${w}%`, animationDelay: `${i * 120}ms` }}
                 />
               ))}
             </div>
+            <span className="sr-only">Reading passages…</span>
           </div>
         )}
         <div ref={chat.endRef} />

@@ -128,9 +128,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
             exists = storage.exists(filename) if hasattr(storage, "exists") else False
         except ValueError:
             log.warning("traversal blocked for %r", filename)
-            raise BadRequest(
-                "Invalid filename", category="invalid_filename"
-            ) from None
+            raise BadRequest("Invalid filename", category="invalid_filename") from None
         if not exists:
             raise _not_found()
 
@@ -483,9 +481,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
                 filename,
                 "Could not remove file: invalid filename. Retry deletion.",
             )
-            raise BadRequest(
-                "Invalid filename", category="invalid_filename"
-            ) from None
+            raise BadRequest("Invalid filename", category="invalid_filename") from None
         except Exception:
             log.exception("storage delete failed for %r", filename)
             failures.append("file")

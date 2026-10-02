@@ -5,7 +5,8 @@
     { "path": "./tsconfig.node.json" }
   ],
   "compilerOptions": {
-    "baseUrl": ".",
+    /* Aliases for the editor. Resolved relative to this file, so no baseUrl is
+       needed — baseUrl is deprecated and stops working in TypeScript 7. */
     "paths": {
       "@/*": ["./src/*"]
     }

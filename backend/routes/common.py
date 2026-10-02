@@ -108,9 +108,7 @@ def deletion_blocked(file_record: dict) -> Conflict:
     """
     payload = deletion_block_payload(file_record)
     details = {
-        key: value
-        for key, value in payload.items()
-        if key not in ("error", "category")
+        key: value for key, value in payload.items() if key not in ("error", "category")
     }
     return Conflict(
         payload["error"],

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Scale, X } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   briefUnavailableReason,
   checkBriefScope,
@@ -12,8 +13,6 @@ import { getErrorMessage } from "@/lib/api-error";
 import { useFiles } from "@/hooks/useFiles";
 import { useBriefRun } from "@/hooks/useBriefRun";
 import type { File as DbFile } from "@/types/db";
-import { useEscapeKey } from "@/hooks/useEscape";
-import { useFocusTrap } from "@/hooks/useFocusTrap";
 import useBriefUi from "@/store/brief-ui";
 import BriefResult from "./BriefResult";
 import BriefFooter from "./BriefFooter";
@@ -40,7 +39,6 @@ function ResearchBriefDialogContent() {
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: getSettings });
   const [selected, setSelected] = useState<string[]>([]);
   const [question, setQuestion] = useState("");
-  const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const files = filesQuery.data?.files;
@@ -102,9 +100,6 @@ function ResearchBriefDialogContent() {
   const brief = useBriefRun({ question, documents: selected, canStart });
   const running = brief.running;
 
-  useFocusTrap(true, dialogRef, closeRef);
-  useEscapeKey(!running, close);
-
   const toggle = useCallback((file: DbFile) => {
     setSelected((current) =>
       current.includes(file.name)
@@ -115,33 +110,35 @@ function ResearchBriefDialogContent() {
     );
   }, []);
 
+  // Focus, Escape, and the backdrop all funnel through the dialog. A run in
+  // flight refuses to close, so stopping one stays an explicit act on Stop.
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm"
-      data-testid="brief-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !running) close();
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !running) close();
       }}
     >
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="brief-dialog-title"
-        aria-busy={running}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col border border-rule bg-paper shadow-sheet focus:outline-none"
+      <DialogContent
         data-testid="brief-dialog"
+        aria-busy={running}
+        showCloseButton={false}
+        initialFocus={closeRef}
+        overlayProps={{
+          "data-testid": "brief-backdrop",
+          className: "bg-ink/40 backdrop-blur-sm",
+        }}
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-0 rounded-none border-rule bg-paper p-0 shadow-sheet"
       >
         <header className="flex items-center justify-between border-b border-rule px-5 py-3">
           <div className="flex items-center gap-2">
-            <Scale size={16} className="text-ink-soft" />
-            <h2
+            <Scale size={16} className="text-ink-soft" aria-hidden="true" />
+            <DialogTitle
               id="brief-dialog-title"
               className="font-mono text-xs font-semibold uppercase tracking-widest text-ink"
             >
               Research brief
-            </h2>
+            </DialogTitle>
           </div>
           <button
             ref={closeRef}
@@ -188,7 +185,7 @@ function ResearchBriefDialogContent() {
           onStart={() => void brief.start()}
           onStop={() => void brief.stop()}
         />
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

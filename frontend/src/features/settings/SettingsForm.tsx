@@ -1,13 +1,12 @@
-import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Spinner } from "@/components/ui/spinner";
 import type { IModelCapabilities } from "@/services/settings";
 import FormFeedback from "@/features/settings/FormFeedback";
 import type { SettingsFeedback } from "@/hooks/useSettingsForm";
 import ModelCapabilities from "./ModelCapabilities";
-
-const selectClass =
-  "h-11 min-h-[44px] w-full rounded-sm border border-rule bg-paper px-3 text-xs text-ink focus:outline-none focus:border-ink disabled:bg-canvas disabled:text-ink-faint font-mono";
 
 type Props = {
   providers: string[];
@@ -81,46 +80,57 @@ export default function SettingsForm({
           </button>
         </div>
       )}
-      <label className="block">
-        <span className="label-meta">Provider</span>
-        <select
+      <div className="space-y-1">
+        <Label htmlFor="settings-provider" className="label-meta">
+          Provider
+        </Label>
+        <NativeSelect
+          id="settings-provider"
           value={provider}
           onChange={(e) => onProvider(e.target.value)}
-          className={selectClass}
           data-testid="settings-provider"
+          className="w-full"
+          selectClassName="h-11 min-h-[44px] rounded-sm border-rule bg-paper px-3 py-1 text-xs text-ink focus-visible:border-ink focus-visible:ring-0 disabled:bg-canvas disabled:text-ink-faint font-mono"
         >
-          <option value="">Select a provider…</option>
+          <NativeSelectOption value="">Select a provider…</NativeSelectOption>
           {providers.map((name) => (
-            <option key={name} value={name}>
+            <NativeSelectOption key={name} value={name}>
               {name}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </div>
 
-      <label className="block">
-        <span className="label-meta">Model</span>
-        <select
+      <div className="space-y-1">
+        <Label htmlFor="settings-model" className="label-meta">
+          Model
+        </Label>
+        <NativeSelect
+          id="settings-model"
           value={model}
           onChange={(e) => onModel(e.target.value)}
           disabled={!provider}
-          className={selectClass}
           data-testid="settings-model"
+          className="w-full"
+          selectClassName="h-11 min-h-[44px] rounded-sm border-rule bg-paper px-3 py-1 text-xs text-ink focus-visible:border-ink focus-visible:ring-0 disabled:bg-canvas disabled:text-ink-faint font-mono"
         >
-          <option value="">Select a model…</option>
+          <NativeSelectOption value="">Select a model…</NativeSelectOption>
           {models.map((name) => (
-            <option key={name} value={name}>
+            <NativeSelectOption key={name} value={name}>
               {name}
-            </option>
+            </NativeSelectOption>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </div>
 
       {selectedModel && <ModelCapabilities model={selectedModel} />}
 
-      <label className="block">
-        <span className="label-meta">API key</span>
+      <div className="space-y-1">
+        <Label htmlFor="settings-api-key" className="label-meta">
+          API key
+        </Label>
         <Input
+          id="settings-api-key"
           type="password"
           placeholder={
             savedMaskedKey
@@ -133,7 +143,7 @@ export default function SettingsForm({
           autoComplete="off"
           data-testid="settings-api-key"
         />
-      </label>
+      </div>
 
       <p className="rounded-sm border border-rule/70 bg-canvas px-3 py-2 text-xs leading-5 text-ink-soft">
         {selectedModel?.data_location === "local"
@@ -156,7 +166,7 @@ export default function SettingsForm({
           className="flex-1 h-11 min-h-[44px] bg-ink text-paper text-xs hover:bg-ink/90"
           data-testid="settings-save"
         >
-          {saving && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+          {saving && <Spinner className="size-3.5" aria-hidden="true" />}
           {saving ? "Saving…" : "Save"}
         </Button>
         <Button
@@ -167,7 +177,7 @@ export default function SettingsForm({
           className="flex-1 h-11 min-h-[44px] text-xs border-rule bg-paper hover:bg-canvas text-ink"
           data-testid="settings-test"
         >
-          {testing && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+          {testing && <Spinner className="size-3.5" aria-hidden="true" />}
           {testing ? "Testing…" : "Test connection"}
         </Button>
       </div>

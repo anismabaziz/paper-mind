@@ -1,5 +1,7 @@
 import { File, Upload } from "lucide-react";
 import { FailureNotice } from "@/components/FailureNotice";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import LibraryItemRow from "./LibraryItemRow";
 import type { LibraryItemActions } from "./LibraryItemAction";
 import type { LibraryItemStatus } from "./library-item-status";
@@ -43,10 +45,11 @@ export default function LibraryList({
 }: Props) {
   if (state === "pending") {
     return (
-      <div className="space-y-2 px-1">
+      <div className="space-y-2 px-1" role="status" aria-label="Loading library">
         {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-[76px] w-full animate-pulse rounded-sm border border-rule bg-paper/60" />
+          <Skeleton key={i} className="h-[76px] w-full rounded-sm border border-rule bg-paper/60" />
         ))}
+        <span className="sr-only">Loading library…</span>
       </div>
     );
   }
@@ -78,13 +81,15 @@ export default function LibraryList({
             <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-faint">
               Open a paper and it will show up here.
             </p>
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={onShowLibrary}
-              className="mt-4 inline-flex items-center gap-1.5 border border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] hover:border-ink"
+              className="mt-4 gap-1.5 rounded-none border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] text-ink hover:border-ink"
             >
               Back to library
-            </button>
+            </Button>
           </>
         ) : (
           <>
@@ -92,13 +97,14 @@ export default function LibraryList({
             <p className="mt-1 text-[0.65rem] leading-relaxed text-ink-faint">
               Ingest a PDF to begin analysis.
             </p>
-            <button
+            <Button
               type="button"
+              size="sm"
               onClick={onUpload}
-              className="mt-4 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
+              className="mt-4 gap-1.5 rounded-none border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
             >
               <Upload className="size-3" /> Ingest Document
-            </button>
+            </Button>
           </>
         )}
       </div>

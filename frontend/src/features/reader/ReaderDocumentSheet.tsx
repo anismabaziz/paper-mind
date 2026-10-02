@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import { RotateCw } from "lucide-react";
 import { FailureNotice } from "@/components/FailureNotice";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import IndexingOverlay from "./IndexingOverlay";
 import type { IngestionJob } from "@/types/db";
 
@@ -50,7 +52,7 @@ export default function ReaderDocumentSheet({
     <div className="paper-grain relative bg-paper shadow-sheet">
       <div className="flex items-center justify-between border-b border-rule px-6 py-3">
         <span className="label-meta">Page {String(page).padStart(2, "0")}</span>
-        <span className="h-px flex-1 mx-3 bg-rule" />
+        <Separator className="mx-3 flex-1 bg-rule" />
         <span className="label-meta">p. {page}</span>
       </div>
       <div className="relative bg-canvas p-3">
@@ -66,20 +68,23 @@ export default function ReaderDocumentSheet({
                   message={`${downloadError} The document is still in your library — this is a download failure, not a missing document.`}
                 />
                 <div className="mt-3 flex items-center justify-center gap-2">
-                  <button
+                  <Button
                     type="button"
+                    size="sm"
                     onClick={onRetryDownload}
-                    className="inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
+                    className="gap-1.5 rounded-none border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
                   >
                     <RotateCw className="size-3" /> Retry download
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={onChooseAnother}
-                    className="inline-flex items-center gap-1.5 border border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] text-ink-soft hover:border-ink"
+                    className="gap-1.5 rounded-none border-rule bg-paper px-3 py-1.5 font-mono text-[0.65rem] text-ink-soft hover:border-ink"
                   >
                     Choose another document
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>

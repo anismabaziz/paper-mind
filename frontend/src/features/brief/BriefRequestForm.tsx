@@ -1,5 +1,7 @@
-import { Loader2 } from "lucide-react";
 import { FailureNotice } from "@/components/FailureNotice";
+import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import type { File as DbFile } from "@/types/db";
 import type { IBriefDocument } from "@/services/research";
 import BriefScopePicker from "./BriefScopePicker";
@@ -47,7 +49,7 @@ export default function BriefRequestForm({
     <>
       {library === "loading" && (
         <p role="status" className="py-8 text-center font-mono text-xs text-ink-faint">
-          <Loader2 size={14} className="mr-2 inline animate-spin" />
+          <Spinner className="mr-2 inline size-3.5" aria-hidden="true" />
           Loading your library…
         </p>
       )}
@@ -79,9 +81,12 @@ export default function BriefRequestForm({
         <FailureNotice testId="brief-error" title="This brief could not start" message={failure} />
       )}
 
-      <label className="mt-4 block">
-        <span className="label-meta">Cross-document question</span>
-        <textarea
+      <div className="mt-4 space-y-1">
+        <Label htmlFor="brief-question" className="label-meta">
+          Cross-document question
+        </Label>
+        <Textarea
+          id="brief-question"
           rows={3}
           value={question}
           onChange={(event) => onQuestion(event.target.value)}
@@ -89,9 +94,9 @@ export default function BriefRequestForm({
           aria-label="Cross-document question"
           placeholder="Where do these two papers disagree?"
           data-testid="brief-question"
-          className="w-full resize-y rounded-sm border border-rule bg-card px-3 py-2 text-xs leading-relaxed text-ink outline-none focus:border-ink disabled:opacity-60"
+          className="resize-y rounded-sm border-rule bg-card px-3 py-2 text-xs leading-relaxed text-ink focus-visible:border-ink focus-visible:ring-0 disabled:opacity-60"
         />
-      </label>
+      </div>
 
       {reason && (
         <p className="label-meta mt-2" data-testid="brief-reason">

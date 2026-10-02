@@ -1,4 +1,5 @@
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { formatFileSize } from "@/lib/format";
 import { ingestionStageLabel } from "@/types/db";
 import type { File as DbFile } from "@/types/db";
@@ -26,47 +27,56 @@ export default function RowStateBadge({ item, status }: { item: DbFile; status: 
 
   if (isDeleting) {
     return (
-      <span className="inline-flex items-center gap-1">
-        <Loader2 className="size-2.5 animate-spin" />
+      <Badge variant="secondary" className="gap-1 font-mono text-[0.6rem] font-normal">
+        <Loader2 className="size-2.5 animate-spin" aria-hidden="true" />
         Deleting
-      </span>
+      </Badge>
     );
   }
-  if (isDeleteFailed) return <span className="text-destructive">Delete failed</span>;
+  if (isDeleteFailed)
+    return (
+      <Badge variant="destructive" className="font-mono text-[0.6rem] font-normal">
+        Delete failed
+      </Badge>
+    );
   if (isStaleIndex || isReindexing) {
     return (
-      <span className="inline-flex items-center gap-1 text-destructive">
-        {isReindexing ? <Loader2 className="size-2.5 animate-spin" /> : <AlertTriangle className="size-2.5" />}
+      <Badge variant="destructive" className="gap-1 font-mono text-[0.6rem] font-normal">
+        {isReindexing ? (
+          <Loader2 className="size-2.5 animate-spin" aria-hidden="true" />
+        ) : (
+          <AlertTriangle className="size-2.5" aria-hidden="true" />
+        )}
         {isReindexing ? "Reindexing" : "Stale"}
-      </span>
+      </Badge>
     );
   }
   if (isJobFailed) {
     return (
-      <span className="inline-flex items-center gap-1 text-destructive">
-        <AlertTriangle className="size-2.5" />
+      <Badge variant="destructive" className="gap-1 font-mono text-[0.6rem] font-normal">
+        <AlertTriangle className="size-2.5" aria-hidden="true" />
         Failed
-      </span>
+      </Badge>
     );
   }
   if (isJobActive) {
     return (
-      <span className="inline-flex items-center gap-1">
-        <Loader2 className="size-2.5 animate-spin" />
+      <Badge variant="secondary" className="gap-1 font-mono text-[0.6rem] font-normal">
+        <Loader2 className="size-2.5 animate-spin" aria-hidden="true" />
         {isCancelling
           ? "Cancelling"
           : isRetrying
             ? "Retrying"
             : ingestionStageLabel(job?.stage ?? "queued")}
-      </span>
+      </Badge>
     );
   }
   if (isJobRetryable) {
     return (
-      <span className="inline-flex items-center gap-1 text-destructive">
-        <AlertTriangle className="size-2.5" />
+      <Badge variant="destructive" className="gap-1 font-mono text-[0.6rem] font-normal">
+        <AlertTriangle className="size-2.5" aria-hidden="true" />
         Retry
-      </span>
+      </Badge>
     );
   }
   return <span>{formatFileSize(item.metadata.size)}</span>;

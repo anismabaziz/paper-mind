@@ -1,4 +1,6 @@
 import { RotateCw } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,35 +30,39 @@ export function FailureNotice({
   actionTestId?: string;
 }) {
   return (
-    <div
+    <Alert
       role={variant === "error" ? "alert" : "status"}
       data-testid={testId}
+      variant={variant === "error" ? "destructive" : "default"}
       className={cn(
-        "rounded-sm border px-5 py-3",
+        "rounded-sm px-5 py-3",
         variant === "error"
           ? "border-destructive/40 bg-destructive/5"
-          : "border-rule bg-paper",
+          : "border-rule bg-paper"
       )}
     >
-      <p
+      <AlertTitle
         className={cn(
           "font-mono text-[0.68rem] font-semibold uppercase tracking-widest",
-          variant === "error" ? "text-destructive" : "text-ink-soft",
+          variant === "error" ? "text-destructive" : "text-ink-soft"
         )}
       >
         {title}
-      </p>
-      <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-soft">{message}</p>
+      </AlertTitle>
+      <AlertDescription className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-soft">
+        {message}
+      </AlertDescription>
       {actionLabel && onAction && (
-        <button
+        <Button
           type="button"
           onClick={onAction}
           data-testid={actionTestId}
-          className="mt-2.5 inline-flex items-center gap-1.5 border border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
+          size="sm"
+          className="mt-2.5 gap-1.5 rounded-none border-ink bg-ink px-3 py-1.5 font-mono text-[0.65rem] text-paper hover:bg-ink/90"
         >
           <RotateCw className="size-3" /> {actionLabel}
-        </button>
+        </Button>
       )}
-    </div>
+    </Alert>
   );
 }

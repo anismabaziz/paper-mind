@@ -31,6 +31,7 @@ from services.llm.base import ChatCredentials, LLMProvider
 
 log = logging.getLogger(__name__)
 
+
 #: The four ways stored settings can stop a request from reaching a model. Kept
 #: as factories rather than as built errors because raising an exception attaches
 #: the frame it was raised in to it, and one shared instance would hold that

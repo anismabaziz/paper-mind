@@ -1,4 +1,5 @@
 import { ArrowUp, CornerDownLeft } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { suggestedPrompts } from "./chat-message";
 
 type Props = {
@@ -43,7 +44,7 @@ export default function ChatComposer({
       </div>
 
       <div className="rounded-sm border border-rule bg-card px-3 py-2.5 transition-colors focus-within:border-ink">
-        <textarea
+        <Textarea
           ref={inputRef}
           rows={2}
           data-testid="chat-input"
@@ -58,7 +59,7 @@ export default function ChatComposer({
           }}
           placeholder={placeholder}
           disabled={disabled}
-          className="w-full resize-none bg-transparent text-[0.85rem] leading-relaxed placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
+          className="min-h-0 resize-none border-0 bg-transparent px-0 py-0 text-[0.85rem] leading-relaxed placeholder:text-ink-faint focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60"
         />
         <div className="mt-1 flex items-center justify-between">
           <span className="label-meta flex items-center gap-1">

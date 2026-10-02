@@ -79,22 +79,23 @@ export default function ReaderToolbar({
       <div className="flex items-center gap-2 sm:gap-4">
         {file && (
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink"
-                aria-label="Document actions"
-                aria-haspopup="menu"
-                title="Document actions"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </button>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  className="flex size-7 items-center justify-center rounded-sm border border-rule text-ink-soft hover:border-ink hover:text-ink"
+                  aria-label="Document actions"
+                  title="Document actions"
+                />
+              }
+            >
+              <MoreHorizontal className="size-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="border-rule bg-paper">
-              <DropdownMenuItem className="sm:hidden" onSelect={() => onZoom(zoom - 10)}>
+              <DropdownMenuItem className="sm:hidden" onClick={() => onZoom(zoom - 10)}>
                 <Minus className="size-3.5" /> Zoom out
               </DropdownMenuItem>
-              <DropdownMenuItem className="sm:hidden" onSelect={() => onZoom(zoom + 10)}>
+              <DropdownMenuItem className="sm:hidden" onClick={() => onZoom(zoom + 10)}>
                 <Plus className="size-3.5" /> Zoom in
               </DropdownMenuItem>
               <DropdownMenuItem

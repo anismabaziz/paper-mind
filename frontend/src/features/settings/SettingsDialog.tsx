@@ -1,14 +1,18 @@
 import { useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Settings, X } from "lucide-react";
+import { Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Spinner } from "@/components/ui/spinner";
 import { getSettings, type IModelCatalog } from "@/services/settings";
 import { ApiError } from "@/lib/api-error";
 import FormFeedback from "@/features/settings/FormFeedback";
-import { useEscapeKey } from "@/hooks/useEscape";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import useSettingsUi from "@/store/settings-ui";
-import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { errorMessage } from "@/lib/settings-format";
 import SettingsForm from "./SettingsForm";
 
@@ -26,7 +30,7 @@ export default function SettingsDialog() {
  * rather than instead of it.
  */
 function SettingsDialogContent() {
-  const { isOpen, close } = useSettingsUi();
+  const { close } = useSettingsUi();
   const settingsQuery = useQuery({
     queryKey: ["settings"],
     queryFn: getSettings,
@@ -41,12 +45,6 @@ function SettingsDialogContent() {
 
   const form = useSettingsForm(settingsQuery.data, catalog, close);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Trap focus while open and restore it to the invoking control on close.
-  useFocusTrap(isOpen, dialogRef, closeRef);
-  // Escape aborts a read-only verification but never interrupts a save.
-  useEscapeKey(isOpen && !form.saving, form.close);
 
   const loadErrorText = settingsQuery.isError
     ? errorMessage(settingsQuery.error, "Could not load settings.")
@@ -56,26 +54,29 @@ function SettingsDialogContent() {
     .filter((entry) => entry.provider === form.provider)
     .map((entry) => entry.id);
 
+  // Focus, Escape, and the backdrop all funnel through the dialog: closing a
+  // save in flight is refused by the form, so the dialog simply stays open.
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm"
-      data-testid="settings-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) form.close();
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) form.close();
       }}
     >
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-dialog-title"
-        aria-busy={form.busy}
-        className="w-full max-w-md border border-rule bg-paper shadow-sheet p-6 relative focus:outline-none"
+      <DialogContent
         data-testid="settings-dialog"
+        aria-busy={form.busy}
+        showCloseButton={false}
+        initialFocus={closeRef}
+        overlayProps={{
+          "data-testid": "settings-backdrop",
+          className: "bg-ink/40 backdrop-blur-sm",
+        }}
+        className="w-full max-w-md gap-0 rounded-none border-rule bg-paper p-6 shadow-sheet"
       >
         <button
           ref={closeRef}
+          type="button"
           onClick={form.close}
           disabled={form.saving}
           aria-label="Close settings"
@@ -84,13 +85,13 @@ function SettingsDialogContent() {
           <X size={16} />
         </button>
         <div className="flex items-center gap-2 mb-5">
-          <Settings size={16} className="text-ink-soft" />
-          <h2
+          <Settings size={16} className="text-ink-soft" aria-hidden="true" />
+          <DialogTitle
             id="settings-dialog-title"
             className="font-mono text-xs font-semibold uppercase tracking-widest text-ink"
           >
             Settings
-          </h2>
+          </DialogTitle>
         </div>
         <div className="space-y-3">
           {settingsQuery.isLoading ? (
@@ -99,11 +100,7 @@ function SettingsDialogContent() {
               role="status"
               aria-label="Loading settings"
             >
-              <Loader2
-                size={18}
-                className="animate-spin text-ink-faint motion-reduce:animate-none"
-                aria-hidden="true"
-              />
+              <Spinner className="size-[18px] text-ink-faint" />
               <span className="sr-only">Loading settings…</span>
             </div>
           ) : settingsQuery.isError && providers.length === 0 ? (
@@ -134,8 +131,8 @@ function SettingsDialogContent() {
             />
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

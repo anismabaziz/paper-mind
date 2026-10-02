@@ -135,19 +135,20 @@ export default function RowAction({
   }
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          data-testid={`document-menu-${item.name}`}
-          type="button"
-          aria-label={`Actions for ${displayTitle(item)}`}
-          aria-haspopup="menu"
-          className={cn(
-            "grid size-7 place-items-center border border-transparent text-ink-faint hover:border-rule hover:bg-paper hover:text-ink",
-            active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-          )}
-        >
-          <MoreHorizontal className="size-3.5" />
-        </button>
+      <DropdownMenuTrigger
+        render={
+          <button
+            data-testid={`document-menu-${item.name}`}
+            type="button"
+            aria-label={`Actions for ${displayTitle(item)}`}
+            className={cn(
+              "grid size-7 place-items-center border border-transparent text-ink-faint hover:border-rule hover:bg-paper hover:text-ink",
+              active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            )}
+          />
+        }
+      >
+        <MoreHorizontal className="size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[140px] border-rule bg-paper p-1">
         <DropdownMenuItem

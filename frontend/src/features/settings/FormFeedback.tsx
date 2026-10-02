@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
 /**
@@ -8,17 +9,18 @@ import { cn } from "@/lib/utils";
  */
 export default function FormFeedback({ kind, text }: { kind: "success" | "error"; text: string }) {
   return (
-    <p
+    <Alert
       data-testid="settings-feedback"
       role={kind === "error" ? "alert" : "status"}
+      variant={kind === "error" ? "destructive" : "default"}
       className={cn(
-        "rounded-sm border px-3 py-2 font-mono text-xs",
+        "rounded-sm px-3 py-2 font-mono text-xs",
         kind === "success"
           ? "border-ink/20 bg-canvas text-ink"
-          : "border-destructive/20 bg-destructive/5 text-destructive"
+          : "border-destructive/20 bg-destructive/5"
       )}
     >
       {text}
-    </p>
+    </Alert>
   );
 }
