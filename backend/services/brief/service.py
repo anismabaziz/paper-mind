@@ -36,7 +36,6 @@ from typing import Any
 from errors import error_payload
 from services.abstention import NO_EVIDENCE
 from services.accounts.chat_settings_service import ModelCapabilities
-from services.answering import AnswerEvent, Refusal
 from services.brief import cancellation
 from services.brief.budget import BriefBudget, BriefLimits
 from services.brief.compare import QUOTED_CHARS, compare_items
@@ -78,6 +77,7 @@ from services.llm.tools import (
     user_message,
 )
 from services.retrieval.base import RetrievalResult
+from services.streaming import AnswerEvent, Refusal, record_refusal
 from services.telemetry.brief import (
     CANCELLED,
     COMPLETE,
@@ -214,7 +214,7 @@ class BriefService:
         trace.identify(question=request.question)
         blockers = request.model.research_brief_blockers()
         if blockers:
-            return self._refused(
+            return record_refusal(
                 trace,
                 Refusal(
                     409,
@@ -229,12 +229,12 @@ class BriefService:
             )
         question = (request.question or "").strip()
         if not question:
-            return self._refused(
+            return record_refusal(
                 trace,
                 Refusal(400, "invalid_question", "A research question is required"),
             )
         if len(question) > MAX_QUESTION_CHARS:
-            return self._refused(
+            return record_refusal(
                 trace,
                 Refusal(400, "question_too_long", "The research question is too long"),
             )
@@ -247,12 +247,6 @@ class BriefService:
             trace=trace,
             cancel=cancellation.register(trace.trace_id),
         )
-
-    @staticmethod
-    def _refused(trace: BriefTrace, refusal: Refusal) -> Refusal:
-        """Record a refused brief and return the refusal unchanged."""
-        trace.refused(refusal.category, refusal.status)
-        return refusal
 
     def stream(self, resolved: ResolvedBrief) -> Iterator[AnswerEvent]:
         """

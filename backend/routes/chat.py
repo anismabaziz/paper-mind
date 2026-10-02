@@ -3,10 +3,10 @@
 import logging
 from typing import TYPE_CHECKING
 
-from flask import Flask, Response, jsonify, request, stream_with_context
+from flask import Flask, jsonify, request
 
 from errors import refusal
-from routes.common import check_filename, raise_refusal
+from routes.common import check_filename, raise_refusal, stream_response
 from routes.credentials import resolve_stored_provider
 from services.answering import AnswerRequest, AnswerService
 
@@ -57,14 +57,7 @@ def register_chat_routes(app: Flask, services: "Services") -> None:
             )
         )
 
-        return Response(
-            stream_with_context(
-                event.as_server_sent_event()
-                for event in answer_service.stream(resolved)
-            ),
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return stream_response(answer_service.stream(resolved))
 
     @app.route("/messages", methods=["GET"])
     def get_messages():

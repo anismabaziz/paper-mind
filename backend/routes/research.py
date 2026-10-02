@@ -3,10 +3,15 @@
 import logging
 from typing import TYPE_CHECKING
 
-from flask import Flask, Response, jsonify, request, stream_with_context
+from flask import Flask, jsonify, request
 
 from errors import BadRequest, Conflict
-from routes.common import check_filename, raise_refusal, raise_scope_refusal
+from routes.common import (
+    check_filename,
+    raise_refusal,
+    raise_scope_refusal,
+    stream_response,
+)
 from routes.credentials import resolve_stored_provider
 from services.brief import cancellation
 from services.brief.budget import BriefLimits
@@ -100,13 +105,7 @@ def register_research_routes(app: Flask, services: "Services") -> None:
             )
         )
 
-        return Response(
-            stream_with_context(
-                event.as_server_sent_event() for event in brief_service.stream(resolved)
-            ),
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return stream_response(brief_service.stream(resolved))
 
     @app.route("/research/cancel", methods=["POST"])
     def cancel_research_brief():

@@ -4,11 +4,11 @@ import logging
 import urllib.parse
 from typing import Any, NoReturn
 
-from flask import request
+from flask import Response, request, stream_with_context
 
 from errors import GENERIC_MESSAGE, BadRequest, Conflict, refusal
-from services.answering import Refusal
 from services.deletion import deletion_block_payload
+from services.streaming import Refusal
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +93,20 @@ def raise_scope_refusal(detail: dict | None) -> NoReturn:
         str(detail.get("category", "")),
         int(detail.get("status", 400)),
         **{key: value for key, value in detail.items() if key not in known},
+    )
+
+
+def stream_response(events) -> Response:
+    """
+    Return one run's events as the server-sent event stream it is.
+
+    Both routes that serve a stream share this framing, and the client parses
+    the same framing, so the framing is stated once instead of once per route.
+    """
+    return Response(
+        stream_with_context(event.as_server_sent_event() for event in events),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

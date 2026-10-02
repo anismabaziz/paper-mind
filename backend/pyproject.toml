@@ -63,6 +63,7 @@ files = [
     "services/llm",
     "services/models.py",
     "services/retrieval",
+    "services/streaming.py",
     "services/telemetry",
     "services/titles.py",
 ]

@@ -18,11 +18,10 @@ the evaluator reads them as case outcomes.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from errors import error_payload
@@ -60,6 +59,7 @@ from services.retrieval.base import (
     VectorStoreUnavailableError,
 )
 from services.retrieval.query_expansion import expand_query
+from services.streaming import AnswerEvent, Refusal, record_refusal
 from services.telemetry.answer import (
     ABSTAINED,
     ANSWERED,
@@ -88,43 +88,6 @@ class AnswerRequest:
     query: str
     provider: LLMProvider
     model: ModelCapabilities
-
-
-@dataclass(frozen=True)
-class Refusal:
-    """
-    Why a question was not answered, before any stream started.
-
-    A value rather than an exception, because the evaluator reads the same refusal
-    as a case outcome: a Document that cannot be asked about is never scored as
-    though it had produced a poor answer. A route that gets one hands it to
-    ``routes.common.raise_refusal``, which turns it into the failure the client
-    reads, so nothing here has to know what that shape is.
-    """
-
-    status: int
-    category: str
-    error: str
-    detail: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class AnswerEvent:
-    """One thing that happened to a question, named the way the stream names it."""
-
-    name: str
-    payload: dict[str, Any]
-
-    def as_server_sent_event(self) -> str:
-        """
-        Return this event as the one server-sent event block it is.
-
-        Both streams the application serves — a chat answer and a Research
-        Brief — write the same framing, and the client parses the same framing.
-        Encoding it here rather than in each route is what keeps the two from
-        drifting into protocols a client can read one of and not the other.
-        """
-        return f"event: {self.name}\ndata: {json.dumps(self.payload)}\n\n"
 
 
 @dataclass(frozen=True)
@@ -366,21 +329,21 @@ class AnswerService:
         trace.identify(filename=request.filename, query=request.query)
         refusal = self._refuse_unanswerable(request)
         if refusal is not None:
-            return self._refused(trace, refusal)
+            return record_refusal(trace, refusal)
 
         file_record = self.files.get_file(request.filename)
         conversation_id = self.conversations.get_conversation_id(file_record["id"])
         if not conversation_id:
-            return self._refused(
+            return record_refusal(
                 trace, Refusal(404, "conversation_not_found", "Conversation not found")
             )
         if not isinstance(request.query, str) or not request.query.strip():
-            return self._refused(
+            return record_refusal(
                 trace,
                 Refusal(400, "invalid_query", "Query and Filename are required"),
             )
         if len(request.query) > MAX_QUERY_CHARS:
-            return self._refused(
+            return record_refusal(
                 trace, Refusal(400, "query_too_long", "Query is too long")
             )
 
@@ -400,23 +363,23 @@ class AnswerService:
             log.exception("/response vector store failed for %s", request.filename)
             # The retrieval span already carries the failure's category: the
             # context it ran in classifies whatever escapes it.
-            return self._refused(trace, vector_store_refusal(exc))
+            return record_refusal(trace, vector_store_refusal(exc))
         except VectorDimensionError as exc:
             log.warning(
                 "/response vector dimension mismatch for %s: %s", request.filename, exc
             )
-            return self._refused(
+            return record_refusal(
                 trace, Refusal(409, "vector_dimension_mismatch", str(exc))
             )
         except Exception:
             log.exception("/response retrieval failed for %s", request.filename)
-            return self._refused(trace, Refusal(500, "", "Internal server error"))
+            return record_refusal(trace, Refusal(500, "", "Internal server error"))
 
         if not self._still_present(request.filename):
             log.warning(
                 "/response refusing chat for deleting document %s", request.filename
             )
-            return self._refused(
+            return record_refusal(
                 trace, deletion_block_refusal(self.files.get_file(request.filename))
             )
 
@@ -429,7 +392,7 @@ class AnswerService:
             log.exception(
                 "/response could not commit the question for %s", request.filename
             )
-            return self._refused(trace, Refusal(500, "", "Internal server error"))
+            return record_refusal(trace, Refusal(500, "", "Internal server error"))
 
         trace.identify(turn_id=turn_id)
         return ResolvedTurn(
@@ -443,12 +406,6 @@ class AnswerService:
             provenance=self._provenance(request, file_record, retrieval),
             trace=trace,
         )
-
-    @staticmethod
-    def _refused(trace: AnswerTrace, refusal: Refusal) -> Refusal:
-        """Record a refused request and return the refusal unchanged."""
-        trace.refused(refusal.category, refusal.status)
-        return refusal
 
     def stream(self, resolved: ResolvedTurn) -> Iterator[AnswerEvent]:
         """
