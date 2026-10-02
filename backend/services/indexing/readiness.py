@@ -20,7 +20,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from services.deletion import is_deleting_record
-from services.indexing.state import REINDEXING_STATES, IndexState, index_status
+from services.indexing.state import (
+    PENDING,
+    REINDEXING_STATES,
+    IndexState,
+    judge_index,
+)
 
 #: Why a Document cannot be read. Named rather than worded so the callers can
 #: say it in their own terms and both are still told the same thing happened.
@@ -42,37 +47,35 @@ class DocumentRefusal:
     detail: dict[str, Any] = field(default_factory=dict)
 
 
-def document_refusal(
-    repositories: Any,
+def refuse(
+    file_record: dict | None,
+    ingestion_job: dict | None,
     settings: Any,
-    filename: str,
 ) -> DocumentRefusal | None:
     """
     Return why one Document cannot be read, or None when it can.
 
-    The index state is judged and recorded here rather than at each call site, so
-    the staleness reason stored against the Document is the same whichever path
-    asked.
+    The caller fetches the Document row and its latest ingestion job first,
+    so this stays pure: judging without recording. The refusal path records
+    the stale reason separately, and read-only paths never record at all.
     """
-    file_record = repositories.files.get_file(filename)
     if not file_record:
         return DocumentRefusal(404, UNREADABLE_MISSING)
     if is_deleting_record(file_record):
         return DocumentRefusal(
             409, UNREADABLE_DELETING, {"deletion": file_record.get("deletion_state")}
         )
-    ingestion_job = repositories.ingestion_jobs.get_latest(filename)
     if (
         file_record.get("is_processed")
         and ingestion_job
         and ingestion_job["state"] in REINDEXING_STATES
     ):
         return DocumentRefusal(409, UNREADABLE_INDEXING, {"job": ingestion_job})
-    state: IndexState = index_status(repositories.files, file_record, settings)
+    state: IndexState = judge_index(file_record, settings)
     detail = {"action": "reindex", "index": state.to_dict(settings)}
     if state.is_stale:
         return DocumentRefusal(409, UNREADABLE_STALE, detail)
-    if state.state == "pending":
+    if state.state == PENDING:
         return DocumentRefusal(409, UNREADABLE_PENDING, detail)
     return None
 

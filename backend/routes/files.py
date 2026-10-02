@@ -26,7 +26,7 @@ from routes.common import (
     is_safe_filename,
 )
 from services.deletion import is_deleting_record
-from services.indexing.state import index_status
+from services.indexing.state import judge_index
 from services.titles import backfill_title, derive_title
 
 if TYPE_CHECKING:
@@ -73,8 +73,7 @@ def register_file_routes(app: Flask, services: "Services") -> None:
 
     def _index_status(file_record: dict) -> dict:
         """Judge a document's index against the running configuration."""
-        state = index_status(files_repository, file_record, services.settings)
-        return state.to_dict(services.settings)
+        return judge_index(file_record, services.settings).to_dict(services.settings)
 
     def _known_file(filename: str) -> dict:
         """

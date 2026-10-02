@@ -65,7 +65,7 @@ class IndexState:
         }
 
 
-def index_state(file_record: dict, settings: Settings) -> IndexState:
+def judge_index(file_record: dict, settings: Settings) -> IndexState:
     """Compare a Document's stored manifest with the running configuration."""
     stored = manifest_from_json(file_record.get("index_manifest"))
     generation = int(file_record.get("index_generation") or 0)
@@ -81,12 +81,12 @@ def index_state(file_record: dict, settings: Settings) -> IndexState:
     return IndexState(READY, stored, [], generation)
 
 
-def index_status(
-    files_repository: Any, file_record: dict, settings: Settings
+def record_stale_reason(
+    files_repository: Any, filename: str, file_record: dict, settings: Settings
 ) -> IndexState:
     """Judge a Document's index and record the verdict for operators."""
-    state = index_state(file_record, settings)
+    state = judge_index(file_record, settings)
     reason = ", ".join(change_labels(state.changes)) if state.is_stale else None
     if (file_record.get("index_stale_reason") or None) != reason:
-        files_repository.set_index_stale(file_record["filename"], reason)
+        files_repository.set_index_stale(filename, reason)
     return state

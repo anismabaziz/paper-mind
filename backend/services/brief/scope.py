@@ -22,8 +22,9 @@ from typing import Any
 
 from services.indexing.readiness import (
     BRIEF_REFUSAL_MESSAGES,
-    document_refusal,
+    refuse,
 )
+from services.indexing.state import record_stale_reason
 
 #: A brief is a cross-Document question over a chosen pair. Not one, not three.
 #: This is the default a caller falls back to; the brief's own limits carry the
@@ -124,7 +125,11 @@ def resolve_scope(
 
     scoped: list[ScopedDocument] = []
     for label, filename in zip(SCOPE_LABELS[:limit], wanted):
-        refusal = document_refusal(repositories, settings, filename)
+        file_record = repositories.files.get_file(filename)
+        ingestion_job = repositories.ingestion_jobs.get_latest(filename)
+        refusal = refuse(file_record, ingestion_job, settings)
+        if file_record is not None:
+            record_stale_reason(repositories.files, filename, file_record, settings)
         if refusal is not None:
             status, template = BRIEF_REFUSAL_MESSAGES[refusal.category]
             return None, {
@@ -134,7 +139,7 @@ def resolve_scope(
                 "label": label,
                 **refusal.detail,
             }
-        file_record = repositories.files.get_file(filename) or {}
+        file_record = file_record or {}
         scoped.append(
             ScopedDocument(
                 label=label,

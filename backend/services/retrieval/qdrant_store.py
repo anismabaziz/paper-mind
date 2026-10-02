@@ -441,7 +441,7 @@ class QdrantIndexAdapter(VectorStore):
         The report is an inventory, not a verdict: counting, vector presence,
         payload completeness, and Page provenance are aggregated here, while
         the policy that decides whether the generation may be activated lives
-        in :class:`services.retrieval.vector_service.VectorService`.
+        in :mod:`services.indexing.activation`.
         """
         self._ensure_collection(create=False)
         total = self.count(filter=filter)

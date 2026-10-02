@@ -47,9 +47,9 @@ from services.indexing.readiness import (
     CHAT_REFUSAL_MESSAGES,
     UNREADABLE_DELETING,
     UNREADABLE_STALE,
-    document_refusal,
+    refuse,
 )
-from services.indexing.state import index_status
+from services.indexing.state import judge_index, record_stale_reason
 from services.llm.base import EmptyAnswerError, LLMProvider, ProviderTimeoutError
 from services.retrieval.base import (
     RetrievalMethod,
@@ -484,9 +484,13 @@ class AnswerService:
         that reads Documents; what is added here is how a question about it
         reads, since that is what this route's reader is waiting on.
         """
-        unreadable = document_refusal(
-            self._repositories, self._settings, request.filename
-        )
+        file_record = self.files.get_file(request.filename)
+        ingestion_job = self._repositories.ingestion_jobs.get_latest(request.filename)
+        unreadable = refuse(file_record, ingestion_job, self._settings)
+        if file_record is not None:
+            record_stale_reason(
+                self.files, request.filename, file_record, self._settings
+            )
         if unreadable is None:
             return None
         if unreadable.category == UNREADABLE_DELETING:
@@ -609,7 +613,7 @@ class AnswerService:
         return AnswerProvenance(
             index_manifest=stored.to_dict() if stored else None,
             index_generation=file_record.get("index_generation"),
-            index_state=index_status(self.files, file_record, self._settings).state,
+            index_state=judge_index(file_record, self._settings).state,
             retrieval_method=retrieval.payload["method"],
             retrieval_outcome=retrieval.payload["outcome"],
             prompt_version=PROMPT_VERSION,

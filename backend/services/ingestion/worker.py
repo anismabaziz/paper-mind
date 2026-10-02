@@ -16,6 +16,7 @@ from repositories.index_cleanups import (
 )
 from repositories.ingestion_jobs import IngestionJobRepository
 from services.embeddings.local_embeddings import EmbeddingService
+from services.indexing.activation import activate_generation
 from services.indexing.manifest import manifest_builder as manifest_builder_for
 from services.ingestion.limits import (
     IngestionCancelled,
@@ -428,7 +429,6 @@ class IngestionWorker:
                 if file_record.get("deletion_state") in ("deleting", "delete_failed"):
                     self._supersede(job)
                     return
-                previous_generation = file_record.get("index_generation")
                 had_ready_index = bool(file_record.get("is_processed"))
                 guard.observe()
                 if not self._stage(job, "parsing", 10, guard):
@@ -483,13 +483,6 @@ class IngestionWorker:
                 )
                 if not self._stage(job, "validating", 90, guard, cleanup=True):
                     return
-                if isinstance(self._vectors, VectorService):
-                    self._vectors.validate_generation(
-                        filename,
-                        job["generation"],
-                        len(embeddings),
-                        page_count=page_count or None,
-                    )
                 guard.observe()
                 if self._cancel_if_requested(job, guard, cleanup=True):
                     return
@@ -502,16 +495,17 @@ class IngestionWorker:
                     return
                 if not fresh.get("is_processed"):
                     self._conversations.ensure_conversation(fresh["id"])
-                # The removal of the generation this one replaces is written
-                # down before activation, so a restart between the two still
-                # retires the superseded vectors.
-                self._schedule_cleanup(filename, previous_generation)
                 if (
-                    self._jobs.mark_ready(
-                        job["id"],
-                        self._worker_id,
-                        index_generation=job["generation"],
-                        index_manifest=self._manifest_builder(
+                    activate_generation(
+                        files=self._files,
+                        jobs=self._jobs,
+                        cleanups=self._cleanups,
+                        vector_store=self._vectors.store,
+                        job=job,
+                        worker_id=self._worker_id,
+                        expected_count=len(embeddings),
+                        page_count=page_count or None,
+                        manifest_json=self._manifest_builder(
                             file_content, job["generation"]
                         ).to_json(),
                     )
