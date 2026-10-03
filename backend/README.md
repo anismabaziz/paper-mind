@@ -178,8 +178,7 @@ Ruff, format, and mypy are the gate.
 
 ## Auditing dependencies and models
 
-`audit/` answers two questions CI asks on a schedule, and one it asks on every
-pull request:
+`audit/` answers three questions on demand (nothing here runs in CI):
 
 ```bash
 uv run python -m audit.cli python      # locked Python dependencies vs the advisory database
@@ -445,6 +444,6 @@ The `digest.md`, `digest.json`, and `traces-summary.json` under each published
 report directory are generated and committed. Re-render them whenever the report
 or the renderer changes and commit the result, the way the reports themselves
 are committed: the digest is what a reviewer reads, and a digest that only
-exists on the machine that produced it is not a report. CI renders all three
-again, uploads them as an artifact whether or not the bounds are crossed, and
-fails only on a crossed bound.
+exists on the machine that produced it is not a report. Re-render and
+hold to bounds locally with `evaluation.cli --render ... --check
+evaluation/thresholds.json`; nothing in CI renders or checks reports.

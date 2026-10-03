@@ -328,8 +328,7 @@ cd backend && uv run ruff check . && uv run mypy
 cd ../frontend && npm run lint && npm run build
 ```
 
-Lint, type-check, and the production build are the gate. CI runs the same
-three plus the evaluation report thresholds.
+Lint, type-check, and the production build are the gate, in CI and locally.
 
 The evaluator (`backend/evaluation/`) runs a versioned labeled case set
 (`backend/evaluation/datasets/`) through the production answer path and

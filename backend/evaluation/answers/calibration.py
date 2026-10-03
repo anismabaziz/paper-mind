@@ -22,7 +22,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from evaluation.answers.judge import RUBRIC_VERSION, UNKNOWN, VERDICTS, judge_faithfulness
+from evaluation.answers.judge import (
+    RUBRIC_VERSION,
+    UNKNOWN,
+    VERDICTS,
+    judge_faithfulness,
+)
 
 CALIBRATION_PATH = Path(__file__).parent.parent / "calibration.json"
 

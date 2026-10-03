@@ -1,17 +1,16 @@
 """
-The audit command CI runs.
+The on-demand dependency and model audit.
 
 Two checks, kept apart on purpose because they fail for different reasons and
 are fixed by different people:
 
 - ``python`` and ``node`` run the ecosystem's own audit tool and decide
   whether the findings block. These are deterministic: given the same
-  lockfiles and the same advisory database, the answer does not change, which
-  is what makes them safe to gate a pull request on.
+  lockfiles and the same advisory database, the answer does not change.
 - ``models`` asks the model providers whether every catalog entry still works,
   and checks that the pinned local revisions still exist upstream. This needs
-  the network, the provider keys, and hours rather than seconds, so it belongs
-  in a scheduled job whose failure is a signal rather than a broken build.
+  the network, the provider keys, and hours rather than seconds, so run it by
+  hand when the world may have moved, not on every push.
 
 Keys are read from the environment and never from an argument, because an
 argument is visible to every process on the machine and lands in shell history.
@@ -256,8 +255,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.check in ("models", "all"):
         # Imported here, not at module scope: this sweep needs the provider
         # SDKs, while the revision check below needs nothing installed. Making
-        # it lazy lets that check run on a bare interpreter, which is what
-        # keeps its CI job to three HTTP calls and no dependency install.
+        # it lazy lets that check run on a bare interpreter: three HTTP calls
+        # and no dependency install.
         from services.accounts.model_availability import (
             check_catalog,
             format_report as format_availability,
