@@ -83,3 +83,71 @@ jobs:
 
       - name: Type-check
         run: uv run mypy
+
+      - name: Unit tests
+        # Plain pytest collects tests/unit only (see testpaths in
+        # backend/pyproject.toml): fast, no network, database, or models.
+        run: uv run pytest
+
+      - name: Integration tests
+        # Flask app over fakes with real temp storage: no services needed.
+        run: uv run pytest tests/integration
+
+  backend-slow:
+    name: Backend slow tests (infra + models)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: papermind
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: papermind_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      qdrant:
+        image: qdrant/qdrant:v1.19.0
+        ports:
+          - 6333:6333
+
+    env:
+      POSTGRES_USER: papermind
+      POSTGRES_PASSWORD: test
+      POSTGRES_TEST_DB: papermind_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --frozen --dev
+
+      - name: Cache model weights
+        # BGE-M3 and MiniLM download once, then reuse. The suite downloads
+        # them itself on a cold cache.
+        uses: actions/cache@70428872260ebe74debd02b27fbf4d9046473840 # v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: hf-models-
+
+      - name: Slow tests
+        # Real Postgres, Qdrant, parsing, and model weights. Skips suites
+        # whose service is unreachable instead of failing the run.
+        run: uv run pytest tests/slow
