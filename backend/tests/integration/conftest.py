@@ -328,7 +328,7 @@ def provider_model():
 
 
 @pytest.fixture()
-def stored_settings():
+def stored_settings(isettings):
     """An app-settings row with a really encrypted key for the test secret."""
     return {
         "provider": "google",

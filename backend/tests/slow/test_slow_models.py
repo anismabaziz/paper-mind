@@ -77,16 +77,16 @@ class TestRealReranker:
         ]
 
     def test_reorders_by_relevance(self, reranker):
-        out = reranker.rerank("how do mitochondria make energy?", self._sources())
-        assert [s["content"] for s in out] == [s["content"] for s in self._sources()]
-        scores = [s["score"] for s in out]
         import math
 
+        out = reranker.rerank("how do mitochondria make energy?", self._sources())
+        scores = [s["score"] for s in out]
         if not all(math.isfinite(score) for score in scores):
             pytest.skip(
                 "cross-encoder returns non-finite scores in this environment "
                 "(torch backend issue); the service keeps legacy order"
             )
+        assert [s["content"] for s in out] != [s["content"] for s in self._sources()]
         assert out[0]["content"].startswith("mitochondria")
         assert all("rerank_score" in source for source in out)
 
