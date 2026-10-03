@@ -180,7 +180,7 @@ class RerankerService(Reranker):
 
         Centralises the ``query_text is not None and sources`` guard and the
         degraded-to-legacy fallback so ``VectorService`` and
-        ``evaluation.evaluator`` share one path instead of duplicating the
+        ``evaluation.answers.evaluator`` share one path instead of duplicating the
         try/except gate.
 
         Returns ``sources`` unchanged when the gate is off, the query is

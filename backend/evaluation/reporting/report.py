@@ -32,9 +32,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evaluation import experiments
-from evaluation.dataset import TUNING
-from evaluation.experiments import describe
+from evaluation.answers import experiments
+from evaluation.answers.dataset import TUNING
+from evaluation.answers.experiments import describe
 from services.answering import AnswerSettings
 from services.citations import PROMPT_VERSION
 from services.indexing.manifest import COLLECTION_SCHEMA_VERSION

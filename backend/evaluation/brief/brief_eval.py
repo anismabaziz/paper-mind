@@ -25,15 +25,15 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from evaluation import brief_grading
-from evaluation.brief_grading import (
+from evaluation.brief import brief_grading
+from evaluation.brief.brief_grading import (
     BriefClaimRecord,
     BriefResultRecord,
     BriefTrajectory,
     EvidenceRecord,
     ToolCallRecord,
 )
-from evaluation.metrics import latency_summary, percentile
+from evaluation.answers.metrics import latency_summary, percentile
 
 #: The configurations a brief report compares, in the order it compares them.
 #: Direct retrieval asks once with no tools; the brief searches and reads;
@@ -692,7 +692,7 @@ def write_brief_report(
     revision: dict[str, Any] | None = None,
 ) -> Path:
     """Write a brief tool-use report a reviewer can read without running anything."""
-    from evaluation import report as report_module
+    from evaluation.reporting import report as report_module
 
     directory = Path(directory)
     results_dir = directory / report_module.RESULTS_DIR

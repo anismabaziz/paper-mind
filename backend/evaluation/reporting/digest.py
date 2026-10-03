@@ -34,7 +34,8 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from evaluation import experiments, report, traces as trace_reader
+from evaluation.answers import experiments
+from evaluation.reporting import report, traces as trace_reader
 
 DIGEST_NAME = "digest.md"
 DIGEST_JSON_NAME = "digest.json"

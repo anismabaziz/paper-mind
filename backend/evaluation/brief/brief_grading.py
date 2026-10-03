@@ -27,8 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from evaluation.graders import content_words
-from evaluation.metrics import contains_snippet
+from evaluation.answers.graders import content_words
+from evaluation.answers.metrics import contains_snippet
 
 PASSED = "passed"
 FAILED = "failed"

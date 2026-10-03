@@ -15,7 +15,7 @@ path writes that a committed report can carry. A file of traces therefore stays
 publishable: the question, the answer, the prompt, and the Passage text are
 already gone before this module sees one.
 
-Percentiles come from :mod:`evaluation.metrics`, so a trace's p50 and an
+Percentiles come from :mod:`evaluation.answers.metrics`, so a trace's p50 and an
 evaluation run's p50 are the same definition rather than two that look alike.
 """
 
@@ -26,7 +26,7 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from evaluation.metrics import latency_summary
+from evaluation.answers.metrics import latency_summary
 
 #: The spans a summary reads. A trace of an answer request always has the
 #: generation span when a model was called and the retrieval span whenever the

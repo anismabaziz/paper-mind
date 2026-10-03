@@ -28,19 +28,19 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
-from evaluation import judge as judge_module
-from evaluation.calibration import load_calibration, run_calibration
-from evaluation.dataset import REPORTED, Case, Dataset, abstention_required
-from evaluation.graders import (
+from evaluation.answers import judge as judge_module
+from evaluation.answers.calibration import load_calibration, run_calibration
+from evaluation.answers.dataset import REPORTED, Case, Dataset, abstention_required
+from evaluation.answers.graders import (
     UNKNOWN,
     Grade,
     GradedCase,
     grade_case,
     outcome_for_score,
 )
-from evaluation.harness import EvaluationEnvironment
-from evaluation.judge import Judge
-from evaluation.metrics import (
+from evaluation.answers.harness import EvaluationEnvironment
+from evaluation.answers.judge import Judge
+from evaluation.answers.metrics import (
     LatencySummary,
     MetricSummary,
     PricedModel,
@@ -50,7 +50,7 @@ from evaluation.metrics import (
     retrieval_scores,
     summarize,
 )
-from evaluation.outcomes import (
+from evaluation.answers.outcomes import (
     ABSTAINED,
     ANSWERED,
     CANCELLED,

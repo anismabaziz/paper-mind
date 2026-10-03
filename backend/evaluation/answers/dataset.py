@@ -26,9 +26,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from evaluation.graders import content_words
-from evaluation.metrics import contains_snippet
-from evaluation.outcomes import (
+from evaluation.answers.graders import content_words
+from evaluation.answers.metrics import contains_snippet
+from evaluation.answers.outcomes import (
     ABSTAINED,
     ANSWERED,
     CITATION_ERROR,
@@ -37,10 +37,10 @@ from evaluation.outcomes import (
 )
 from services.parsing.pdf_service import PDFParser
 
-DATASETS_DIR = Path(__file__).parent / "datasets"
+DATASETS_DIR = Path(__file__).parent.parent / "datasets"
 
 #: Where the documents the cases are labelled against are committed.
-SAMPLE_DOCS_DIR = Path(__file__).parent / "sample_docs"
+SAMPLE_DOCS_DIR = Path(__file__).parent.parent / "sample_docs"
 
 #: The version a run measures by default. It is a directory name, so a new set
 #: is a new directory and the one it replaces stays readable beside it.

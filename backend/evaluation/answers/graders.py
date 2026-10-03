@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from evaluation.metrics import contains_snippet
+from evaluation.answers.metrics import contains_snippet
 from services.text import STOPWORDS, word_parts
 
 PASSED = "passed"

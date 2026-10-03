@@ -27,7 +27,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from evaluation.dataset import REPORTED, TUNING
+from evaluation.answers.dataset import REPORTED, TUNING
 from services.retrieval.base import RetrievalMethod
 from settings import Settings
 

@@ -72,11 +72,12 @@ from services.llm.base import ChatCredentials, is_context_fallback
 from services.llm.factory import build_chat_provider
 from settings import Settings
 
-from evaluation import ablations, digest, experiments, report, traces
-from evaluation.dataset import REPORTED, SPLITS, load_dataset
-from evaluation.evaluator import DEFAULT_K, evaluate
-from evaluation.harness import build_environment, remove_documents
-from evaluation.judge import Judge, JudgeSettings
+from evaluation.answers import ablations, experiments
+from evaluation.answers.dataset import REPORTED, SPLITS, load_dataset
+from evaluation.answers.evaluator import DEFAULT_K, evaluate
+from evaluation.answers.harness import build_environment, remove_documents
+from evaluation.answers.judge import Judge, JudgeSettings
+from evaluation.reporting import digest, report, traces
 
 EVAL_PREFIX = "eval-"
 
@@ -836,8 +837,8 @@ def _brief_eval_main(args) -> None:
     cost estimate inside ``--brief-cost-limit``; without both the schedule
     gate refuses before the first paid call.
     """
-    from evaluation import brief_eval
-    from evaluation.brief_tasks import load_brief_tasks
+    from evaluation.brief import brief_eval
+    from evaluation.brief.brief_tasks import load_brief_tasks
 
     task_set = load_brief_tasks()
     if args.allow_paid:

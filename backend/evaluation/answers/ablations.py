@@ -29,16 +29,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from evaluation.dataset import Case, Dataset
-from evaluation.experiments import Experiment
-from evaluation.harness import EvaluationEnvironment
-from evaluation.metrics import (
+from evaluation.answers.dataset import Case, Dataset
+from evaluation.answers.experiments import Experiment
+from evaluation.answers.harness import EvaluationEnvironment
+from evaluation.answers.metrics import (
     RetrievalReport,
     latency_summary,
     retrieval_scores,
     summarize,
 )
-from evaluation.report import evidence_for_retrieval
+from evaluation.reporting.report import evidence_for_retrieval
 from services.retrieval.query_expansion import expand_query
 from services.retrieval.vector_service import FETCH_K
 

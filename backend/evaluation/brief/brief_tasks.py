@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-TASKS_DIR = Path(__file__).parent / "datasets"
+TASKS_DIR = Path(__file__).parent.parent / "datasets"
 
 CURRENT_BRIEF_TASKS = "2026-09-brief-tasks-v1"
 

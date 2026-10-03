@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from evaluation.dataset import Dataset
+from evaluation.answers.dataset import Dataset
 from repositories import Repositories, build_repositories
 from services.accounts.chat_settings_service import ModelCapabilities
 from services.answering import AnswerService
@@ -33,7 +33,7 @@ from services.retrieval.base import RetrievalResult, VectorStoreConfigurationErr
 from services.retrieval.vector_service import VectorService
 from settings import Settings
 
-SAMPLE_DOCS_DIR = Path(__file__).parent / "sample_docs"
+SAMPLE_DOCS_DIR = Path(__file__).parent.parent / "sample_docs"
 
 #: The question a retrieval capability check asks. It is ordinary text with
 #: content words in it, so the production path selects hybrid retrieval for it
