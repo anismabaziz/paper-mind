@@ -1,8 +1,9 @@
 """
 Storage for uploaded PDF bytes.
 
-The app only knows the interface below; swapping local disk for a bucket
-service means implementing the same five methods.
+Dependents take storage through the constructor, so a second adapter would
+arrive as a constructor argument. There is no storage port: one adapter does
+not justify one.
 """
 
 import threading

@@ -54,12 +54,3 @@ def get_vector_index():
                     get_qdrant_client(), get_settings().vector.index_name
                 )
     return _qdrant_index
-
-
-def reset_providers() -> None:
-    """Drop memoized clients (tests install fakes or rewire between runs)."""
-    global _qdrant_client, _qdrant_index
-    with _qdrant_lock:
-        _qdrant_client = None
-    with _qdrant_index_lock:
-        _qdrant_index = None

@@ -14,8 +14,10 @@ Two tools, two report shapes:
   advisories that name it. It does not say whether a package is a direct
   dependency, so that comes from the project's own ``pyproject.toml``.
 - ``npm audit --format=json`` reports per-package entries whose ``via`` list
-  mixes a package's own advisories (strings) with ones inherited from its
-  dependencies (objects), and does say which packages are direct.
+  mixes the package's own advisories (objects with a title and a URL) with
+  references to other entries in the same report (strings naming the package
+  the vulnerability is inherited through), and does say which packages are
+  direct.
 
 The parsers read the recorded text, not the tools, so both are checkable
 without a network and without the tools installed. A report that cannot be
@@ -163,17 +165,22 @@ def parse_npm_audit(report: Any) -> tuple[Finding, ...]:
         fix_available = entry.get("fixAvailable") not in (False, None)
         for via in entry.get("via") or []:
             if isinstance(via, str):
-                advisory, inherited_severity = via, severity
-            elif isinstance(via, dict):
-                inherited_severity = str(via.get("severity", severity))
-                advisory = str(via.get("title") or via.get("url") or "")
-                # npm puts the identifier in the advisory URL and only the
-                # prose in the title, and the identifier is what a reader
-                # looks up and what an acceptance is recorded against.
-                identifier = _ADVISORY_ID.search(f"{via.get('url', '')} {advisory}")
-            else:
+                # A string names another entry in the same report whose
+                # vulnerability this package inherits through the dependency
+                # tree (for example "fast-glob" inside the "shadcn" entry).
+                # It is a dependency edge, not an advisory: counting it would
+                # invent an advisory named after a package and wrongly blame
+                # the direct dependency for a transitive finding.
                 continue
-            if isinstance(via, str) or identifier is None:
+            if not isinstance(via, dict):
+                continue
+            inherited_severity = str(via.get("severity", severity))
+            advisory = str(via.get("title") or via.get("url") or "")
+            # npm puts the identifier in the advisory URL and only the
+            # prose in the title, and the identifier is what a reader
+            # looks up and what an acceptance is recorded against.
+            identifier = _ADVISORY_ID.search(f"{via.get('url', '')} {advisory}")
+            if identifier is None:
                 identifier = _ADVISORY_ID.search(advisory)
             findings.append(
                 Finding(
@@ -182,9 +189,9 @@ def parse_npm_audit(report: Any) -> tuple[Finding, ...]:
                     version="",
                     advisory=identifier.group(0) if identifier else advisory,
                     severity=inherited_severity,
-                    # An advisory inherited through a dependency stays
-                    # attributed to the direct package, because that is the
-                    # one this project chose and can upgrade.
+                    # A direct package's own advisory stays attributed to it,
+                    # because that is the one this project chose and can
+                    # upgrade.
                     direct=is_direct,
                     fix_available=fix_available,
                 )

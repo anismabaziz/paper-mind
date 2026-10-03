@@ -61,7 +61,6 @@ from pathlib import Path
 
 
 import settings as settings_module
-from providers import get_vector_index
 from services.accounts.chat_settings_service import (
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
@@ -72,7 +71,6 @@ from services.accounts.chat_settings_service import (
 from services.llm.base import ChatCredentials, is_context_fallback
 from services.llm.factory import build_chat_provider
 from settings import Settings
-from storage import get_storage
 
 from evaluation import ablations, digest, experiments, report, traces
 from evaluation.dataset import REPORTED, SPLITS, load_dataset
@@ -262,36 +260,31 @@ def _environment(
     even when the gate is off, so that a variant can turn it on for one call
     over an index the other variants share.
     """
-    from services.embeddings.local_embeddings import LocalEmbeddingService
+    from composition import Services
     from services.retrieval.reranker import RerankerService
     from services.retrieval.vector_service import VectorService
 
     settings_module.set_settings(app_settings)
-    embedding_service = LocalEmbeddingService(
-        app_settings.embedding.embedding_model,
-        revision=app_settings.embedding.revision,
-        trust_remote_code=app_settings.embedding.trust_remote_code,
-    )
-    return build_environment(
-        dataset,
-        settings=app_settings,
-        session_factory=None,
-        storage=get_storage(),
-        embedding_service=embedding_service,
-        vector_service=VectorService(
-            get_vector_index(),
+    services = Services.from_settings(app_settings)
+    vector_service = services.vector_service
+    if rerank_enabled is not None:
+        vector_service = VectorService(
+            services.vector_service.store,
             RerankerService(
                 app_settings.rerank.rerank_model,
                 revision=app_settings.rerank.revision,
                 trust_remote_code=app_settings.rerank.trust_remote_code,
-                enabled=(
-                    app_settings.rerank.enabled
-                    if rerank_enabled is None
-                    else rerank_enabled
-                ),
+                enabled=rerank_enabled,
             ),
-            embedding_service=embedding_service,
-        ),
+            embedding_service=services.embedding_service,
+        )
+    return build_environment(
+        dataset,
+        settings=app_settings,
+        session_factory=None,
+        storage=services.storage,
+        embedding_service=services.embedding_service,
+        vector_service=vector_service,
         chat_provider_factory=generator_factory(),
         documents_prefix=documents_prefix,
     )
