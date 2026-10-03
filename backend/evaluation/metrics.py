@@ -20,15 +20,9 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
-
-class PricedModel(Protocol):
-    """What a cost estimate reads: the model's identity and its two prices."""
-
-    id: str
-    input_cost_per_million_usd: float
-    output_cost_per_million_usd: float
+from services.telemetry.cost import PricedModel
 
 
 def _normalize(text: str) -> str:
