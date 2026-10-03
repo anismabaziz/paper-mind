@@ -2,10 +2,7 @@
 .venv/
 .env
 .env.local
-.env.development
-.env.production
 .env.*.local
-.infra.env
 
 # OS Files
 .DS_Store

@@ -50,9 +50,9 @@ uv run alembic upgrade head
 uv run python app.py   # API on http://127.0.0.1:3000 (GET /health)
 ```
 
-`bootstrap-local.sh` is idempotent: it creates gitignored
-`backend/.infra.env` with a random Postgres password and writes a matching
-`DATABASE_URL` into `backend/.env`. No step edits a published port — every
+`bootstrap-local.sh` is idempotent: it writes a random `POSTGRES_PASSWORD`
+and a matching `DATABASE_URL` into gitignored `backend/.env`. No step edits
+a published port — every
 service binds `127.0.0.1` by default, so the database and the vector store
 are reachable from your machine and invisible to the LAN.
 
@@ -117,17 +117,18 @@ another machine on the network unless you explicitly allow it.
 - Postgres (`5432`), Qdrant HTTP (`6333`), and Qdrant gRPC (`6334`) publish
   on `127.0.0.1` only, in `compose.yaml`.
 - The Postgres password is generated per machine by
-  `backend/scripts/bootstrap-local.sh` into gitignored `backend/.infra.env`
+  `backend/scripts/bootstrap-local.sh` into gitignored `backend/.env`
   — no fixed default ships in source control.
 - Qdrant runs without an API key on loopback. The backend refuses to start
   against a non-loopback `QDRANT_URL` unless `QDRANT_API_KEY` is set, and
-  `compose.qdrant-auth.yaml` is the compose path that turns the key on for the
-  server. It is an overlay rather than a line in `compose.yaml` because even an
+  the commented `QDRANT__SERVICE__API_KEY` line in `compose.yaml` is the
+  compose path that turns the key on for the server. It stays commented
+  rather than set-but-empty because even an
   empty `QDRANT__SERVICE__API_KEY` switches Qdrant into auth-required mode and
   would lock out keyless local clients.
 - Development and test credentials are isolated: the full-stack suite mints
   an ephemeral `POSTGRES_TEST_*` password per run and never reads
-  `backend/.infra.env`.
+  `backend/.env` secrets.
 - `tests/test_local_network.py` proves the effective published addresses (both
   the compose file and `docker compose config`), the remote-without-key refusal,
   and what the bootstrap script generates.
@@ -136,7 +137,9 @@ Before exposing anything beyond loopback:
 
 ```bash
 export QDRANT_API_KEY='<strong unique value>'
-docker compose -f backend/compose.yaml -f backend/compose.qdrant-auth.yaml up -d
+# uncomment the QDRANT__SERVICE__API_KEY line in backend/compose.yaml,
+# then restart infra:
+docker compose -f backend/compose.yaml up -d
 ```
 
 Put the same value in `backend/.env`, front the service with TLS, use a strong

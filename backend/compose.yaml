@@ -5,16 +5,16 @@ services:
     # change the database under an existing volume. The digest is the
     # multi-architecture index, so one pin covers Apple silicon and CI alike.
     # To move forward: change the tag, resolve the new index digest with
-    # `docker buildx imagetools inspect <tag>`, and update both here and in
-    # compose.test.yaml.
+    # `docker buildx imagetools inspect <tag>`, and update it here.
     image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
-    # Credentials come from backend/.infra.env (gitignored, created by
-    # backend/scripts/bootstrap-local.sh). Nothing secret lives in this file,
+    # Credentials come from backend/.env (gitignored, created by
+    # backend/scripts/bootstrap-local.sh). Only the two Postgres variables
+    # are passed in; the rest of backend/.env belongs to the app, not the
+    # database container. Nothing secret lives in this file,
     # so a clone never starts with a shared default password.
-    env_file:
-      - path: .infra.env
-        required: true
     environment:
+      POSTGRES_USER: ${POSTGRES_USER:-papermind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in backend/.env (run backend/scripts/bootstrap-local.sh)}
       POSTGRES_DB: papermind
     ports:
       # Loopback only: the database is reachable from this machine, never the LAN.
@@ -44,8 +44,10 @@ services:
       QDRANT__SERVICE__GRPC_PORT: 6334
       # No API key is set here on purpose: an empty value would still switch
       # Qdrant into auth-required mode and lock out keyless local clients.
-      # Remote deployments add `-f compose.qdrant-auth.yaml` with QDRANT_API_KEY
-      # exported; the backend refuses a remote QDRANT_URL without that key.
+      # Remote deployments: uncomment the next line and set the same value as
+      # QDRANT_API_KEY in backend/.env, then front the service with TLS.
+      # The backend refuses a remote QDRANT_URL without that key.
+      # QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in backend/.env before uncommenting}
 
 volumes:
   pgdata:

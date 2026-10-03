@@ -66,18 +66,23 @@ ensure_secrets() {
   # a healthy password is never rotated, so reruns keep the database working).
   # Covers invalid secrets: a placeholder password aborts with guidance.
   bash "$BACKEND_DIR/scripts/bootstrap-local.sh"
-  if grep -q '^POSTGRES_PASSWORD=replace-me' "$BACKEND_DIR/.infra.env" 2>/dev/null; then
-    die "invalid secrets: $BACKEND_DIR/.infra.env still holds the placeholder password. Fix: delete backend/.infra.env and rerun ./papermind.sh up to generate a random one."
+  if grep -q '^POSTGRES_PASSWORD=replace-me' "$BACKEND_DIR/.env" 2>/dev/null; then
+    die "invalid secrets: $BACKEND_DIR/.env still holds the placeholder password. Fix: delete the POSTGRES_PASSWORD line in backend/.env and rerun ./papermind.sh up to generate a random one."
   fi
   if [ ! -f "$BACKEND_DIR/.env" ] || ! grep -q '^APP_SECRET=' "$BACKEND_DIR/.env"; then
     secret=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
     printf '\nAPP_SECRET=%s\n' "$secret" >> "$BACKEND_DIR/.env"
     log "Generated APP_SECRET in backend/.env (encrypts stored provider keys)."
   fi
-  # shellcheck disable=SC1091
-  set -a; . "$BACKEND_DIR/.infra.env" 2>/dev/null || true; set +a
+  POSTGRES_USER=$(grep -E '^POSTGRES_USER=' "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2- | tail -n 1)
+  POSTGRES_PASSWORD=$(grep -E '^POSTGRES_PASSWORD=' "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2- | tail -n 1)
+  export POSTGRES_USER
   if [ -z "${POSTGRES_PASSWORD:-}" ]; then
-    die "invalid secrets: POSTGRES_PASSWORD is empty in backend/.infra.env. Fix: delete backend/.infra.env and rerun ./papermind.sh up."
+    die "invalid secrets: POSTGRES_PASSWORD is empty in backend/.env. Fix: delete the POSTGRES_PASSWORD line in backend/.env and rerun ./papermind.sh up."
+  fi
+  if [ ! -f "$FRONTEND_DIR/.env.local" ] && [ -z "${VITE_API_URL:-}" ]; then
+    cp "$FRONTEND_DIR/.env.example" "$FRONTEND_DIR/.env.local"
+    log "Created frontend/.env.local from .env.example (VITE_API_URL=$API_URL)."
   fi
 }
 
@@ -143,7 +148,7 @@ readiness() {
   # Confirms the database, migration state, Qdrant, and worker before success.
   log "Checking readiness (database, migrations, Qdrant, worker)..."
   (cd "$BACKEND_DIR" && uv run alembic current) | grep -q . \
-    || die "invalid secrets or unavailable services: cannot read migration state. Fix: confirm DATABASE_URL in backend/.env matches backend/.infra.env, then rerun ./papermind.sh up."
+    || die "invalid secrets or unavailable services: cannot read migration state. Fix: confirm DATABASE_URL in backend/.env matches POSTGRES_PASSWORD in the same file, then rerun ./papermind.sh up."
   curl -sf http://127.0.0.1:6333/collections >/dev/null \
     || die "unavailable services: Qdrant unreachable. Fix: run 'docker compose -f backend/compose.yaml ps', then rerun ./papermind.sh up."
   curl -sf "$API_URL/health" >/dev/null \

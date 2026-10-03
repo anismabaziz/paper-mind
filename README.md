@@ -81,7 +81,7 @@ are documented in [frontend/.env.example](frontend/.env.example), and the
 backend's in [backend/.env.example](backend/.env.example).
 
 Required env vars: `DATABASE_URL` (written by `backend/scripts/bootstrap-local.sh`
-from a per-machine random password in gitignored `backend/.infra.env`)
+from a per-machine random `POSTGRES_PASSWORD` in gitignored `backend/.env`)
 and `QDRANT_URL` (defaults to `http://localhost:6333`). Optional: `QDRANT_API_KEY`
 — empty for loopback development, required before any remote Qdrant address —
 and `APP_SECRET`
