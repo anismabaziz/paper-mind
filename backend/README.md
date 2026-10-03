@@ -176,6 +176,33 @@ uv run ruff check . && uv run mypy
 
 Ruff, format, and mypy are the gate.
 
+## Testing
+
+Three suites, split by what they need. Plain `pytest` runs the unit suite
+only; the heavier suites never run by accident.
+
+```bash
+uv run pytest                    # unit: fast, no network, database, or models
+uv run pytest tests/integration  # routes and services over fakes, real temp storage
+uv run pytest tests/slow         # real Postgres, Qdrant, parsing, and model weights
+```
+
+The slow suite needs the compose stack and a test database:
+
+```bash
+docker compose up -d db qdrant
+psql -U papermind -d postgres -c "CREATE DATABASE papermind_test"
+uv run pytest tests/slow
+```
+
+It reads `POSTGRES_USER` / `POSTGRES_PASSWORD` from the environment (the
+same values the stack runs on), uses an isolated `papermind_test` database
+and `papermind-test-slow` collection, and loads embedding and reranker
+weights from the local Hugging Face cache, downloading them only on a cold
+cache. Suites whose service is unreachable skip instead of failing. CI runs
+unit plus integration on every push, and the slow suite as its own job with
+Postgres and Qdrant services.
+
 ## Auditing dependencies and models
 
 `audit/` answers three questions on demand (nothing here runs in CI):
