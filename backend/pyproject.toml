@@ -65,6 +65,7 @@ files = [
     "services/retrieval",
     "services/streaming.py",
     "services/telemetry",
+    "services/text.py",
     "services/titles.py",
 ]
 check_untyped_defs = true

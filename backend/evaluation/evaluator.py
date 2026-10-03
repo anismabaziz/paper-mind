@@ -67,7 +67,7 @@ from services.answering import (
     ResolvedTurn,
 )
 from services.streaming import AnswerEvent, Refusal
-from services.chat_context import token_count
+from services.text import token_len
 from services.citations import PROMPT_VERSION, claims_block
 from services.llm.base import is_context_fallback
 from services.prompts import SYSTEM_INSTRUCTION
@@ -424,7 +424,7 @@ def _with_answer(result: CaseResult, payload: dict[str, Any]) -> CaseResult:
         # What the provider was asked to produce is the prose and the claims
         # block together, and it billed for both. The stored answer is the prose
         # alone, so the block is put back to count what was actually written.
-        output_tokens=token_count(
+        output_tokens=token_len(
             (answer or "") + claims_block(payload.get("claims") or [])
         ),
     )

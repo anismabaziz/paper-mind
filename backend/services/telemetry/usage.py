@@ -10,8 +10,8 @@ evaluation run reports, so a trace and a report can be compared.
 
 from __future__ import annotations
 
-from services.chat_context import token_count
 from services.prompts import SYSTEM_INSTRUCTION
+from services.text import token_len
 
 
 def input_tokens(query: str, context: str, prior_turns: str = "") -> int:
@@ -22,13 +22,13 @@ def input_tokens(query: str, context: str, prior_turns: str = "") -> int:
     out would understate every answer by the same amount.
     """
     return (
-        token_count(SYSTEM_INSTRUCTION)
-        + token_count(query)
-        + token_count(context)
-        + token_count(prior_turns)
+        token_len(SYSTEM_INSTRUCTION)
+        + token_len(query)
+        + token_len(context)
+        + token_len(prior_turns)
     )
 
 
 def output_tokens(generated: str) -> int:
     """Return what one call asked the model to write."""
-    return token_count(generated)
+    return token_len(generated)

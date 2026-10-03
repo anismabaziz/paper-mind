@@ -16,11 +16,10 @@ rewriter outage degrades retrieval quality rather than the request.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-_WORD_RE = re.compile(r"[a-z0-9%°]+")
+from services.text import word_parts
 
 #: Words that point back at earlier turns instead of naming document content.
 _PRONOUNS = frozenset(
@@ -93,7 +92,7 @@ class QueryExpansion:
 
 def _words(text: str) -> list[str]:
     """Split text into lowercase words, keeping stopwords."""
-    return _WORD_RE.findall(text.lower())
+    return word_parts(text)
 
 
 def refers_to_prior_turns(query: str) -> bool:

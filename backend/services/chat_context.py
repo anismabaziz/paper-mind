@@ -20,14 +20,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-import tiktoken
-
 from services.citations import render_evidence
 from services.llm.base import LLMProvider
 from services.retrieval.query_expansion import QueryExpansion
-
-# cl100k_base is the tokenizer the chunker already uses; stable, no download.
-_ENCODING = tiktoken.get_encoding("cl100k_base")
+from services.text import token_len
 
 REWRITE_INSTRUCTION = (
     "Rewrite the follow-up question as one self-contained search query. "
@@ -68,11 +64,6 @@ def build_model_rewriter(provider: LLMProvider) -> Callable[[str, str], str]:
         return rewritten
 
     return rewrite
-
-
-def token_count(text: str) -> int:
-    """Return the token count of a piece of text."""
-    return len(_ENCODING.encode(text)) if text else 0
 
 
 def render_prior_turns(turns: Sequence[dict[str, Any]]) -> str:
@@ -119,7 +110,7 @@ def bounded_turns(
     """
     window = list(turns)[-max_turns:] if max_turns > 0 else []
     dropped = len(turns) - len(window)
-    while window and token_count(render_prior_turns(window)) > token_budget:
+    while window and token_len(render_prior_turns(window)) > token_budget:
         window.pop(0)
         dropped += 1
     unseen = (turns_in_conversation - len(window)) if turns_in_conversation else dropped
@@ -138,7 +129,7 @@ def bounded_sources(
     kept: list[dict[str, Any]] = []
     used = 0
     for source in sources:
-        cost = token_count(source.get("content") or "")
+        cost = token_len(source.get("content") or "")
         if kept and used + cost > token_budget:
             break
         kept.append(source)
@@ -178,7 +169,7 @@ def build_chat_context(
         # The system instruction and the prompt's section tags ride along with
         # the question, so what is left is an over-estimate, never an
         # under-estimate.
-        spent = token_count(query) + token_count(prior_turns_text) + _PROMPT_OVERHEAD
+        spent = token_len(query) + token_len(prior_turns_text) + _PROMPT_OVERHEAD
         evidence_budget = max(0, min(context_token_budget, input_token_budget - spent))
     kept_sources, dropped_sources = bounded_sources(sources, evidence_budget)
     return ChatContext(

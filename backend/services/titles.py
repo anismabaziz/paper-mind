@@ -48,25 +48,14 @@ def _normalize_pdf_bytes(pdf_bytes: bytes | None) -> bytes | None:
     return data
 
 
-def _extract_pdf_metadata_title(pdf_bytes: bytes) -> str | None:
-    """Return trimmed PDF metadata Title via pymupdf, or None."""
+def _read_title_candidates(pdf_bytes: bytes) -> tuple[str | None, str | None]:
+    """Return the metadata title and first heading from one open, or Nones."""
     try:
         import pymupdf
 
         with pymupdf.open("pdf", io.BytesIO(pdf_bytes)) as doc:
-            title = (doc.metadata or {}).get("title") or ""
-            title = title.strip()
-            return title or None
-    except Exception:
-        return None
-
-
-def _extract_first_heading(pdf_bytes: bytes) -> str | None:
-    """Return first non-empty line from PDF text, truncated, or None."""
-    try:
-        import pymupdf
-
-        with pymupdf.open("pdf", io.BytesIO(pdf_bytes)) as doc:
+            metadata = (doc.metadata or {}).get("title") or ""
+            metadata_title = metadata.strip() or None
             for page in doc:
                 text = page.get_text() or ""
                 for line in text.splitlines():
@@ -74,21 +63,22 @@ def _extract_first_heading(pdf_bytes: bytes) -> str | None:
                     if heading:
                         if len(heading) > MAX_TITLE_LEN:
                             heading = heading[: MAX_TITLE_LEN - 3] + "..."
-                        return heading
-            return None
+                        return metadata_title, heading
+            return metadata_title, None
     except Exception:
-        return None
+        return None, None
 
 
 def derive_title(pdf_bytes_or_none: bytes | None, original_filename: str | None) -> str:
     """Derive a human title from PDF bytes and the original filename."""
     pdf_bytes = _normalize_pdf_bytes(pdf_bytes_or_none)
+    metadata_title, heading = (
+        _read_title_candidates(pdf_bytes) if pdf_bytes is not None else (None, None)
+    )
 
     # 1. PDF metadata Title via pymupdf
-    if pdf_bytes is not None:
-        title = _extract_pdf_metadata_title(pdf_bytes)
-        if title:
-            return title
+    if metadata_title:
+        return metadata_title
 
     # 2. Original filename without extension
     if original_filename:
@@ -99,10 +89,8 @@ def derive_title(pdf_bytes_or_none: bytes | None, original_filename: str | None)
             return name
 
     # 3. First heading heuristic
-    if pdf_bytes is not None:
-        heading = _extract_first_heading(pdf_bytes)
-        if heading:
-            return heading
+    if heading:
+        return heading
 
     return "Untitled"
 

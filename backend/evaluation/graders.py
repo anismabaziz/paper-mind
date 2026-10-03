@@ -21,17 +21,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from evaluation.metrics import contains_snippet
+from services.text import STOPWORDS, word_parts
 
 PASSED = "passed"
 FAILED = "failed"
 UNKNOWN = "unknown"
-
-#: Words that appear in most claims and most Passages, so their presence in both
-#: says nothing about whether a Passage supports a claim.
-STOPWORDS = frozenset(
-    """a an and are as at be been by for from has have in is it its of on or that
-    the their there they this to was were will with""".split()
-)
 
 #: How much of a claim's own wording a cited Passage has to repeat before the
 #: citation counts as supporting it. Half the content words is the point where
@@ -43,14 +37,13 @@ SUPPORTING_OVERLAP = 0.5
 _PAGE_REFERENCE = re.compile(
     r"\b(?:pages?|pp?\.)\s*(\d+)(?:\s*[-–—]\s*(\d+))?", re.IGNORECASE
 )
-_WORD = re.compile(r"[a-z0-9]+")
 
 
 def content_words(text: str) -> set[str]:
     """Return the words of a text that carry its meaning, folded to lower case."""
     return {
         word
-        for word in _WORD.findall(str(text or "").lower())
+        for word in word_parts(str(text or ""))
         if word not in STOPWORDS and len(word) > 1
     }
 

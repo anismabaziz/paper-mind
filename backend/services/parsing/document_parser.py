@@ -19,24 +19,17 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 
-import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from services.ingestion.limits import IngestionCancelled, IngestionLimitExceeded
 from services.parsing.pdf_heuristics import should_use_docling
+from services.text import token_len
 
 log = logging.getLogger(__name__)
 
 # Bumped when parsing or chunking output changes shape, so indexes built by an
 # older parser are recognised as incompatible and reindexed.
 PARSER_VERSION = "pymupdf-docling-page-chunks-v1"
-
-# cl100k_base is the tokenizer for gpt-4 / embeddings; stable, no download.
-_ENCODING = tiktoken.get_encoding("cl100k_base")
-
-
-def _token_len(text: str) -> int:
-    return len(_ENCODING.encode(text))
 
 
 def _pdf_page_count(file_bytes: bytes) -> int:
@@ -109,7 +102,7 @@ class TokenChunker:
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
-            length_function=_token_len,
+            length_function=token_len,
             is_separator_regex=False,
         )
         texts = text_splitter.create_documents([text])

@@ -4,44 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import math
-import re
 from collections import Counter
 
-# Keep in sync with ``evaluation.metrics`` / ``test_evaluation`` stopwords.
-STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "has",
-    "have",
-    "how",
-    "in",
-    "is",
-    "it",
-    "its",
-    "of",
-    "on",
-    "or",
-    "that",
-    "the",
-    "this",
-    "to",
-    "was",
-    "were",
-    "what",
-    "where",
-    "which",
-    "with",
-}
+from services.text import STOPWORDS, word_parts
 
-_TOKEN_RE = re.compile(r"[a-z0-9%°]+")
 # Vocabulary size for hashing – large enough to keep collisions rare
 VOCAB_SIZE = 30_000
 
@@ -52,9 +18,8 @@ TOKENIZER_VERSION = "lowercase-regex-stopwords-v1"
 
 
 def tokenize(text: str) -> list[str]:
-    """Do tokenize."""
-    tokens = _TOKEN_RE.findall(text.lower())
-    return [t for t in tokens if t not in STOPWORDS and len(t) > 1]
+    """Return the content words of a text: split, drop stopwords and singles."""
+    return [t for t in word_parts(text) if t not in STOPWORDS and len(t) > 1]
 
 
 def _hash_token(token: str) -> int:
